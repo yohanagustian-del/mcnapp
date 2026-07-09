@@ -1,0 +1,42 @@
+-- ============================================================
+-- 0015_m12_partitioning.sql  — DESTRUCTIVE. DO NOT APPLY AUTOMATICALLY.
+-- ============================================================
+-- Converts the recorded raw tables to monthly RANGE partitions so retention can DROP PARTITION
+-- (cheap, no bloat) instead of DELETE. Converting an existing table is NOT in-place: it requires
+-- create-new → copy → swap. Run ONLY in a dedicated branch / maintenance window, after backup,
+-- with writes paused. Verify row counts before dropping the originals.
+--
+-- Applies to: platform_metrics_raw (period), transactions_all (period_start),
+--             transactions_agency_link (period_start).
+--
+-- Template (repeat per table; shown for platform_metrics_raw):
+-- ------------------------------------------------------------
+-- begin;
+--   -- 1. New partitioned parent (same columns; partition key must be part of the PK/unique).
+--   create table platform_metrics_raw_p (like platform_metrics_raw including defaults including indexes)
+--     partition by range (period);
+--
+--   -- 2. Monthly partitions covering existing + near-future range (generate as needed).
+--   -- create table platform_metrics_raw_2026_01 partition of platform_metrics_raw_p
+--   --   for values from ('2026-01-01') to ('2026-02-01');
+--   -- … one per month …
+--   create table platform_metrics_raw_default partition of platform_metrics_raw_p default;
+--
+--   -- 3. Backfill.
+--   insert into platform_metrics_raw_p select * from platform_metrics_raw;
+--
+--   -- 4. Verify (must match) before swap:
+--   -- select (select count(*) from platform_metrics_raw) = (select count(*) from platform_metrics_raw_p);
+--
+--   -- 5. Swap names + re-point FKs/policies, then drop the original.
+--   alter table platform_metrics_raw rename to platform_metrics_raw_old;
+--   alter table platform_metrics_raw_p rename to platform_metrics_raw;
+--   -- re-create RLS policies from 0011 (pmr_creator_selfonly, *_od_no_*), indexes, and grants.
+--   -- drop table platform_metrics_raw_old;   -- only after full verification
+-- commit;
+-- ------------------------------------------------------------
+--
+-- Once partitioned, run_retention_purge() (0014) can be upgraded to DROP PARTITION for months
+-- entirely older than the cutoff (after aggregate verification), keeping the DELETE fallback for
+-- partial months. Index each partition on (creator_id, period) and (shop_id, product_id).
+-- ============================================================

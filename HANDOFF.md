@@ -1,0 +1,106 @@
+# HANDOFF — MCN MEA Platform
+
+Status per sesi 2026-07-09 (sesi 5, backlog-sweep + audit deploy). Baca ini + `CLAUDE.md` sebelum lanjut.
+
+## ⚡ SESI 2026-07-09 (sesi 5) — Sweep backlog HANDOFF + audit kesiapan deploy Vercel
+1. **/link-leakage disesuaikan ke era artifak**: copy engine-era diganti (data = upload artifak CM via /ingest Lane 2, bukan hitungan platform); banner totals mingguan dari `leak_week_summary`; status NULL (artifak v2) kini badge "Belum diketahui (artifak v2)" (bukan render `null`); pill "artifak" per baris source='artifact'; blok stale-engine warning (query `transactions_all` m4all:) DIHAPUS (meaningless pasca drop-raw); tabel `leakage_products` hanya dirender kalau ada data historis, dengan label "data historis era engine", selain itu empty-state yang mengarahkan ke file Excel artifak.
+2. **Verifikasi one-time upsert clobber SELESAI (vs remote, baris test dibersihkan)**: kekhawatiran TIDAK terbukti — PostgREST upsert hanya menimpa kolom yang dikirim. TAPI ketemu bug nyata: payload master-refresh `upsertDerivedFromTap` meng-omit `shop_id` NOT NULL → SELALU gagal constraint (branch INSERT divalidasi walau hanya UPDATE yang jalan) dan error di-swallow diam-diam → last_seen/updated_at produk master tak pernah ter-bump. **SUDAH DIFIX**: payload kini kirim `shop_id` existing; error di-log + di-surface via `errors[]` → masuk daftar `skipped` laporan ingest (prefix `products_tap:`). Script verifikasi: `scripts/verify-upsert-clobber.ts`. 2 test regresi baru.
+3. **Audit deploy Vercel (read-only)**: TIDAK ada blocker kode — 0 hardcode localhost, service role key server-side only, RBAC guard semua mutasi, 0 dependensi native, next.config aman (bodySizeLimit 10mb untuk CSV). Yang dibutuhkan hanya operasional: commit+push → import repo ke Vercel → set env (`NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, opsional `ANTHROPIC_API_KEY`/`M2_INSIGHT_MODEL`) → set Site URL domain Vercel di Supabase Dashboard > Auth > URL Configuration. Remote git: https://github.com/yohanagustian-del/Claudecode.git (HTTPS).
+4. Verifikasi: typecheck 0 error, **492 pass + 2 skip** (naik dari 490: 2 test baru products.test.ts), tidak ada regresi.
+
+## ⚡ SESI 2026-07-09 — M13 Penjadwalan Live Streaming + shop_name dashboard BD (QA batch 4)
+> UPDATE (sesi yang sama, setelah user kasih Supabase PAT): nomor modul dikoreksi **M11 → M13** (M11 = OD Oversight, M12 = Retensi Data — sudah terpakai). Migration **0023 SUDAH APPLIED ke remote** via Management API. **MCP Supabase kini ter-setup di `.mcp.json`** (project-scoped, `@supabase/mcp-server-supabase`, project-ref bqknstylbpwsnlgnzayw, token PAT inline — file di-gitignore; aktif mulai SESI BERIKUTNYA, sesi ini pakai Management API langsung via curl, catatan: python urllib diblok Cloudflare 1010, wajib curl + User-Agent browser). **E2E TERBUKTI di browser vs remote**: login director → /schedule render → toggle roster vikahere → buat slot (badge PK/TAP benar) → muncul di antrean Verifikasi Hari Ini → verifikasi (✓ done, keluar antrean) → 3 audit_logs `schedule.*` tercatat → data uji dibersihkan (slots=0, roster=0).
+Semua keputusan via interview user (final, jangan re-interview):
+1. **shop_name di dashboard BD (fix kecil)**: `bd_leads.shop_name` sudah ada (0018) & terisi oleh ingest artifak — bug hanya di select/render. `workspace/bizdev` + `link-leakage` kini menampilkan nama shop + shop_id sebagai subteks muted, fallback shop_id kalau null (baris lama pra-artifak-v2).
+2. **M13 baru: Penjadwalan Live** (pengganti Google Sheet "Penjadwalan" CM). Tabel `live_schedule_slots` (migration **0023 — applied, lihat UPDATE di atas**) + flag manual `creators.live_roster` (kurasi kalender, permission `schedule.roster`). Slot: status `scheduled|tentative|off|done`, brand FREE TEXT + `deal_id` opsional ke brand_deals, `deals_by` (bd|cm|creator), `ads_payer` (brand|mea|invoicing_mea|organik) + ads_note bebas, pk_ready & product_connected_tap boolean, fokus_produk. **Verifikasi oleh CM ATAU CS** (CS handle di luar jam kerja CM): actual_start/end + verified_by/at → status done (locked). Multi-slot per creator per hari diizinkan.
+3. **RBAC**: view = management+CM+BD+CS (cpm hanya lihat creator sendiri, lainnya semua); edit = CM+BD+CS (cpm scope `owner_cpm_id`); verify = CM+CS+management; roster = CM lead/cpm/management. Semua mutasi → audit_logs type `auto` (siapa edit tercatat — permintaan eksplisit user). Writes via service role, RLS select-only; otorisasi halus di server actions.
+4. **UI**: `/schedule` (nav "Jadwal Live") — matriks creator × 7 hari (Senin-start), badge PK ✘/TAP ✘/Tentatif/✓ done/ring merah belum-verifikasi + penanda "besok belum ada jadwal"; form slot client island; nav minggu + "Salin dari minggu lalu" (`copyWeekAction`, tolak kalau minggu target sudah terisi, reset status/PK/verifikasi, skip OFF); panel "Verifikasi Hari Ini" + "Terlewat belum diverifikasi"; panel "Kelola Roster". Workspace CM: seksi ringkas hari ini+besok + warning kreator kosong besok. Workspace BD: seksi slot minggu ini `deals_by='bd'` OR ada deal_id.
+5. **Keputusan scope**: mulai KOSONG (2.170 baris sheet historis = arsip, tidak diimpor); indikator visual saja (reminder/notifikasi eksternal = fase nanti); sheet "import Data CM & Creator" (master tambahan) out of scope; recurrence penuh tidak dibuat (cukup salin minggu).
+6. **Files**: `supabase/migrations/0023_live_schedule.sql`, `src/lib/schedule/{types,week,matrix,indicators,copy-week}.ts` + 28 unit test, `src/app/(portal)/schedule/{actions.ts,page.tsx,schedule-board.tsx,slot-form.tsx,week-nav.tsx,verify-panel.tsx,roster-panel.tsx,compact-list.tsx}`, rbac `schedule.*` + NAV_ITEM.
+7. Verifikasi: typecheck 0 error, **490 pass + 2 skip**, production build sukses (route /schedule 5,2 kB) + e2e browser vs remote (lihat UPDATE di atas — create/verify/roster/audit semua terbukti).
+
+## ⚡ SESI 2026-07-08 MALAM (lanjutan) — Lane Shopee /ingest (keputusan interview, final)
+1. **File Shopee = SATU CSV gabungan MCN+SAP** (Conversion Report per-transaksi, contoh: ConversionReport_202607080813.csv, BOM utf-8-sig, header Indonesia). Card Shopee /ingest kini form hidup 1 slot (bukan placeholder).
+2. **Aturan (user-final)**: hanya baris `Status Pesanan="Selesai"`; GMV = `Total Pembelian yang Dibuat(Rp)`; tanggal acuan window = **`Waktu Pesanan Selesai`**; window W1-W5 persis TikTok (lintas window DITOLAK — file contoh 28Jun-4Jul memang ditolak, by design); live/video dari kolom `Platform` (Shopeelive/Shopeevideo, lainnya cuma masuk total); replace idempotent per creator×week.
+3. **Kreator Shopee TERPISAH per platform**: `resolveCreatorNamesByPlatform` match username + platform='shopee' saja (tak pernah nyambung ke kreator TikTok walau username sama); baru → dibuat status 'prospek'. Avg GMV bulanan otomatis jalan (helper bersama `src/lib/ingest/creator-autofill.ts`, run.ts ikut direfactor pakai ini).
+4. **LEAK/BD SHOPEE TIDAK DIHITUNG PLATFORM**: user akan bikin artifak Agency Leaked Generator versi Shopee "persis sama seperti TikTok" (belum dibuat) → dibaca Lane 2 existing; master deal Shopee belum sinkron, menyusul. Kolom Campaign Type/Partner Promo di CSV sengaja diabaikan (dikomentari di shopee-run.ts). Rule bisnis leak Shopee utk artifak nanti: Promo MCN+Partner Promo="Pemilik"=via agency; Promo MCN+nama lain=leaked (list creator/shop_id/ID Promosi); non-Promo MCN → cek deal shop: tak ada=BD opportunity, ada=leak.
+5. **Agregat Shopee = GMV mingguan SAJA** (creator_period_summary; kolom khusus TikTok diisi netral 0/null) — TANPA subcat/top-products/products_tap (matching M5 tetap TikTok-only dulu).
+6. Migration **0022** (source_type 'shopee' di upload_batches) SUDAH applied ke remote. Files: shopee-csv.ts / shopee-aggregate.ts / shopee-run.ts / creator-autofill.ts / shopee-actions.ts / shopee-ingest-form.tsx. batch_id `ingest-shopee:<periodStart>:<hash8>`, audit `ingest.run_shopee`. Tests **458 pass + 2 skip**, tsc 0 error; e2e browser: penolakan lintas window tampil benar di card Shopee.
+
+## ⚡ SESI 2026-07-08 MALAM — QA batch 3 (avg GMV /creators + konsolidasi /ingest + hapus /metrics)
+Semua keputusan via interview user (final, jangan re-interview):
+1. **GMV di /creators = RATA-RATA BULANAN** (rata-rata total bulanan dari SEMUA bulan yang punya data, live/video ikut). Disimpan di `creators.gmv/gmv_live/gmv_video` (bukan on-the-fly): `autoFillCreators` (run.ts) kini menghitung dari SELURUH histori `creator_period_summary` per creator (bukan total batch) via `buildMonthlyAverages` di `src/lib/m8/weekly-growth.ts` (reuse grouping bulan + dedupe `buildMonthlyGrowth` — helper internal `groupWeeksByMonth` dipakai bersama). Backfill sekali SUDAH DIJALANKAN ke remote (`scripts/backfill-avg-gmv.ts`, 6 update/6 skip/0 gagal, audit `creator.backfill_avg_gmv`); bidanlilis77 Rp399.859.865 = cocok chart W1-W4 Juni.
+2. **/metrics DIHAPUS**: page → `redirect("/ingest")`, `metrics/actions.ts` dihapus (tidak ada importer lain; util shared memang di `src/lib/platform-csv.ts`), nav + permission `metrics.upload` dihapus. Jenis report LIVE TikTok (mcn/tap_tiktok_live) ikut dihapus — keputusan user: tidak dipakai (live sudah dari affiliate_live_gmv file MCN). Tabel `platform_metrics_raw`/`metric_upload_batches` DIBIARKAN.
+3. **/ingest** = satu-satunya pintu upload, nav label "Upload Data Platform Mingguan". Dua card terpisah: **TikTok** ("File MCN TikTok report (semua transaksi) — wajib" + "File TAP report (via agency link) — opsional, disarankan") dan **Shopee** (MCN Shopee wajib + Sap opsional) — card Shopee **PLACEHOLDER disabled** ("segera hadir") karena user belum kasih file contoh Shopee/SAP; user janji kasih path contoh sesi berikutnya → baru bangun parser (keputusan: placeholder dulu, bukan pipeline penuh). Lane 2 artifak tidak disentuh.
+4. Test: **419 pass + 2 smoke skip** (−1 dari 420: test auto-generated per key PERMISSIONS berkurang saat `metrics.upload` dihapus — bukan regresi). Typecheck 0 error. Verifikasi browser: /ingest 3 card OK, /metrics redirect 200 → /ingest, /creators tampil avg + header "(avg/bln)".
+
+## ⚡ SESI 2026-07-08 SORE — QA batch 2 (Uma 4-minggu + artifak format baru)
+Semua via interview user (keputusan final):
+1. **Replace Lane 1 kini PER (kreator × minggu)** — bug nyata: `batch_id` lama global per minggu (`ingest:<period_start>`) membuat upload Uma W4 MENGHAPUS agregat vikahere W4. Fix: `batch_id = ingest:<periodStart>:<hash8 sha256 file MCN>`; delete agregat di-scope `.in(creator_id) + period_start/window_end` (chunk 200). Dua CM upload minggu sama = aman berdampingan. Regression test ada di run.test.ts.
+2. **Parser artifak Lane 2 dual-format** (`detectArtifactFormat`): v1 = 3-tab lama (Executive Summary "Period: X to Y" + blok "▶ CREATOR:"), v2 = 2-tab baru "MEA Agency Link Intelligence" (Ringkasan Creator + Produk Bocor). v2 TIDAK punya rincian bocor per kreator → simpan `gmv_affiliate_total` per kreator, `link_status/gmv_bocor/leak_ratio` = NULL (unknown, bukan nol; migration 0021 drop NOT NULL), totals level-CM ke tabel baru `leak_week_summary` (unique week+uploaded_by). Migration 0021 SUDAH applied ke remote. Sheet BD dideteksi by header probing (nama sheet varian: "Ringkasan Shop Non-Partnered"/"Ringkasan Peluang BD Shops").
+3. **Akar "tidak terbaca sama sekali" QA**: (a) file 3-tab Uma lama ditolak W1-W5 (periode 2026-05-27→06-23 = 4 minggu) TAPI pesannya tak pernah tampil karena server action `throw` DISENSOR Next.js production; (b) file baru = format v2 tak dikenali. Fix: SEMUA action /ingest kini return `{ok:true,result}|{ok:false,error}` (jangan pernah throw ke client), pesan menyebut periode file + window W1-W5 valid + daftar sheet ditemukan vs diharapkan.
+4. **UI Growth W1-W5**: CM Workspace section "Pertumbuhan GMV Mingguan" (pemilih bulan `?bulan=YYYY-MM`, tabel W1-W5 + panah + Total Bulan + Growth + baris TOTAL; kreator tanpa data bulan itu disembunyikan) + chart recharts (BARU diinstal) di `/creators/[id]` + helper murni `src/lib/m8/weekly-growth.ts` (weekIndexOf/buildMonthlyGrowth/availableMonths, dedupe createdAt, preferensi canonical week-start 1/8/15/22/29). TERBUKTI di browser: TOTAL W4 Juni = Rp640,2jt (cocok DB), chart bidanlilis77 total Rp399,9jt growth -62,5%.
+5. **Terbukti e2e vs remote** dengan file QA nyata (`MEA_Agency_Link_Detail_2026-06.xlsx` + `MEA_BD_Opportunity_2026-06.xlsx`, W1 Juni): 6 kreator masuk creator_link_status (status NULL by design), leak_week_summary terisi (347,4jt/66,1jt/185,8jt), bd_leads 16 baru + 29 update.
+6. **Spec generator artifak**: `docs/artifact-generator-spec.md` — untuk memperbaiki tool eksternal (target: kembali ke format v1 per-creator + WAJIB per minggu W1-W5). Keputusan user: leak SEMENTARA tetap via artifak (master shop belum tercover); hitung-di-platform ditunda.
+7. **vikahere**: agregat W4-nya yang tertimpa TIDAK dipulihkan otomatis — file sumber di ~/Documents ternyata export BULANAN (tak bisa dipecah per minggu jujur; data lama berasal dari salinan smoke yang tanggalnya direkayasa). Upload ulang export mingguan via UI kapan saja (kini aman).
+
+## ⚡ PERUBAHAN ARSITEKTUR BESAR (keputusan user 2026-07-08, via interview)
+Target skala: **sampai 1.000 kreator/minggu**. Analisis agency-leak M4 **dipindah ke tool eksternal** ("Agency Leaked Generator" artifak, dijalankan tiap CM MINGGUAN untuk semua kreator yang di-handle). Platform tidak lagi menghitung leak — hanya menyimpan hasil. Dua jalur upload di `/ingest`:
+
+1. **Lane 1 — Upload performa (MCN + TAP opsional)**: parse → agregat in-memory → tulis 3 tabel agregat + katalog products_tap + auto-fill creators → SELESAI. **Raw TIDAK PERNAH ditulis ke DB** (tidak ada staging, tidak ada engine M4). Terbukti: file vikahere W4 (2.528 MCN + 1.746 TAP) tuntas **16,3 detik** (sebelumnya >6 menit gagal fetch).
+2. **Lane 2 — Upload hasil artifak leak (2 file Excel per CM)**: parse → validasi W1-W5 → simpan **ROLLUP SAJA** per kreator per minggu ke `creator_link_status` (kolom baru migration 0020) + `bd_leads` dari sheet BD_Shop_Summary → tampil di CM Workspace section "Link Leakage Kreator". Detail produk bocor TETAP di Excel (tidak disimpan — keputusan "rollup saja").
+
+Keputusan interview lain (final, jangan re-interview):
+- Report M2 = **data-only dulu cukup** (insight LLM nanti setelah API key diganti).
+- BD pitch / Prediksi Deal (M6) **ditunda sampai pasca-produksi**; menu `/predictor` disembunyikan dari NAV_ITEMS (kode utuh, tinggal un-comment di rbac.ts).
+- Artifak WAJIB dijalankan dengan rentang W1-W5; periode lain ditolak dengan pesan jelas.
+
+## Kondisi sekarang
+- Branch: `claude/mcn-phase-3-kickoff-zjtfyo` — 2 commit lama BELUM di-push + **seluruh perubahan sesi ini BELUM di-commit** (user push hanya setelah semua review lolos; `gh` belum terinstal di mesin ini).
+- Typecheck HIJAU (0 error). Tests: **490 pass + 2 smoke manual auto-skip** (vitest). Production build sukses.
+- Migration **0001–0023 SEMUA applied ke remote** (0023 = live schedule, applied 2026-07-09 via Management API).
+- **MCP Supabase**: `.mcp.json` di root project (gitignored, berisi PAT) — tersedia mulai sesi berikutnya. Fallback tanpa MCP: Management API `POST /v1/projects/bqknstylbpwsnlgnzayw/database/query` dengan curl + User-Agent browser (python urllib kena Cloudflare 1010).
+- Supabase project: `bqknstylbpwsnlgnzayw`. Dev server: `npm run dev -- --port 3100` (launch.json `mcn-dev`).
+- `ANTHROPIC_API_KEY` di `.env.local` masih INVALID (401) — report M2 jalan data-only (pesan error di UI sudah jelas + report tetap tersimpan draft).
+
+## Login QA
+Semua akun `@mcn.test`, password `Password123!`. Director: `director@mcn.test`.
+
+## Selesai sesi ini ✅ (e2e TERBUKTI di remote + browser preview)
+1. **Root cause "upload lambat + gagal fetch" ditemukan & dibasmi**: N+1 di `upsertDerivedFromTap` (2 query sekuensial × 1.841 produk) + staging round-trip. Fix: bulk `.in()` select chunk 200 + bulk upsert chunk 500 (dipisah per bentuk kolom — PostgREST menolak batch dengan key set beda), dan Lane 1 aggregates-only tanpa staging.
+2. **Batch stranded `ingest:2026-06-22` dibersihkan** dari DB (audit `ingest.recover_stuck_staging`), lalu re-ingest sukses 16,3 dtk, invariant terpenuhi (processed, staging 0, agregat lengkap).
+3. **Lane 2 dibangun & terbukti dengan file Uma nyata** (6 kreator multi-creator per CM): parser toleran (`src/lib/ingest/leak-artifact.ts`), rollup deterministik reuse `rollupCreatorStatus` + threshold `m4.bocor_*` dari app_config (`leak-rollup.ts`), orchestrator (`leak-run.ts`), server action + card kedua di /ingest, section read-only di workspace CM. 50 bd_leads source='artifact'. Status terhitung benar (0.49→bocor_sebagian, 0.926→bocor_total, 0→via_agency).
+4. **Report M2 vikahere terbit** (draft #4, weekly 2026-06-22, data-only) dan **Matching M5 menghasilkan kandidat** (Skintific, skor 0.625 + proyeksi GMV) — dua kegagalan QA sebelumnya akarnya sama: tabel agregat kosong karena pipeline tak pernah tuntas.
+5. Menu `/predictor` disembunyikan; smoke test manual tersedia: `RUN_INGEST_SMOKE=1` / `RUN_LEAK_SMOKE=1` + `SMOKE_DIR` (lihat `src/lib/ingest/__tests__/smoke*.qa-manual.test.ts`).
+
+## Belum dilakukan 🟡
+- **QA user /schedule dengan data nyata**: tim CM set `live_roster` kreator via panel Kelola Roster lalu isi jadwal minggu berjalan (e2e teknis sudah terbukti; tinggal pemakaian nyata).
+- **Artifak Agency Leaked Generator versi SHOPEE** — user yang buat (format persis TikTok v1); sampai ada, leak Shopee tak terhitung. Master deal Shopee juga belum sinkron ke cooperating_shops.
+- **Commit + push** semua perubahan (3 sesi menumpuk, butuh `gh auth login`).
+- **Perbaiki generator artifak eksternal** pakai `docs/artifact-generator-spec.md` (target format v1 per-creator, per minggu W1-W5) — supaya status per kreator hidup lagi (v2 = status NULL).
+- **Re-upload data mingguan vikahere** via UI (agregatnya tertimpa era batch global; lihat poin 7 di atas).
+- Tests baseline sekarang: **492 pass + 2 smoke manual auto-skip**; typecheck 0 error; migration applied s/d **0023**.
+- Data smoke di DB adalah data QA nyata (vikahere W4 + rollup Uma week 2026-06-22) — DIBIARKAN sebagai contoh; re-upload periode sama akan me-replace.
+- ~~/link-leakage copy era engine~~ → SELESAI sesi 5. ~~Verifikasi upsert clobber~~ → SELESAI sesi 5 (tidak clobber; bug shop_id ketemu & difix — lihat blok sesi 5 di atas).
+- **Deploy Vercel untuk QA tim** (baru): kode siap; tinggal commit+push, import ke Vercel, set 3 env wajib + Site URL Supabase (lihat blok sesi 5).
+- ANTHROPIC_API_KEY ganti yang valid → insight M2 hidup.
+- Portal kreator M9 "Produk Cocok Untukmu"; BD Master Data kolom kaya; M8 e-sign provider; M5/M6 taxonomy Level 2.
+
+## Arsitektur penting (jangan keliru)
+- **Lane 1 /ingest**: parse → validasi W1-W5 + guard overlap → resolve creators → agregat in-memory → writeAggregates + upsertDerivedFromTap (bulk) + autoFillCreators → processed. TANPA staging/engine. `enforceLeakRetention` dipanggil dari Lane 2 (bukan Lane 1).
+- **Lane 2 /ingest**: `uploadLeakArtifact` (leak-run.ts): File 1 wajib (Executive Summary "Period: X to Y" + sheet Creator_Detail_Sections blok "▶ CREATOR:" + bullet Rp), File 2 opsional (BD_Shop_Summary). Delete-then-insert rollup HANYA (week × creator di file) — CM lain minggu sama aman. bd_leads existing: refresh metrics saja, status BizDev tak diubah.
+- **Skema W1-W5** (final): W1=1-7, W2=8-14, W3=15-21, W4=22-28, W5=29-akhir. Identik=replace, overlap-beda=tolak.
+- **M10 matching**: katalog = master upload UNION derived_tap; skor dari `creator_subcat_segment_gmv`.
+- **M4 engine** (`src/lib/m4/engine.ts`) TIDAK dipanggil dari mana pun sekarang (di-retain untuk referensi rumus; `rollupCreatorStatus` di classify.ts di-reuse Lane 2).
+
+## File contoh user (di luar repo, untuk QA)
+- `~/Downloads/Uma_AgencyLink_Leak_Detail_Report (1).xlsx` + `~/Downloads/Uma_AgencyLink_BD_Opportunity_Report.xlsx` — artifak batch multi-kreator (CM Uma, 6 kreator) — SUMBER format Lane 2.
+- `~/Documents/Organik kreator /data platform transaksi creator - vikahere.csv` + `~/Documents/tap /data tap vika here.csv` — export bulanan (header Indonesia, delimiter `;`).
+- `~/Downloads/sample data mcn .xlsx` + `~/Downloads/sample data tap .xlsx` — sampel 5 creator.
+
+## Aturan yang gampang kelupaan (dari CLAUDE.md)
+- `commission_share` & `agency_links.link_status` READ-ONLY; creator_link_status juga read-only (diisi Lane 2).
+- Semua threshold dari `app_config` (m4.bocor_sebagian=0.1, m4.bocor_total=0.5, retensi leak).
+- Semua mutasi material → `audit_logs`. 0 LLM di jalur deterministik. `genId()` terpusat.
+- Invariant Module 0.5: pasca-upload staging HARUS kosong (Lane 1 kini by construction — raw tak pernah ditulis).
+- `getConfig` request-scoped (Next cookies) — di luar request pakai mock/admin client (lihat smoke tests).
