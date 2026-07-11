@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { z } from "zod";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { writeAudit } from "@/lib/audit";
 import { requirePermission } from "@/lib/rbac";
@@ -186,4 +187,142 @@ export async function updateRateCard(formData: FormData): Promise<void> {
     type: "auto",
   });
   revalidatePath("/creators");
+}
+
+/**
+ * Edit data master creator (jalur edit per-field dari halaman detail).
+ * Field yang BOLEH diedit: identitas + atribut master. Field auto-computed /
+ * sync platform — gmv, gmv_live, gmv_video, commission_share — TIDAK termasuk
+ * (read-only, CLAUDE.md #4/#3): tidak pernah menerima nilai dari form ini.
+ * Permission setara updateRateCard/uploadCreators ("creators.bulk_upload").
+ */
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+const creatorEditSchema = z.object({
+  creator_id: z.string().min(1, "creator_id wajib"),
+  name: z.string().trim().min(1, "Nama creator wajib diisi"),
+  username: z.string().trim().optional().default(""),
+  phone: z.string().trim().optional().default(""),
+  profile_link: z.string().trim().optional().default(""),
+  uid: z.string().trim().optional().default(""),
+  followers: z.string().trim().optional().default(""),
+  content_quality: z.string().trim().optional().default(""),
+  join_date: z.string().trim().optional().default(""),
+  domisili: z.string().trim().optional().default(""),
+  jenis_creator: z.string().trim().optional().default(""),
+  niche: z.string().trim().optional().default(""),
+  level: z.string().trim().optional().default(""),
+  platform: z.string().trim().optional().default(""),
+  status: z.string().trim().optional().default(""),
+  contract_end_date: z.string().trim().optional().default(""),
+  target_gmv_monthly: z.string().trim().optional().default(""),
+});
+
+export interface CreatorEditState {
+  ok: boolean;
+  message: string;
+  fieldErrors?: Record<string, string>;
+}
+
+export async function updateCreator(
+  _prev: CreatorEditState | null,
+  formData: FormData
+): Promise<CreatorEditState> {
+  const actor = await requirePermission("creators.bulk_upload");
+
+  const parsed = creatorEditSchema.safeParse(Object.fromEntries(formData.entries()));
+  if (!parsed.success) {
+    const fieldErrors: Record<string, string> = {};
+    for (const issue of parsed.error.issues) fieldErrors[String(issue.path[0])] = issue.message;
+    return { ok: false, message: "Periksa kembali isian form.", fieldErrors };
+  }
+  const d = parsed.data;
+  const fieldErrors: Record<string, string> = {};
+
+  // level: 1..6 (kosong → null)
+  let level: number | null = null;
+  if (d.level) {
+    const n = Number(d.level);
+    if (!Number.isInteger(n) || n < 1 || n > 6) fieldErrors.level = "Level harus 1-6";
+    else level = n;
+  }
+
+  // platform: enum tiktok/shopee (kosong → null)
+  let platform: string | null = null;
+  if (d.platform) {
+    if (!PLATFORMS.includes(d.platform as (typeof PLATFORMS)[number])) fieldErrors.platform = "Platform tidak valid";
+    else platform = d.platform;
+  }
+
+  // status: enum wajib (default DB 'prospek')
+  if (!d.status) fieldErrors.status = "Status wajib dipilih";
+  else if (!STATUSES.includes(d.status as (typeof STATUSES)[number])) fieldErrors.status = "Status tidak valid";
+
+  // tanggal: kosong → null, jika terisi wajib format YYYY-MM-DD (dari date picker)
+  let joinDate: string | null = null;
+  if (d.join_date) {
+    if (!DATE_RE.test(d.join_date)) fieldErrors.join_date = "Tanggal tidak valid";
+    else joinDate = d.join_date;
+  }
+  let contractEnd: string | null = null;
+  if (d.contract_end_date) {
+    if (!DATE_RE.test(d.contract_end_date)) fieldErrors.contract_end_date = "Tanggal tidak valid";
+    else contractEnd = d.contract_end_date;
+  }
+
+  // target GMV bulanan: angka ≥ 0 (kosong → null)
+  let targetGmv: number | null = null;
+  if (d.target_gmv_monthly) {
+    const n = Number(d.target_gmv_monthly);
+    if (!Number.isFinite(n) || n < 0) fieldErrors.target_gmv_monthly = "Target GMV harus angka ≥ 0";
+    else targetGmv = n;
+  }
+
+  if (Object.keys(fieldErrors).length > 0) {
+    return { ok: false, message: "Periksa kembali isian form.", fieldErrors };
+  }
+
+  // Field editable saja — gmv/gmv_live/gmv_video/commission_share sengaja TIDAK ada di sini.
+  const payload = {
+    name: d.name,
+    username: d.username || null,
+    phone: d.phone || null,
+    profile_link: d.profile_link || null,
+    uid: d.uid || null,
+    followers: d.followers || null,
+    content_quality: d.content_quality || null,
+    join_date: joinDate,
+    domisili: d.domisili || null,
+    jenis_creator: d.jenis_creator || null,
+    niche: d.niche || null,
+    level,
+    platform,
+    status: d.status,
+    contract_end_date: contractEnd,
+    target_gmv_monthly: targetGmv,
+  };
+
+  const admin = createAdminClient();
+  const beforeCols =
+    "name, username, phone, profile_link, uid, followers, content_quality, join_date, domisili, jenis_creator, niche, level, platform, status, contract_end_date, target_gmv_monthly";
+  const { data: before } = await admin
+    .from("creators").select(beforeCols).eq("id", d.creator_id).maybeSingle();
+  if (!before) return { ok: false, message: `Creator ${d.creator_id} tidak ditemukan.` };
+
+  const { error } = await admin.from("creators").update(payload).eq("id", d.creator_id);
+  if (error) return { ok: false, message: `Gagal menyimpan perubahan: ${error.message}` };
+
+  await writeAudit({
+    actorId: actor.id,
+    action: "creator.edit",
+    entityType: "creators",
+    entityId: d.creator_id,
+    before,
+    after: payload,
+    type: "auto",
+  });
+
+  revalidatePath("/creators");
+  revalidatePath(`/creators/${d.creator_id}`);
+  return { ok: true, message: `Data creator ${d.creator_id} tersimpan.` };
 }
