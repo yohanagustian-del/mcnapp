@@ -7,18 +7,20 @@ export default async function MatchingPage() {
   const canRun = hasPermission("m5.run", member.role);
 
   const supabase = await createClient();
-  const { data: creators } = await supabase
-    .from("creators")
-    .select("id, name")
-    .in("status", ["binding", "aktif"])
-    .order("name")
-    .limit(1000);
-
-  const { data: runs } = await supabase
-    .from("matching_runs")
-    .select("id, creator_id, window_start, created_at, creators(name)")
-    .order("created_at", { ascending: false })
-    .limit(10);
+  // ===== Wave 1: independent lookups =====
+  const [{ data: creators }, { data: runs }] = await Promise.all([
+    supabase
+      .from("creators")
+      .select("id, name")
+      .in("status", ["binding", "aktif"])
+      .order("name")
+      .limit(1000),
+    supabase
+      .from("matching_runs")
+      .select("id, creator_id, window_start, created_at, creators(name)")
+      .order("created_at", { ascending: false })
+      .limit(10),
+  ]);
 
   return (
     <div>

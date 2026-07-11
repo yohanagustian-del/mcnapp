@@ -11,14 +11,17 @@ export default async function ComplaintsPage() {
   const { creatorId } = await requireCreator();
   const admin = createAdminClient();
 
-  const { data: cats } = await admin.from("app_config").select("value").eq("key", "m9.complaint_categories").maybeSingle();
+  // ===== Wave 1: independent lookups =====
+  const [{ data: cats }, { data: complaints }] = await Promise.all([
+    admin.from("app_config").select("value").eq("key", "m9.complaint_categories").maybeSingle(),
+    admin
+      .from("creator_complaints")
+      .select("id, category, severity, body, status, created_at, closed_at")
+      .eq("creator_id", creatorId).order("created_at", { ascending: false }),
+  ]);
   const categories: string[] = Array.isArray(cats?.value) ? (cats!.value as string[]) : [];
 
-  const { data: complaints } = await admin
-    .from("creator_complaints")
-    .select("id, category, severity, body, status, created_at, closed_at")
-    .eq("creator_id", creatorId).order("created_at", { ascending: false });
-
+  // ===== Wave 2: depends on complaint ids from wave 1 =====
   const ids = (complaints ?? []).map((c) => c.id);
   const { data: replies } = ids.length
     ? await admin.from("complaint_replies").select("complaint_id, author_role, body, created_at").in("complaint_id", ids)

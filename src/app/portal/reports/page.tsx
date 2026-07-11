@@ -9,14 +9,16 @@ export default async function ReportsPage() {
   const admin = createAdminClient();
   const now = new Date();
 
-  const { data: reports } = await admin
-    .from("creator_reports")
-    .select("id, period_type, period_start, status, generated_at")
-    .eq("creator_id", creatorId).eq("status", "final")
-    .order("period_start", { ascending: false });
-
-  const { data: credits } = await admin
-    .from("creator_report_credits").select("week_start").eq("creator_id", creatorId);
+  // ===== Wave 1: independent lookups =====
+  const [{ data: reports }, { data: credits }] = await Promise.all([
+    admin
+      .from("creator_reports")
+      .select("id, period_type, period_start, status, generated_at")
+      .eq("creator_id", creatorId).eq("status", "final")
+      .order("period_start", { ascending: false }),
+    admin
+      .from("creator_report_credits").select("week_start").eq("creator_id", creatorId),
+  ]);
   const available = hasReportCredit(now, (credits ?? []).map((c) => c.week_start as string));
 
   return (

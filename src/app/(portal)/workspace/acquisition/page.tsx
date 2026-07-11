@@ -24,7 +24,8 @@ export default async function AcquisitionWorkspacePage() {
   const canPay = hasPermission("m8.referral_pay", member.role);
 
   const supabase = await createClient();
-  const [{ data: acquisitions }, { data: referrals }, { data: creators }] = await Promise.all([
+  // ===== Wave 1: independent lookups =====
+  const [{ data: acquisitions }, { data: referrals }, { data: creators }, projectReqs] = await Promise.all([
     supabase
       .from("acquisitions")
       .select("id, creator_id, lead_source, binding_date, gmv_post_join, commission_share_at_binding, gmv_last_30d, quarter_end, gmv_quarter_actual, handoff_done, creators(name, level, niche, status, owner_cpm_id), team_members(name)")
@@ -36,12 +37,11 @@ export default async function AcquisitionWorkspacePage() {
       .order("id", { ascending: false })
       .limit(50),
     supabase.from("creators").select("id, name, status").order("name").limit(500),
+    // M7 creator requirements — acquisition sources creators to close the gap.
+    getProjectRequirements(supabase),
   ]);
 
   const name = (rel: unknown) => (rel as { name?: string } | null)?.name ?? "—";
-
-  // M7 creator requirements — acquisition sources creators to close the gap.
-  const projectReqs = await getProjectRequirements(supabase);
 
   // §2C.1 metrik: binding per sumber (pribadi + tim) + GMV hasil binding.
   const bySource = new Map<string, { count: number; gmv: number }>();

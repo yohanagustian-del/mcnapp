@@ -6,18 +6,20 @@ export default async function CreatorDashboard() {
   const { creatorId } = await requireCreator();
   const admin = createAdminClient();
 
-  const { data: creator } = await admin
-    .from("creators").select("name, level, niche, gmv").eq("id", creatorId).maybeSingle();
-  // Module 0.5 Fase 2: creator_period_summary — satu baris per creator per
-  // periode (bukan platform_metrics_raw long-format per-hari); ambil batch
-  // terbaru per periode, lalu render periode paling baru.
-  const { data: periodRows } = await admin
-    .from("creator_period_summary")
-    .select("period_start, period_end, created_at, affiliate_gmv, affiliate_live_gmv, affiliate_video_gmv, orders, items_sold")
-    .eq("creator_id", creatorId)
-    .order("period_start", { ascending: false })
-    .order("created_at", { ascending: false })
-    .limit(24);
+  // ===== Wave 1: independent lookups =====
+  const [{ data: creator }, { data: periodRows }] = await Promise.all([
+    admin.from("creators").select("name, level, niche, gmv").eq("id", creatorId).maybeSingle(),
+    // Module 0.5 Fase 2: creator_period_summary — satu baris per creator per
+    // periode (bukan platform_metrics_raw long-format per-hari); ambil batch
+    // terbaru per periode, lalu render periode paling baru.
+    admin
+      .from("creator_period_summary")
+      .select("period_start, period_end, created_at, affiliate_gmv, affiliate_live_gmv, affiliate_video_gmv, orders, items_sold")
+      .eq("creator_id", creatorId)
+      .order("period_start", { ascending: false })
+      .order("created_at", { ascending: false })
+      .limit(24),
+  ]);
 
   const latestPeriodStart = periodRows?.[0]?.period_start ?? null;
   const latest = latestPeriodStart

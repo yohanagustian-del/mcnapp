@@ -56,16 +56,6 @@ export default async function LinkLeakagePage({
 
   const supabase = await createClient();
 
-  // Latest week with a rollup on file (written by the /ingest Lane 2 artifact
-  // upload — not computed on the platform, see leak-rollup.ts).
-  const { data: latest } = await supabase
-    .from("creator_link_status")
-    .select("week")
-    .order("week", { ascending: false })
-    .limit(1)
-    .maybeSingle();
-  const latestWeek: string | null = latest?.week ?? null;
-
   // Detail produk bocor: leakage_products TIDAK diisi lagi untuk minggu baru (era
   // artifak menyimpan rollup saja) — apa pun yang muncul di sini adalah sisa data
   // historis dari era engine, ditampilkan dengan keterangan jelas, bukan tabel
@@ -79,16 +69,19 @@ export default async function LinkLeakagePage({
   if (creatorIdFilter?.trim()) detailQuery = detailQuery.eq("creator_id", creatorIdFilter.trim());
   if (weekFilter?.trim()) detailQuery = detailQuery.eq("week", weekFilter.trim());
 
-  const [{ data: rollup }, { data: leads }, { data: alerts }, { data: leakDetail }, { data: weekSummary }] =
+  // ===== Wave 1: independent lookups =====
+  // `latest` (latest rollup week) doesn't gate these — leads/alerts/detailQuery/
+  // weekSummary are all independent of it; only `rollup` (wave 2) needs latestWeek.
+  const [{ data: latest }, { data: leads }, { data: alerts }, { data: leakDetail }, { data: weekSummary }] =
     await Promise.all([
-      latestWeek
-        ? supabase
-            .from("creator_link_status")
-            .select("creator_id, week, gmv_deal_total, gmv_bocor, leak_ratio, link_status, source, creators(name)")
-            .eq("week", latestWeek)
-            .order("leak_ratio", { ascending: false, nullsFirst: false })
-            .limit(200)
-        : Promise.resolve({ data: [] as never[] }),
+      // Latest week with a rollup on file (written by the /ingest Lane 2 artifact
+      // upload — not computed on the platform, see leak-rollup.ts).
+      supabase
+        .from("creator_link_status")
+        .select("week")
+        .order("week", { ascending: false })
+        .limit(1)
+        .maybeSingle(),
       supabase
         .from("bd_leads")
         .select("shop_id, shop_name, frequency, total_gmv, priority_score, first_seen_week, status")
@@ -109,6 +102,17 @@ export default async function LinkLeakagePage({
         .limit(1)
         .maybeSingle(),
     ]);
+  const latestWeek: string | null = latest?.week ?? null;
+
+  // ===== Wave 2: depends on latestWeek (wave 1 output) =====
+  const { data: rollup } = latestWeek
+    ? await supabase
+        .from("creator_link_status")
+        .select("creator_id, week, gmv_deal_total, gmv_bocor, leak_ratio, link_status, source, creators(name)")
+        .eq("week", latestWeek)
+        .order("leak_ratio", { ascending: false, nullsFirst: false })
+        .limit(200)
+    : { data: [] as never[] };
 
   return (
     <div>

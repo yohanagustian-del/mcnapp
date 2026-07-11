@@ -41,59 +41,69 @@ export default async function BizdevWorkspacePage() {
   const bdWeekStart = getWeekStart(new Date());
   const bdWeekDays = getWeekDays(bdWeekStart);
   const bdWeekEnd = bdWeekDays[6];
-  let bdScheduleRows: CompactSlotRow[] = [];
-  if (canViewSchedule) {
-    const { data: bdSlots } = await supabase
-      .from("live_schedule_slots")
-      .select("*")
-      .gte("schedule_date", bdWeekStart)
-      .lte("schedule_date", bdWeekEnd)
-      .or("deals_by.eq.bd,deal_id.not.is.null")
-      .order("schedule_date", { ascending: true });
-    const bdCreatorIds = [...new Set(((bdSlots ?? []) as LiveScheduleSlot[]).map((s) => s.creator_id))];
-    const { data: bdSlotCreators } = bdCreatorIds.length
-      ? await supabase.from("creators").select("id, name").in("id", bdCreatorIds)
-      : { data: [] as { id: string; name: string }[] };
-    const bdNameById = new Map((bdSlotCreators ?? []).map((c) => [c.id, c.name]));
-    bdScheduleRows = ((bdSlots ?? []) as LiveScheduleSlot[]).map((s) => ({
-      slot: s,
-      creatorName: bdNameById.get(s.creator_id) ?? s.creator_id,
-    }));
-  }
-  const [{ data: deals }, { data: creatorReqs }, { data: campaignReqs }, { data: leads }, { data: brandReports }] =
-    await Promise.all([
-      supabase
-        .from("brand_deals")
-        .select("id, brand_name, shop_id, pipeline_stage, status, campaign_name, exp_date")
-        .order("created_at", { ascending: false })
-        .limit(100),
-      supabase
-        .from("creator_requests")
-        .select("id, creator_id, type, target_brand, status, amount, approval_status, creators(name)")
-        .order("created_at", { ascending: false })
-        .limit(50),
-      supabase
-        .from("campaign_requests")
-        .select("id, deal_id, creator_id, owner_cpm_id, cm_confirm_status, needs_brand_acc, brand_acc_status, final_status, handed_over_at, creator_sourced_by, brand_deals(brand_name), creators(name), team_members!campaign_requests_owner_cpm_id_fkey(name)")
-        .order("created_at", { ascending: false })
-        .limit(50),
-      supabase
-        .from("bd_leads")
-        .select("id, shop_id, shop_name, frequency, total_gmv, priority_score, source, status")
-        .order("priority_score", { ascending: false, nullsFirst: false })
-        .limit(20),
-      supabase
-        .from("brand_reports")
-        .select("id, deal_id, period_start, period_end, data_json, summary_text, token_used, brand_deals(brand_name)")
-        .order("created_at", { ascending: false })
-        .limit(10),
-    ]);
+  // ===== Wave 1: independent lookups =====
+  // The BD schedule block is a 2-step dependent chain (slots → creator names
+  // for those slots), bundled into an inline async fn so it still joins the
+  // parallel wave; it's independent of deals/reqs/leads/reports/projectReqs.
+  const [
+    bdScheduleRows,
+    { data: deals },
+    { data: creatorReqs },
+    { data: campaignReqs },
+    { data: leads },
+    { data: brandReports },
+    projectReqs,
+  ] = await Promise.all([
+    (async (): Promise<CompactSlotRow[]> => {
+      if (!canViewSchedule) return [];
+      const { data: bdSlots } = await supabase
+        .from("live_schedule_slots")
+        .select("*")
+        .gte("schedule_date", bdWeekStart)
+        .lte("schedule_date", bdWeekEnd)
+        .or("deals_by.eq.bd,deal_id.not.is.null")
+        .order("schedule_date", { ascending: true });
+      const bdCreatorIds = [...new Set(((bdSlots ?? []) as LiveScheduleSlot[]).map((s) => s.creator_id))];
+      const { data: bdSlotCreators } = bdCreatorIds.length
+        ? await supabase.from("creators").select("id, name").in("id", bdCreatorIds)
+        : { data: [] as { id: string; name: string }[] };
+      const bdNameById = new Map((bdSlotCreators ?? []).map((c) => [c.id, c.name]));
+      return ((bdSlots ?? []) as LiveScheduleSlot[]).map((s) => ({
+        slot: s,
+        creatorName: bdNameById.get(s.creator_id) ?? s.creator_id,
+      }));
+    })(),
+    supabase
+      .from("brand_deals")
+      .select("id, brand_name, shop_id, pipeline_stage, status, campaign_name, exp_date")
+      .order("created_at", { ascending: false })
+      .limit(100),
+    supabase
+      .from("creator_requests")
+      .select("id, creator_id, type, target_brand, status, amount, approval_status, creators(name)")
+      .order("created_at", { ascending: false })
+      .limit(50),
+    supabase
+      .from("campaign_requests")
+      .select("id, deal_id, creator_id, owner_cpm_id, cm_confirm_status, needs_brand_acc, brand_acc_status, final_status, handed_over_at, creator_sourced_by, brand_deals(brand_name), creators(name), team_members!campaign_requests_owner_cpm_id_fkey(name)")
+      .order("created_at", { ascending: false })
+      .limit(50),
+    supabase
+      .from("bd_leads")
+      .select("id, shop_id, shop_name, frequency, total_gmv, priority_score, source, status")
+      .order("priority_score", { ascending: false, nullsFirst: false })
+      .limit(20),
+    supabase
+      .from("brand_reports")
+      .select("id, deal_id, period_start, period_end, data_json, summary_text, token_used, brand_deals(brand_name)")
+      .order("created_at", { ascending: false })
+      .limit(10),
+    // M7 ads budget requirements — BizDev secures/allocates the ads spend.
+    getProjectRequirements(supabase),
+  ]);
 
   const name = (rel: unknown) => (rel as { name?: string } | null)?.name ?? "—";
   const dealOptions = (deals ?? []).map((d) => ({ id: d.id, brand_name: d.brand_name }));
-
-  // M7 ads budget requirements — BizDev secures/allocates the ads spend.
-  const projectReqs = await getProjectRequirements(supabase);
 
   return (
     <div className="space-y-8">

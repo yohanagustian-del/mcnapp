@@ -29,8 +29,6 @@ export default async function OkrPage() {
   const isCpm = member.role === "cpm" || member.role === "cm_lead";
   const isDirector = member.role === "director";
 
-  const windowDays = Number((await getConfig("m3.hands_on_window_days")) ?? 7);
-
   // Load KRs untuk role ini (atau semua jika management)
   const krQuery = supabase
     .from("okr_key_results")
@@ -42,7 +40,9 @@ export default async function OkrPage() {
     krQuery.eq("role", member.role);
   }
 
-  const [{ data: krs }, { data: tiers }, { data: gatingPending }] = await Promise.all([
+  // ===== Wave 1: independent lookups =====
+  const [windowDaysRaw, { data: krs }, { data: tiers }, { data: gatingPending }] = await Promise.all([
+    getConfig("m3.hands_on_window_days"),
     krQuery,
     supabase.from("reward_tiers").select("role, kr_achieved_count, reward_amount").order("kr_achieved_count"),
     supabase
@@ -50,6 +50,7 @@ export default async function OkrPage() {
       .select("id, kr_id, event_desc, director_decision")
       .eq("director_decision", "pending"),
   ]);
+  const windowDays = Number(windowDaysRaw ?? 7);
 
   const krIds = (krs ?? []).map((k) => k.id);
 
@@ -62,17 +63,42 @@ export default async function OkrPage() {
     computed_at: string;
   };
 
-  // Load aktuals — latest per (kr_id, subject_id) via distinct-on emulation:
-  // ambil semua, lalu filter di JS (jumlah KR terbatas)
-  let allActuals: OkrActualRow[] = [];
-  if (krIds.length) {
-    const { data } = await supabase
-      .from("okr_actuals")
-      .select("kr_id, subject_id, actual_value, pct_progress, achieved, computed_at")
-      .in("kr_id", krIds)
-      .order("computed_at", { ascending: false });
-    allActuals = (data ?? []) as OkrActualRow[];
-  }
+  // Adopsi sistem (QA): jam pemakaian tools per user per bulan — Director & Lead.
+  const since = new Date();
+  since.setUTCDate(since.getUTCDate() - 92); // ~3 bulan terakhir
+
+  // ===== Wave 2: depend only on wave-1 results (krIds/windowDays) or on
+  // role flags known from the start — independent of each other =====
+  const [actualsResult, membersResult, handsOnRatioVal, usageResult] = await Promise.all([
+    // Load aktuals — latest per (kr_id, subject_id) via distinct-on emulation:
+    // ambil semua, lalu filter di JS (jumlah KR terbatas)
+    krIds.length
+      ? supabase
+          .from("okr_actuals")
+          .select("kr_id, subject_id, actual_value, pct_progress, achieved, computed_at")
+          .in("kr_id", krIds)
+          .order("computed_at", { ascending: false })
+      : Promise.resolve({ data: [] as OkrActualRow[] }),
+    // Untuk management: ambil semua subject dalam setiap KR (cross-team view)
+    isManagement
+      ? supabase.from("team_members").select("id, name, role").eq("active", true)
+      : Promise.resolve({ data: [] as { id: string; name: string; role: string }[] }),
+    // Hands-on ratio hanya untuk CPM
+    isCpm ? getHandsOnRatio(supabase as never, member.id, windowDays) : Promise.resolve(null as number | null),
+    isLead
+      ? Promise.all([
+          supabase
+            .from("tool_usage_logs")
+            .select("member_id, occurred_at")
+            .gte("occurred_at", since.toISOString())
+            .order("occurred_at", { ascending: true })
+            .limit(20000),
+          supabase.from("team_members").select("id, name, role").eq("active", true),
+        ])
+      : Promise.resolve(null),
+  ]);
+
+  const allActuals: OkrActualRow[] = (actualsResult.data ?? []) as OkrActualRow[];
 
   // Untuk tiap (kr_id, subject_id) ambil yang paling baru
   const latestActuals = new Map<string, OkrActualRow>();
@@ -95,16 +121,10 @@ export default async function OkrPage() {
     myActuals.some((a) => a.kr_id === g.kr_id)
   ).length;
 
-  // Hands-on ratio hanya untuk CPM
-  const handsOnRatioVal = isCpm ? await getHandsOnRatio(supabase as never, member.id, windowDays) : null;
-
   // Untuk management: ambil semua subject dalam setiap KR (cross-team view)
   let crossTeam: { memberId: string; memberName: string; role: string; achieved: number; total: number }[] = [];
   if (isManagement) {
-    const { data: members } = await supabase
-      .from("team_members")
-      .select("id, name, role")
-      .eq("active", true);
+    const members = membersResult.data;
 
     const subjectAchieved = new Map<string, number>();
     const subjectTotal = new Map<string, number>();
@@ -129,18 +149,8 @@ export default async function OkrPage() {
 
   // Adopsi sistem (QA): jam pemakaian tools per user per bulan — Director & Lead.
   let usageRows: (MonthlyUsage & { memberName: string; role: string })[] = [];
-  if (isLead) {
-    const since = new Date();
-    since.setUTCDate(since.getUTCDate() - 92); // ~3 bulan terakhir
-    const [{ data: usageLogs }, { data: allMembers }] = await Promise.all([
-      supabase
-        .from("tool_usage_logs")
-        .select("member_id, occurred_at")
-        .gte("occurred_at", since.toISOString())
-        .order("occurred_at", { ascending: true })
-        .limit(20000),
-      supabase.from("team_members").select("id, name, role").eq("active", true),
-    ]);
+  if (isLead && usageResult) {
+    const [{ data: usageLogs }, { data: allMembers }] = usageResult;
     const memberById = new Map((allMembers ?? []).map((m) => [m.id, m]));
     usageRows = aggregateUsageHours(usageLogs ?? []).map((u) => ({
       ...u,

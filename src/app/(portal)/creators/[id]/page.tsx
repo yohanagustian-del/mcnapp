@@ -45,13 +45,61 @@ export default async function CreatorDetailPage({
   const { bulan: bulanParam } = await searchParams;
 
   const supabase = await createClient();
-  const { data: creator } = await supabase
-    .from("creators")
-    .select(
-      "id, name, username, phone, profile_link, uid, platform, jenis_creator, level, niche, top_niches, status, gmv, gmv_live, gmv_video, commission_share, followers, content_quality, join_date, domisili, contract_end_date, target_gmv_monthly"
-    )
-    .eq("id", id)
-    .maybeSingle();
+
+  // ===== Wave 1: independent lookups =====
+  // (a) creator row, (b) all period-summary rows for W1-W5 growth, (c) latest
+  // window_end + that window's category×segment rows (a 2-step dependent
+  // chain, bundled into one inline async fn so it still joins the parallel
+  // wave), (d) active TAP product catalog — none of these depend on each other.
+  const [
+    { data: creator },
+    { data: allPeriodRows },
+    { windowEnd, segmentRows },
+    { data: productRows },
+  ] = await Promise.all([
+    supabase
+      .from("creators")
+      .select(
+        "id, name, username, phone, profile_link, uid, platform, jenis_creator, level, niche, top_niches, status, gmv, gmv_live, gmv_video, commission_share, followers, content_quality, join_date, domisili, contract_end_date, target_gmv_monthly"
+      )
+      .eq("id", id)
+      .maybeSingle(),
+    supabase
+      .from("creator_period_summary")
+      .select("period_start, period_end, affiliate_gmv, created_at")
+      .eq("creator_id", id)
+      .order("period_start", { ascending: false })
+      .limit(500),
+    (async () => {
+      // latest window_end for this creator's segment data (Module 0.5 ingest output).
+      const { data: latestRow } = await supabase
+        .from("creator_subcat_segment_gmv")
+        .select("window_end")
+        .eq("creator_id", id)
+        .order("window_end", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      const windowEnd = latestRow?.window_end ?? null;
+
+      const segmentRows: CreatorSegmentRow[] = windowEnd
+        ? ((
+            await supabase
+              .from("creator_subcat_segment_gmv")
+              .select("level2_category, price_segment, gmv, live_gmv, items_sold, avg_price")
+              .eq("creator_id", id)
+              .eq("window_end", windowEnd)
+          ).data ?? [])
+        : [];
+
+      return { windowEnd, segmentRows };
+    })(),
+    supabase
+      .from("products_tap")
+      .select("product_id, product_name, shop_id, shop_name, level2_category, price_segment, price, commission_pct")
+      .eq("active", true)
+      .limit(2000),
+  ]);
 
   if (!creator) notFound();
 
@@ -59,12 +107,6 @@ export default async function CreatorDetailPage({
   // All periods for this creator (only needed to list available months + build
   // the selected month's chart) — one creator, so no need for the 1000-row
   // global cap pattern used in the CM Workspace list view.
-  const { data: allPeriodRows } = await supabase
-    .from("creator_period_summary")
-    .select("period_start, period_end, affiliate_gmv, created_at")
-    .eq("creator_id", id)
-    .order("period_start", { ascending: false })
-    .limit(500);
   const periodInputRows: WeeklyGrowthInputRow[] = (allPeriodRows ?? []).map((r) => ({
     creatorId: id,
     periodStart: r.period_start,
@@ -103,27 +145,6 @@ export default async function CreatorDetailPage({
     return { month: m, total, growthPct };
   });
 
-  // latest window_end for this creator's segment data (Module 0.5 ingest output).
-  const { data: latestRow } = await supabase
-    .from("creator_subcat_segment_gmv")
-    .select("window_end")
-    .eq("creator_id", id)
-    .order("window_end", { ascending: false })
-    .limit(1)
-    .maybeSingle();
-
-  const windowEnd = latestRow?.window_end ?? null;
-
-  const segmentRows: CreatorSegmentRow[] = windowEnd
-    ? ((
-        await supabase
-          .from("creator_subcat_segment_gmv")
-          .select("level2_category, price_segment, gmv, live_gmv, items_sold, avg_price")
-          .eq("creator_id", id)
-          .eq("window_end", windowEnd)
-      ).data ?? [])
-    : [];
-
   const matrix = creatorSegmentMap(segmentRows);
 
   // top level-2 categories by GMV (rows for the matrix table)
@@ -143,12 +164,6 @@ export default async function CreatorDetailPage({
   }
 
   // ---- top-10 recommended TAP products ----
-  const { data: productRows } = await supabase
-    .from("products_tap")
-    .select("product_id, product_name, shop_id, shop_name, level2_category, price_segment, price, commission_pct")
-    .eq("active", true)
-    .limit(2000);
-
   const products: ProductRow[] = (productRows ?? []).map((p) => ({
     productId: p.product_id,
     productName: p.product_name,
@@ -169,28 +184,26 @@ export default async function CreatorDetailPage({
   const recProductIds = [...new Set(recommendations.map((r) => r.product.productId).filter((x): x is string => !!x))];
   const recShopIds = [...new Set(recommendations.map((r) => r.product.shopId).filter((x): x is string => !!x))];
 
+  // ===== Wave 2: dep on recommendations only, independent of each other =====
+  const [{ data: dpRows }, { data: bdRows }] = await Promise.all([
+    recProductIds.length > 0
+      ? supabase.from("deal_products").select("product_id, komisi_mea_pct").in("product_id", recProductIds)
+      : Promise.resolve({ data: null }),
+    recShopIds.length > 0
+      ? supabase.from("brand_deals").select("shop_id, komisi_mea_pct").in("shop_id", recShopIds)
+      : Promise.resolve({ data: null }),
+  ]);
+
   const meaByProduct = new Map<string, number>();
-  if (recProductIds.length > 0) {
-    const { data: dpRows } = await supabase
-      .from("deal_products")
-      .select("product_id, komisi_mea_pct")
-      .in("product_id", recProductIds);
-    for (const row of dpRows ?? []) {
-      if (row.product_id != null && row.komisi_mea_pct != null && !meaByProduct.has(row.product_id)) {
-        meaByProduct.set(row.product_id, Number(row.komisi_mea_pct));
-      }
+  for (const row of dpRows ?? []) {
+    if (row.product_id != null && row.komisi_mea_pct != null && !meaByProduct.has(row.product_id)) {
+      meaByProduct.set(row.product_id, Number(row.komisi_mea_pct));
     }
   }
   const meaByShop = new Map<string, number>();
-  if (recShopIds.length > 0) {
-    const { data: bdRows } = await supabase
-      .from("brand_deals")
-      .select("shop_id, komisi_mea_pct")
-      .in("shop_id", recShopIds);
-    for (const row of bdRows ?? []) {
-      if (row.shop_id != null && row.komisi_mea_pct != null && !meaByShop.has(row.shop_id)) {
-        meaByShop.set(row.shop_id, Number(row.komisi_mea_pct));
-      }
+  for (const row of bdRows ?? []) {
+    if (row.shop_id != null && row.komisi_mea_pct != null && !meaByShop.has(row.shop_id)) {
+      meaByShop.set(row.shop_id, Number(row.komisi_mea_pct));
     }
   }
   const meaPctFor = (p: ProductRow): number | null => {
