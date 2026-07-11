@@ -15,6 +15,16 @@ import { parseFlexibleDate } from "@/lib/utils/date";
 import type { UploadReport } from "@/app/(portal)/tim/actions";
 
 /**
+ * Optional numeric field helper (bugfix): z.coerce.number() on an empty/whitespace
+ * string coerces to 0 instead of undefined, so a cleared "max" field silently became
+ * 0 and then failed the "max ≥ min" check — the form could never be saved once a user
+ * typed then cleared an optional number. Preprocess blank strings to undefined BEFORE
+ * coercion so "optional" actually means optional.
+ */
+const optionalNumber = (schema: z.ZodNumber) =>
+  z.preprocess((v) => (typeof v === "string" && v.trim() === "" ? undefined : v), schema.optional());
+
+/**
  * Deal Registration Form schema (CLAUDE.md #6 — strict validation, no dirty data):
  * shop_id numeric & unique; exp_date from date picker; komisi = clean numbers
  * (range handled as separate min/max); Rupiah fields = pure numbers.
@@ -25,18 +35,22 @@ const dealFormSchema = z.object({
   niche: z.string().min(1, "Niche wajib diisi"),
   exp_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Exp date wajib dari date picker"),
   komisi_kreator_min: z.coerce.number().min(0).max(100),
-  komisi_kreator_max: z.coerce.number().min(0).max(100).optional(),
+  komisi_kreator_max: optionalNumber(z.coerce.number().min(0).max(100)),
   komisi_mea_min: z.coerce.number().min(0).max(100),
-  komisi_mea_max: z.coerce.number().min(0).max(100).optional(),
-  pic_tap: z.string().uuid("PIC TAP wajib dipilih"),
+  komisi_mea_max: optionalNumber(z.coerce.number().min(0).max(100)),
+  pic_tap: z.string().uuid("PIC Campaign wajib dipilih"),
   campaign_name: z.string().min(1, "Campaign name wajib diisi"),
   brand_link: z.string().url().optional().or(z.literal("")),
-  gmv_tap: z.coerce.number().nonnegative().optional(),
-  avg_price: z.coerce.number().nonnegative().optional(),
-  ads_budget: z.coerce.number().nonnegative().optional(),
-  service_fee: z.coerce.number().nonnegative().optional(),
-  // Campaign sample & komisi extra = non-berbayar (QA feedback BizDev)
-  campaign_type: z.enum(["paid", "sample", "extra_commission"]).default("paid"),
+  gmv_tap: optionalNumber(z.coerce.number().nonnegative()),
+  avg_price: optionalNumber(z.coerce.number().nonnegative()),
+  ads_budget: optionalNumber(z.coerce.number().nonnegative()),
+  service_fee: optionalNumber(z.coerce.number().nonnegative()),
+  // 4 tipe campaign (form baru). Nilai lama paid/sample/extra_commission tetap tersimpan
+  // valid untuk baris lama di DB (lihat supabase/migrations/0024_campaign_types.sql) tapi
+  // tidak lagi bisa dipilih dari form ini.
+  campaign_type: z
+    .enum(["paid_endorsement", "bulking_ads_endorse", "bulking_ads", "cps"])
+    .default("paid_endorsement"),
   notes: z.string().optional(),
 });
 

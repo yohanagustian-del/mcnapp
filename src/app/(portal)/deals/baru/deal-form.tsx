@@ -8,7 +8,7 @@ interface PicOption {
   name: string;
 }
 
-export function DealForm({ picOptions }: { picOptions: PicOption[] }) {
+export function DealForm({ picOptions, nicheOptions }: { picOptions: PicOption[]; nicheOptions: string[] }) {
   const [state, formAction, pending] = useActionState<DealFormState | null, FormData>(
     registerDeal,
     null
@@ -38,7 +38,18 @@ export function DealForm({ picOptions }: { picOptions: PicOption[] }) {
           <input name="shop_id" required inputMode="numeric" pattern="\d+" className={inputCls} placeholder="7495123456789" />
         </Field>
         <Field label="Niche" error={err("niche")}>
-          <input name="niche" required className={inputCls} placeholder="Beauty / FMCG / Fashion..." />
+          <input
+            name="niche"
+            required
+            list="niche-options"
+            className={inputCls}
+            placeholder="Beauty / FMCG / Fashion..."
+          />
+          <datalist id="niche-options">
+            {nicheOptions.map((n) => (
+              <option key={n} value={n} />
+            ))}
+          </datalist>
         </Field>
       </div>
 
@@ -46,7 +57,7 @@ export function DealForm({ picOptions }: { picOptions: PicOption[] }) {
         <Field label="Exp Date (durasi deal → deal_end)" error={err("exp_date")}>
           <input name="exp_date" type="date" required className={inputCls} />
         </Field>
-        <Field label="PIC TAP" error={err("pic_tap")}>
+        <Field label="PIC Campaign" error={err("pic_tap")}>
           <select name="pic_tap" required className={inputCls} defaultValue="">
             <option value="" disabled>Pilih PIC…</option>
             {picOptions.map((p) => (
@@ -85,10 +96,11 @@ export function DealForm({ picOptions }: { picOptions: PicOption[] }) {
           <input name="campaign_name" required className={inputCls} />
         </Field>
         <Field label="Tipe Campaign" error={err("campaign_type")}>
-          <select name="campaign_type" className={inputCls} defaultValue="paid">
-            <option value="paid">Paid campaign</option>
-            <option value="sample">Campaign sample (non-berbayar)</option>
-            <option value="extra_commission">Komisi extra (non-berbayar)</option>
+          <select name="campaign_type" className={inputCls} defaultValue="paid_endorsement">
+            <option value="paid_endorsement">Paid / Endorsement</option>
+            <option value="bulking_ads_endorse">Bulking Ads &amp; Endorse</option>
+            <option value="bulking_ads">Bulking Ads</option>
+            <option value="cps">CPS (Sample, Voucher, Ads) — bertahap</option>
           </select>
         </Field>
       </div>
@@ -104,7 +116,7 @@ export function DealForm({ picOptions }: { picOptions: PicOption[] }) {
 
       <fieldset className="rounded-md border border-slate-200 p-4">
         <legend className="px-1 text-sm font-medium">
-          Daftar Produk (1 brand boleh mendaftarkan &gt;1 produk)
+          PRODUK PRIORITAS (produk yang di-push brand)
         </legend>
         <div className="space-y-3">
           {Array.from({ length: productRows }).map((_, i) => (

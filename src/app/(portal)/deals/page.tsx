@@ -7,6 +7,18 @@ function formatRp(v: number | null | undefined): string {
   return v ? `Rp${Number(v).toLocaleString("id-ID")}` : "—";
 }
 
+// Tipe campaign: 4 pilihan baru + 3 nilai lama yang tetap tersimpan di baris lama
+// (supabase/migrations/0024_campaign_types.sql — nilai lama tidak dimigrasikan).
+const CAMPAIGN_TYPE_LABEL: Record<string, string> = {
+  paid_endorsement: "Paid / Endorsement",
+  bulking_ads_endorse: "Bulking Ads & Endorse",
+  bulking_ads: "Bulking Ads",
+  cps: "CPS (Sample, Voucher, Ads)",
+  paid: "Paid (lama)",
+  sample: "Sample (lama)",
+  extra_commission: "Komisi Extra (lama)",
+};
+
 export default async function DealsPage({
   searchParams,
 }: {
@@ -124,9 +136,9 @@ export default async function DealsPage({
                         via CM
                       </span>
                     )}
-                    {d.campaign_type && d.campaign_type !== "paid" && (
+                    {d.campaign_type && d.campaign_type !== "paid_endorsement" && d.campaign_type !== "paid" && (
                       <span className="ml-2 rounded-full bg-sky-100 px-2 py-0.5 text-xs text-sky-800">
-                        {d.campaign_type === "sample" ? "sample" : "komisi extra"}
+                        {CAMPAIGN_TYPE_LABEL[d.campaign_type] ?? d.campaign_type}
                       </span>
                     )}
                   </td>

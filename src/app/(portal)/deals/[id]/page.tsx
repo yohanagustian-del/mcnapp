@@ -9,6 +9,18 @@ function formatRp(v: number | null | undefined): string {
   return v ? `Rp${Number(v).toLocaleString("id-ID")}` : "—";
 }
 
+// Tipe campaign: 4 pilihan baru + 3 nilai lama yang tetap tersimpan di baris lama
+// (supabase/migrations/0024_campaign_types.sql — nilai lama tidak dimigrasikan).
+const CAMPAIGN_TYPE_LABEL: Record<string, string> = {
+  paid_endorsement: "Paid / Endorsement",
+  bulking_ads_endorse: "Bulking Ads & Endorse",
+  bulking_ads: "Bulking Ads",
+  cps: "CPS (Sample, Voucher, Ads) — bertahap",
+  paid: "Paid (lama)",
+  sample: "Sample (non-berbayar, lama)",
+  extra_commission: "Komisi Extra (non-berbayar, lama)",
+};
+
 const input = "rounded-md border border-slate-300 px-3 py-2 text-sm";
 
 /** Halaman 2: produk yang didaftarkan brand + tracking report campaign BD. */
@@ -80,7 +92,7 @@ export default async function DealDetailPage({
     ["Komisi MEA", deal.komisi_mea_raw ?? "—"],
     ["Ads Budget", formatRp(deal.ads_budget)],
     ["Service Fee", formatRp(deal.service_fee)],
-    ["Tipe Campaign", deal.campaign_type === "sample" ? "Sample (non-berbayar)" : deal.campaign_type === "extra_commission" ? "Komisi Extra (non-berbayar)" : "Paid"],
+    ["Tipe Campaign", deal.campaign_type ? (CAMPAIGN_TYPE_LABEL[deal.campaign_type] ?? deal.campaign_type) : "—"],
     ["Didaftarkan oleh", deal.sourced_by_role === "cm" ? "CM (tanpa BizDev)" : "BizDev"],
     ["PIC Brand", deal.contact_pic_brand ?? "—"],
     ["Status", deal.status ?? "—"],
