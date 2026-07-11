@@ -3,7 +3,7 @@ import { requireMember, hasPermission } from "@/lib/rbac";
 import { createClient } from "@/lib/supabase/server";
 import { getConfig } from "@/lib/config";
 import { filterLiveActive, trackDaily, type CurveShape, type LiveActivityRow } from "@/lib/m7/tracking";
-import { addParticipant, assignManpower, setProjectStatus, upsertCreatorMetric, upsertDailyMetric } from "../actions";
+import { addParticipant, assignManpower, setProjectStatus, updateProject, upsertCreatorMetric, upsertDailyMetric } from "../actions";
 
 const STATUS_LABELS: Record<string, string> = {
   on_track: "On-track", behind: "Behind", ahead: "Ahead",
@@ -129,6 +129,39 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
             </button>
           )}
         </form>
+      )}
+
+      {canManage && (
+        <details className="mt-3 rounded-lg border border-slate-200 bg-white p-4">
+          <summary className="cursor-pointer text-sm font-medium">Edit Project</summary>
+          <form action={updateProject} className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            <input type="hidden" name="project_id" value={project.id} />
+            <input name="name" required defaultValue={project.name} placeholder="Nama project"
+              className="rounded-md border border-slate-300 px-3 py-2 text-sm" />
+            <input name="type" defaultValue={project.type ?? ""} placeholder="Tipe (showcase/bootcamp/China trip)"
+              className="rounded-md border border-slate-300 px-3 py-2 text-sm" />
+            <label className="flex items-center gap-2 text-xs text-slate-500">
+              Mulai
+              <input type="date" name="start_date" required defaultValue={project.start_date}
+                className="flex-1 rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-900" />
+            </label>
+            <label className="flex items-center gap-2 text-xs text-slate-500">
+              Selesai
+              <input type="date" name="end_date" required defaultValue={project.end_date}
+                className="flex-1 rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-900" />
+            </label>
+            <input name="target_gmv" required defaultValue={String(project.target_gmv ?? "")} placeholder="Target GMV (Rp)"
+              className="rounded-md border border-slate-300 px-3 py-2 text-sm" />
+            <input name="target_creators" type="number" min="1" defaultValue={project.target_creators ?? ""} placeholder="Target jumlah creator"
+              className="rounded-md border border-slate-300 px-3 py-2 text-sm" />
+            <input name="ads_budget_cap" defaultValue={project.ads_budget_cap === null ? "" : String(project.ads_budget_cap)} placeholder="Ads budget cap (Rp, opsional)"
+              className="rounded-md border border-slate-300 px-3 py-2 text-sm" />
+            <button type="submit"
+              className="rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-700">
+              Simpan Perubahan
+            </button>
+          </form>
+        </details>
       )}
 
       {(alerts ?? []).length > 0 && (
@@ -395,8 +428,11 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
                   <option key={t.id} value={t.id}>{t.name} ({t.role})</option>
                 ))}
               </select>
-              <input name="role" placeholder="Peran di project (mis. Campaign Ops)"
-                className="rounded-md border border-slate-300 px-3 py-2" />
+              <select name="role" required defaultValue="" className="rounded-md border border-slate-300 px-3 py-2">
+                <option value="" disabled>— Pilih peran —</option>
+                <option value="PIC">PIC</option>
+                <option value="Anggota">Anggota</option>
+              </select>
               <input name="involvement" placeholder="Porsi keterlibatan (mis. 50%)"
                 className="rounded-md border border-slate-300 px-3 py-2" />
               <button type="submit"
@@ -415,15 +451,23 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {(manpower ?? []).map((m) => (
-                  <tr key={m.member_id}>
-                    <td className="px-4 py-2 font-medium">
-                      {(m.team_members as unknown as { name: string } | null)?.name ?? m.member_id}
-                    </td>
-                    <td className="px-4 py-2">{m.role ?? "—"}</td>
-                    <td className="px-4 py-2">{m.involvement ?? "—"}</td>
-                  </tr>
-                ))}
+                {[...(manpower ?? [])]
+                  .sort((a, b) => (a.role === "PIC" ? -1 : 0) - (b.role === "PIC" ? -1 : 0))
+                  .map((m) => (
+                    <tr key={m.member_id}>
+                      <td className="px-4 py-2 font-medium">
+                        {(m.team_members as unknown as { name: string } | null)?.name ?? m.member_id}
+                      </td>
+                      <td className="px-4 py-2">
+                        {m.role === "PIC" ? (
+                          <span className="rounded-full bg-slate-900 px-2 py-0.5 text-xs font-medium text-white">PIC</span>
+                        ) : m.role ? (
+                          <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-600">{m.role}</span>
+                        ) : "—"}
+                      </td>
+                      <td className="px-4 py-2">{m.involvement ?? "—"}</td>
+                    </tr>
+                  ))}
                 {(manpower ?? []).length === 0 && (
                   <tr><td colSpan={3} className="px-4 py-6 text-center text-slate-400">Belum ada man power.</td></tr>
                 )}

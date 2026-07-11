@@ -51,13 +51,27 @@ export default async function ProjectsPage() {
 
   // Jumlah peserta aktual per project (vs target_creators)
   const participantCounts = new Map<number, number>();
+  // PIC per project (man power dengan role='PIC') — satu query .in() untuk semua project, no N+1.
+  const picByProject = new Map<number, string>();
   if ((projects ?? []).length > 0) {
-    const { data: parts } = await supabase
-      .from("project_participants")
-      .select("project_id")
-      .in("project_id", (projects ?? []).map((p) => p.id));
+    const projectIds = (projects ?? []).map((p) => p.id);
+    const [{ data: parts }, { data: picRows }] = await Promise.all([
+      supabase
+        .from("project_participants")
+        .select("project_id")
+        .in("project_id", projectIds),
+      supabase
+        .from("project_manpower")
+        .select("project_id, team_members(name)")
+        .in("project_id", projectIds)
+        .eq("role", "PIC"),
+    ]);
     for (const pt of parts ?? []) {
       participantCounts.set(pt.project_id, (participantCounts.get(pt.project_id) ?? 0) + 1);
+    }
+    for (const row of picRows ?? []) {
+      const name = (row.team_members as unknown as { name: string } | null)?.name;
+      if (name && !picByProject.has(row.project_id)) picByProject.set(row.project_id, name);
     }
   }
 
@@ -120,6 +134,7 @@ export default async function ProjectsPage() {
               <th className="px-4 py-3">Periode</th>
               <th className="px-4 py-3">Target GMV</th>
               <th className="px-4 py-3">Target Creator</th>
+              <th className="px-4 py-3">PIC</th>
               <th className="px-4 py-3">Ads Cap</th>
               <th className="px-4 py-3">Status</th>
               <th className="px-4 py-3">Achievement</th>
@@ -150,6 +165,7 @@ export default async function ProjectsPage() {
                       `${participantCounts.get(p.id) ?? 0}`
                     )}
                   </td>
+                  <td className="px-4 py-2">{picByProject.get(p.id) ?? "—"}</td>
                   <td className="px-4 py-2">{rupiah(p.ads_budget_cap)}</td>
                   <td className="px-4 py-2">
                     <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${STATUS_STYLES[p.status] ?? ""}`}>
@@ -166,7 +182,7 @@ export default async function ProjectsPage() {
             })}
             {(projects ?? []).length === 0 && (
               <tr>
-                <td colSpan={7} className="px-4 py-6 text-center text-slate-400">Belum ada project.</td>
+                <td colSpan={8} className="px-4 py-6 text-center text-slate-400">Belum ada project.</td>
               </tr>
             )}
           </tbody>
