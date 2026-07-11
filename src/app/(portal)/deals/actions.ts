@@ -60,6 +60,125 @@ export interface DealFormState {
   fieldErrors?: Record<string, string>;
 }
 
+/**
+ * Edit Deal schema ("incase ada salah input" — user decision): same shape as the
+ * registration form (komisi_*_min tetap wajib, bisa diedit), tapi campaign_type di
+ * sini menerima 7 nilai (4 baru + 3 lama) supaya baris lama bisa disimpan ulang tanpa
+ * dipaksa ganti tipe (lihat supabase/migrations/0024_campaign_types.sql).
+ */
+const dealEditSchema = dealFormSchema.extend({
+  id: z.string().min(1, "Deal ID wajib"),
+  campaign_type: z
+    .enum([
+      "paid_endorsement", "bulking_ads_endorse", "bulking_ads", "cps",
+      "paid", "sample", "extra_commission",
+    ])
+    .default("paid_endorsement"),
+});
+
+export async function updateDeal(
+  _prev: DealFormState | null,
+  formData: FormData
+): Promise<DealFormState> {
+  const actor = await requirePermission("deals.register");
+
+  const parsed = dealEditSchema.safeParse(Object.fromEntries(formData.entries()));
+  if (!parsed.success) {
+    const fieldErrors: Record<string, string> = {};
+    for (const issue of parsed.error.issues) {
+      fieldErrors[String(issue.path[0])] = issue.message;
+    }
+    return { ok: false, message: "Periksa kembali isian form.", fieldErrors };
+  }
+  const d = parsed.data;
+
+  if (d.komisi_kreator_max != null && d.komisi_kreator_max < d.komisi_kreator_min) {
+    return { ok: false, message: "Komisi kreator max < min.", fieldErrors: { komisi_kreator_max: "Max harus ≥ min" } };
+  }
+  if (d.komisi_mea_max != null && d.komisi_mea_max < d.komisi_mea_min) {
+    return { ok: false, message: "Komisi MEA max < min.", fieldErrors: { komisi_mea_max: "Max harus ≥ min" } };
+  }
+
+  const supabase = await createClient();
+
+  const { data: existing } = await supabase.from("brand_deals").select("*").eq("id", d.id).maybeSingle();
+  if (!existing) {
+    return { ok: false, message: `Deal ${d.id} tidak ditemukan.` };
+  }
+
+  // shop_id unique among OTHER registered deals (bugfix target: exclude diri sendiri).
+  const { data: dupe } = await supabase
+    .from("brand_deals").select("id").eq("shop_id", d.shop_id).neq("id", d.id).maybeSingle();
+  if (dupe) {
+    return { ok: false, message: `Shop ID ${d.shop_id} sudah terdaftar di deal ${dupe.id}.`, fieldErrors: { shop_id: "Shop ID sudah dipakai" } };
+  }
+
+  const kreatorRaw = d.komisi_kreator_max != null && d.komisi_kreator_max !== d.komisi_kreator_min
+    ? `${d.komisi_kreator_min}-${d.komisi_kreator_max}%` : `${d.komisi_kreator_min}%`;
+  const meaRaw = d.komisi_mea_max != null && d.komisi_mea_max !== d.komisi_mea_min
+    ? `${d.komisi_mea_min}-${d.komisi_mea_max}%` : `${d.komisi_mea_min}%`;
+
+  const record = {
+    brand_name: d.brand_name.trim(),
+    shop_id: d.shop_id,
+    niche: d.niche.trim(),
+    exp_date: d.exp_date,
+    deal_end: d.exp_date, // deal_end = exp_date (BUILD_PLAN blocker resolution)
+    komisi_kreator_raw: kreatorRaw,
+    komisi_kreator_pct: d.komisi_kreator_min,
+    komisi_mea_raw: meaRaw,
+    komisi_mea_pct: d.komisi_mea_min,
+    pic_tap: d.pic_tap,
+    campaign_name: d.campaign_name.trim(),
+    brand_link: d.brand_link || null,
+    gmv_tap: d.gmv_tap ?? null,
+    avg_price: d.avg_price ?? null,
+    ads_budget: d.ads_budget || null,
+    service_fee: d.service_fee || null,
+    campaign_type: d.campaign_type,
+    notes: d.notes?.trim() || null,
+  };
+
+  // Update via user-scoped client so RLS enforces the deals_update role rule.
+  // RLS yang menolak TIDAK menghasilkan error (hanya 0 baris) — verifikasi via .select().
+  const { data: updated, error } = await supabase
+    .from("brand_deals").update(record).eq("id", d.id).select("id");
+  if (error) return { ok: false, message: `Gagal menyimpan perubahan: ${error.message}` };
+  if (!updated || updated.length === 0) {
+    return { ok: false, message: "Perubahan tidak tersimpan — akses edit deal ditolak kebijakan data." };
+  }
+
+  // Sync exp_date → cooperating_shops.deal_end for the M4 expiry alert (service write),
+  // same pattern as registerDeal.
+  const admin = createAdminClient();
+  const { error: shopError } = await admin.from("cooperating_shops").upsert(
+    {
+      shop_id: d.shop_id,
+      deal_id: d.id,
+      deal_end: d.exp_date,
+      active_flag: d.exp_date >= new Date().toISOString().slice(0, 10),
+    },
+    { onConflict: "shop_id" }
+  );
+
+  await writeAudit({
+    actorId: actor.id,
+    action: "brand_deal.update",
+    entityType: "brand_deals",
+    entityId: d.id,
+    before: existing,
+    after: { ...existing, ...record },
+    type: "auto", // edit deal → tetap ter-log (CLAUDE.md #2/#3)
+  });
+
+  revalidatePath("/deals");
+  revalidatePath(`/deals/${d.id}`);
+  return {
+    ok: true,
+    message: `Deal ${d.id} berhasil diupdate.${shopError ? ` Sync cooperating_shops gagal: ${shopError.message}.` : ""}`,
+  };
+}
+
 export async function registerDeal(
   _prev: DealFormState | null,
   formData: FormData
