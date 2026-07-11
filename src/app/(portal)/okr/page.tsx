@@ -12,7 +12,7 @@ import {
 } from "@/lib/m3/scoring";
 import { getHandsOnRatio } from "@/lib/m3/adapters";
 import { aggregateUsageHours, type MonthlyUsage } from "@/lib/m3/usage";
-import { getConfig } from "@/lib/config";
+import { getCachedConfig } from "@/lib/cached";
 
 export const dynamic = "force-dynamic";
 
@@ -42,7 +42,7 @@ export default async function OkrPage() {
 
   // ===== Wave 1: independent lookups =====
   const [windowDaysRaw, { data: krs }, { data: tiers }, { data: gatingPending }] = await Promise.all([
-    getConfig("m3.hands_on_window_days"),
+    getCachedConfig("m3.hands_on_window_days"),
     krQuery,
     supabase.from("reward_tiers").select("role, kr_achieved_count, reward_amount").order("kr_achieved_count"),
     supabase

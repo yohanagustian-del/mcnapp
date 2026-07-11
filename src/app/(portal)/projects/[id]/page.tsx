@@ -1,7 +1,7 @@
 import { notFound } from "next/navigation";
 import { requireMember, hasPermission } from "@/lib/rbac";
 import { createClient } from "@/lib/supabase/server";
-import { getConfig } from "@/lib/config";
+import { getCachedConfig } from "@/lib/cached";
 import { filterLiveActive, trackDaily, type CurveShape, type LiveActivityRow } from "@/lib/m7/tracking";
 import { addParticipant, assignManpower, setProjectStatus, updateProject, upsertCreatorMetric, upsertDailyMetric } from "../actions";
 
@@ -62,8 +62,8 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
       .eq("entity_id", String(projectId))
       .in("alert_type", ["project_rugi", "project_over_cap"])
       .eq("resolved", false),
-    getConfig<number>("m7.status_tolerance"),
-    getConfig<number>("m7.live_active_min"),
+    getCachedConfig<number>("m7.status_tolerance"),
+    getCachedConfig<number>("m7.live_active_min"),
     // Live-active helper (PRD §2.3): live GMV ≥ config over the recent ~1 month.
     // Module 0.5 Fase 2: creator_period_summary (satu baris per creator per
     // periode, kolom affiliate_live_gmv langsung) menggantikan platform_metrics_raw
