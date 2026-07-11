@@ -31,6 +31,10 @@ export default async function ProductsPage({
   const canUpload = hasPermission("products.upload_master", member.role);
 
   const { level2, segment, review } = await searchParams;
+  // Bug fix (2026-07-11): every needs_review=true row has price_segment NULL (flag muncul
+  // persis saat harga tak terbaca), jadi kombinasi review=1 + segment/level2 lama selalu 0
+  // baris. Mode review sekarang eksklusif — server mengabaikan level2/segment saat aktif.
+  const isReviewMode = review === "1";
 
   const supabase = await createClient();
   let query = supabase
@@ -41,11 +45,32 @@ export default async function ProductsPage({
     .order("last_seen", { ascending: false })
     .limit(500);
 
-  if (level2) query = query.ilike("level2_category", `%${level2}%`);
-  if (segment) query = query.eq("price_segment", segment);
-  if (review === "1") query = query.eq("needs_review", true);
+  let resultCountQuery = supabase.from("products_tap").select("product_id", { count: "exact", head: true });
 
-  const { data: products } = await query;
+  if (isReviewMode) {
+    query = query.eq("needs_review", true);
+    resultCountQuery = resultCountQuery.eq("needs_review", true);
+  } else {
+    if (level2) {
+      query = query.ilike("level2_category", `%${level2}%`);
+      resultCountQuery = resultCountQuery.ilike("level2_category", `%${level2}%`);
+    }
+    if (segment) {
+      query = query.eq("price_segment", segment);
+      resultCountQuery = resultCountQuery.eq("price_segment", segment);
+    }
+  }
+
+  const reviewCountQuery = supabase
+    .from("products_tap")
+    .select("product_id", { count: "exact", head: true })
+    .eq("needs_review", true);
+
+  const [{ data: products }, { count: resultCount }, { count: reviewCount }] = await Promise.all([
+    query,
+    resultCountQuery,
+    reviewCountQuery,
+  ]);
 
   const { data: categoryRows } = await supabase
     .from("products_tap")
@@ -53,6 +78,15 @@ export default async function ProductsPage({
     .not("level2_category", "is", null)
     .limit(1000);
   const categories = [...new Set((categoryRows ?? []).map((r) => r.level2_category).filter(Boolean))].sort();
+
+  const exportParams = new URLSearchParams();
+  if (isReviewMode) {
+    exportParams.set("review", "1");
+  } else {
+    if (level2) exportParams.set("level2", level2);
+    if (segment) exportParams.set("segment", segment);
+  }
+  const exportHref = `/products/export${exportParams.toString() ? `?${exportParams.toString()}` : ""}`;
 
   return (
     <div>
@@ -77,45 +111,82 @@ export default async function ProductsPage({
         </div>
       )}
 
-      <form className="mt-6 flex flex-wrap items-end gap-3 rounded-lg border border-slate-200 bg-white p-4" method="get">
-        <div>
-          <label className="block text-xs text-slate-500">Kategori (Level 2)</label>
-          <input
-            name="level2"
-            defaultValue={level2 ?? ""}
-            list="level2-options"
-            placeholder="cth: Skincare Serum"
-            className="mt-1 w-56 rounded-md border border-slate-200 px-2 py-1.5 text-sm"
-          />
-          <datalist id="level2-options">
-            {categories.map((c) => (
-              <option key={c} value={c ?? ""} />
-            ))}
-          </datalist>
-        </div>
-        <div>
-          <label className="block text-xs text-slate-500">Segmen Harga</label>
-          <select name="segment" defaultValue={segment ?? ""} className="mt-1 w-48 rounded-md border border-slate-200 px-2 py-1.5 text-sm">
-            <option value="">Semua segmen</option>
-            {Object.entries(SEGMENT_LABEL).map(([k, label]) => (
-              <option key={k} value={k}>{label}</option>
-            ))}
-          </select>
-        </div>
-        <label className="flex items-center gap-2 text-sm">
-          <input type="checkbox" name="review" value="1" defaultChecked={review === "1"} />
-          Perlu review saja
-        </label>
-        <button type="submit" className="rounded-md bg-slate-900 px-4 py-1.5 text-sm text-white hover:bg-slate-700">
-          Filter
-        </button>
-      </form>
+      <div className="mt-6 flex flex-wrap items-end gap-3">
+        <form className="flex flex-wrap items-end gap-3 rounded-lg border border-slate-200 bg-white p-4" method="get">
+          <div>
+            <label className="block text-xs text-slate-500">Kategori (Level 2)</label>
+            <input
+              name="level2"
+              defaultValue={isReviewMode ? "" : level2 ?? ""}
+              list="level2-options"
+              placeholder="cth: Skincare Serum"
+              disabled={isReviewMode}
+              className="mt-1 w-56 rounded-md border border-slate-200 px-2 py-1.5 text-sm disabled:bg-slate-50 disabled:text-slate-400"
+            />
+            <datalist id="level2-options">
+              {categories.map((c) => (
+                <option key={c} value={c ?? ""} />
+              ))}
+            </datalist>
+          </div>
+          <div>
+            <label className="block text-xs text-slate-500">Segmen Harga</label>
+            <select
+              name="segment"
+              defaultValue={isReviewMode ? "" : segment ?? ""}
+              disabled={isReviewMode}
+              className="mt-1 w-48 rounded-md border border-slate-200 px-2 py-1.5 text-sm disabled:bg-slate-50 disabled:text-slate-400"
+            >
+              <option value="">Semua segmen</option>
+              {Object.entries(SEGMENT_LABEL).map(([k, label]) => (
+                <option key={k} value={k}>{label}</option>
+              ))}
+            </select>
+          </div>
+          <button type="submit" className="rounded-md bg-slate-900 px-4 py-1.5 text-sm text-white hover:bg-slate-700">
+            Filter
+          </button>
+        </form>
 
-      <div className="mt-6 overflow-x-auto rounded-lg border border-slate-200 bg-white">
+        <div className="flex flex-col gap-1 rounded-lg border border-slate-200 bg-white p-4">
+          {isReviewMode ? (
+            <>
+              <span className="inline-flex w-fit items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-700">
+                Mode review aktif ({reviewCount ?? 0})
+              </span>
+              <p className="text-xs text-slate-500">Mode review: filter kategori &amp; segmen dinonaktifkan</p>
+              <a href="/products" className="w-fit text-xs font-medium text-slate-600 underline hover:text-slate-900">
+                Reset filter
+              </a>
+            </>
+          ) : (
+            <a
+              href="/products?review=1"
+              className="rounded-md border border-amber-300 bg-amber-50 px-3 py-1.5 text-sm font-medium text-amber-700 hover:bg-amber-100"
+            >
+              Perlu review saja ({reviewCount ?? 0})
+            </a>
+          )}
+        </div>
+
+        <a
+          href={exportHref}
+          className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50"
+        >
+          Download CSV
+        </a>
+      </div>
+
+      <p className="mt-4 text-sm text-slate-500">
+        Menampilkan {(products ?? []).length} dari {resultCount ?? 0} produk yang cocok.
+      </p>
+
+      <div className="mt-2 overflow-x-auto rounded-lg border border-slate-200 bg-white">
         <table className="min-w-full text-sm">
           <thead className="bg-slate-50 text-left text-xs uppercase text-slate-500">
             <tr>
-              <th className="px-3 py-3">Produk</th>
+              <th className="px-3 py-3">PID</th>
+              <th className="px-3 py-3">Nama Produk</th>
               <th className="px-3 py-3">Shop</th>
               <th className="px-3 py-3">Kategori L1/L2</th>
               <th className="px-3 py-3">Harga</th>
@@ -128,9 +199,9 @@ export default async function ProductsPage({
           <tbody className="divide-y divide-slate-100">
             {(products ?? []).map((p) => (
               <tr key={p.product_id} className={p.needs_review ? "bg-amber-50" : undefined}>
-                <td className={`${td} font-medium`}>
+                <td className={`${td} font-mono text-xs`}>{p.product_id}</td>
+                <td className={`${td} max-w-[220px] truncate font-medium`} title={p.product_name ?? p.product_id}>
                   {p.product_name ?? "—"}
-                  <span className="ml-1 font-mono text-[10px] text-slate-400">{p.product_id}</span>
                 </td>
                 <td className={td}>
                   {p.shop_name ?? "—"}
@@ -162,7 +233,7 @@ export default async function ProductsPage({
             ))}
             {(products ?? []).length === 0 && (
               <tr>
-                <td colSpan={8} className="px-4 py-6 text-center text-slate-400">
+                <td colSpan={9} className="px-4 py-6 text-center text-slate-400">
                   Belum ada produk TAP. Upload master list atau tunggu ingest mingguan.
                 </td>
               </tr>
