@@ -28,18 +28,32 @@ function contractRemaining(end: string | null): { label: string; danger: boolean
 
 const td = "px-3 py-2 whitespace-nowrap";
 
-export default async function CreatorsPage() {
+export default async function CreatorsPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ q?: string }>;
+}) {
   const member = await requireMember();
   const canUpload = hasPermission("creators.bulk_upload", member.role);
 
+  const { q: qParam } = await searchParams;
+  const q = qParam?.trim() ?? "";
+  // Bersihkan karakter yang memecah sintaks PostgREST .or() (koma/kurung) sebelum ilike.
+  const qSafe = q.replace(/[,()]/g, " ").trim();
+
   const supabase = await createClient();
-  const { data: creators } = await supabase
+  let query = supabase
     .from("creators")
     .select(
       "id, name, username, profile_link, phone, uid, followers, content_quality, join_date, domisili, jenis_creator, niche, top_niches, level, segment, gmv, gmv_live, gmv_video, platform, rc_live, rc_video, rate_card, commission_share, contract_end_date, status, tim_akuisisi, target_gmv_monthly, team_members(name)"
-    )
+    );
+  if (qSafe) {
+    query = query.or(`username.ilike.%${qSafe}%,name.ilike.%${qSafe}%`);
+  }
+  const { data: creators } = await query
     .order("created_at", { ascending: false })
     .limit(200);
+  const resultCount = (creators ?? []).length;
 
   return (
     <div>
@@ -62,7 +76,32 @@ export default async function CreatorsPage() {
         </div>
       )}
 
-      <div className="mt-6 overflow-x-auto rounded-lg border border-slate-200 bg-white">
+      <div className="mt-6 flex flex-wrap items-center gap-3">
+        <form method="get" className="flex items-center gap-2">
+          <input
+            name="q"
+            defaultValue={q}
+            placeholder="Cari username / nama creator…"
+            className="w-64 rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-slate-500 focus:outline-none"
+          />
+          <button
+            type="submit"
+            className="rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-700"
+          >
+            Cari
+          </button>
+        </form>
+        {q && (
+          <p className="text-sm text-slate-500">
+            {resultCount} hasil untuk &quot;{q}&quot; ·{" "}
+            <Link href="/creators" className="underline">
+              Reset
+            </Link>
+          </p>
+        )}
+      </div>
+
+      <div className="mt-4 overflow-x-auto rounded-lg border border-slate-200 bg-white">
         <table className="min-w-full text-sm">
           <thead className="bg-slate-50 text-left text-xs uppercase text-slate-500">
             <tr>

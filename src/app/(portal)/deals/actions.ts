@@ -15,6 +15,16 @@ import { parseFlexibleDate } from "@/lib/utils/date";
 import type { UploadReport } from "@/app/(portal)/tim/actions";
 
 /**
+ * Optional numeric field helper (bugfix): z.coerce.number() on an empty/whitespace
+ * string coerces to 0 instead of undefined, so a cleared "max" field silently became
+ * 0 and then failed the "max ≥ min" check — the form could never be saved once a user
+ * typed then cleared an optional number. Preprocess blank strings to undefined BEFORE
+ * coercion so "optional" actually means optional.
+ */
+const optionalNumber = (schema: z.ZodNumber) =>
+  z.preprocess((v) => (typeof v === "string" && v.trim() === "" ? undefined : v), schema.optional());
+
+/**
  * Deal Registration Form schema (CLAUDE.md #6 — strict validation, no dirty data):
  * shop_id numeric & unique; exp_date from date picker; komisi = clean numbers
  * (range handled as separate min/max); Rupiah fields = pure numbers.
@@ -25,18 +35,22 @@ const dealFormSchema = z.object({
   niche: z.string().min(1, "Niche wajib diisi"),
   exp_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Exp date wajib dari date picker"),
   komisi_kreator_min: z.coerce.number().min(0).max(100),
-  komisi_kreator_max: z.coerce.number().min(0).max(100).optional(),
+  komisi_kreator_max: optionalNumber(z.coerce.number().min(0).max(100)),
   komisi_mea_min: z.coerce.number().min(0).max(100),
-  komisi_mea_max: z.coerce.number().min(0).max(100).optional(),
-  pic_tap: z.string().uuid("PIC TAP wajib dipilih"),
+  komisi_mea_max: optionalNumber(z.coerce.number().min(0).max(100)),
+  pic_tap: z.string().uuid("PIC Campaign wajib dipilih"),
   campaign_name: z.string().min(1, "Campaign name wajib diisi"),
   brand_link: z.string().url().optional().or(z.literal("")),
-  gmv_tap: z.coerce.number().nonnegative().optional(),
-  avg_price: z.coerce.number().nonnegative().optional(),
-  ads_budget: z.coerce.number().nonnegative().optional(),
-  service_fee: z.coerce.number().nonnegative().optional(),
-  // Campaign sample & komisi extra = non-berbayar (QA feedback BizDev)
-  campaign_type: z.enum(["paid", "sample", "extra_commission"]).default("paid"),
+  gmv_tap: optionalNumber(z.coerce.number().nonnegative()),
+  avg_price: optionalNumber(z.coerce.number().nonnegative()),
+  ads_budget: optionalNumber(z.coerce.number().nonnegative()),
+  service_fee: optionalNumber(z.coerce.number().nonnegative()),
+  // 4 tipe campaign (form baru). Nilai lama paid/sample/extra_commission tetap tersimpan
+  // valid untuk baris lama di DB (lihat supabase/migrations/0024_campaign_types.sql) tapi
+  // tidak lagi bisa dipilih dari form ini.
+  campaign_type: z
+    .enum(["paid_endorsement", "bulking_ads_endorse", "bulking_ads", "cps"])
+    .default("paid_endorsement"),
   notes: z.string().optional(),
 });
 
@@ -44,6 +58,125 @@ export interface DealFormState {
   ok: boolean;
   message: string;
   fieldErrors?: Record<string, string>;
+}
+
+/**
+ * Edit Deal schema ("incase ada salah input" — user decision): same shape as the
+ * registration form (komisi_*_min tetap wajib, bisa diedit), tapi campaign_type di
+ * sini menerima 7 nilai (4 baru + 3 lama) supaya baris lama bisa disimpan ulang tanpa
+ * dipaksa ganti tipe (lihat supabase/migrations/0024_campaign_types.sql).
+ */
+const dealEditSchema = dealFormSchema.extend({
+  id: z.string().min(1, "Deal ID wajib"),
+  campaign_type: z
+    .enum([
+      "paid_endorsement", "bulking_ads_endorse", "bulking_ads", "cps",
+      "paid", "sample", "extra_commission",
+    ])
+    .default("paid_endorsement"),
+});
+
+export async function updateDeal(
+  _prev: DealFormState | null,
+  formData: FormData
+): Promise<DealFormState> {
+  const actor = await requirePermission("deals.register");
+
+  const parsed = dealEditSchema.safeParse(Object.fromEntries(formData.entries()));
+  if (!parsed.success) {
+    const fieldErrors: Record<string, string> = {};
+    for (const issue of parsed.error.issues) {
+      fieldErrors[String(issue.path[0])] = issue.message;
+    }
+    return { ok: false, message: "Periksa kembali isian form.", fieldErrors };
+  }
+  const d = parsed.data;
+
+  if (d.komisi_kreator_max != null && d.komisi_kreator_max < d.komisi_kreator_min) {
+    return { ok: false, message: "Komisi kreator max < min.", fieldErrors: { komisi_kreator_max: "Max harus ≥ min" } };
+  }
+  if (d.komisi_mea_max != null && d.komisi_mea_max < d.komisi_mea_min) {
+    return { ok: false, message: "Komisi MEA max < min.", fieldErrors: { komisi_mea_max: "Max harus ≥ min" } };
+  }
+
+  const supabase = await createClient();
+
+  const { data: existing } = await supabase.from("brand_deals").select("*").eq("id", d.id).maybeSingle();
+  if (!existing) {
+    return { ok: false, message: `Deal ${d.id} tidak ditemukan.` };
+  }
+
+  // shop_id unique among OTHER registered deals (bugfix target: exclude diri sendiri).
+  const { data: dupe } = await supabase
+    .from("brand_deals").select("id").eq("shop_id", d.shop_id).neq("id", d.id).maybeSingle();
+  if (dupe) {
+    return { ok: false, message: `Shop ID ${d.shop_id} sudah terdaftar di deal ${dupe.id}.`, fieldErrors: { shop_id: "Shop ID sudah dipakai" } };
+  }
+
+  const kreatorRaw = d.komisi_kreator_max != null && d.komisi_kreator_max !== d.komisi_kreator_min
+    ? `${d.komisi_kreator_min}-${d.komisi_kreator_max}%` : `${d.komisi_kreator_min}%`;
+  const meaRaw = d.komisi_mea_max != null && d.komisi_mea_max !== d.komisi_mea_min
+    ? `${d.komisi_mea_min}-${d.komisi_mea_max}%` : `${d.komisi_mea_min}%`;
+
+  const record = {
+    brand_name: d.brand_name.trim(),
+    shop_id: d.shop_id,
+    niche: d.niche.trim(),
+    exp_date: d.exp_date,
+    deal_end: d.exp_date, // deal_end = exp_date (BUILD_PLAN blocker resolution)
+    komisi_kreator_raw: kreatorRaw,
+    komisi_kreator_pct: d.komisi_kreator_min,
+    komisi_mea_raw: meaRaw,
+    komisi_mea_pct: d.komisi_mea_min,
+    pic_tap: d.pic_tap,
+    campaign_name: d.campaign_name.trim(),
+    brand_link: d.brand_link || null,
+    gmv_tap: d.gmv_tap ?? null,
+    avg_price: d.avg_price ?? null,
+    ads_budget: d.ads_budget || null,
+    service_fee: d.service_fee || null,
+    campaign_type: d.campaign_type,
+    notes: d.notes?.trim() || null,
+  };
+
+  // Update via user-scoped client so RLS enforces the deals_update role rule.
+  // RLS yang menolak TIDAK menghasilkan error (hanya 0 baris) — verifikasi via .select().
+  const { data: updated, error } = await supabase
+    .from("brand_deals").update(record).eq("id", d.id).select("id");
+  if (error) return { ok: false, message: `Gagal menyimpan perubahan: ${error.message}` };
+  if (!updated || updated.length === 0) {
+    return { ok: false, message: "Perubahan tidak tersimpan — akses edit deal ditolak kebijakan data." };
+  }
+
+  // Sync exp_date → cooperating_shops.deal_end for the M4 expiry alert (service write),
+  // same pattern as registerDeal.
+  const admin = createAdminClient();
+  const { error: shopError } = await admin.from("cooperating_shops").upsert(
+    {
+      shop_id: d.shop_id,
+      deal_id: d.id,
+      deal_end: d.exp_date,
+      active_flag: d.exp_date >= new Date().toISOString().slice(0, 10),
+    },
+    { onConflict: "shop_id" }
+  );
+
+  await writeAudit({
+    actorId: actor.id,
+    action: "brand_deal.update",
+    entityType: "brand_deals",
+    entityId: d.id,
+    before: existing,
+    after: { ...existing, ...record },
+    type: "auto", // edit deal → tetap ter-log (CLAUDE.md #2/#3)
+  });
+
+  revalidatePath("/deals");
+  revalidatePath(`/deals/${d.id}`);
+  return {
+    ok: true,
+    message: `Deal ${d.id} berhasil diupdate.${shopError ? ` Sync cooperating_shops gagal: ${shopError.message}.` : ""}`,
+  };
 }
 
 export async function registerDeal(

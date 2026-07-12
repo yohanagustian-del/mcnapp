@@ -1,9 +1,9 @@
 import { notFound } from "next/navigation";
 import { requireMember, hasPermission } from "@/lib/rbac";
 import { createClient } from "@/lib/supabase/server";
-import { getConfig } from "@/lib/config";
+import { getCachedConfig } from "@/lib/cached";
 import { filterLiveActive, trackDaily, type CurveShape, type LiveActivityRow } from "@/lib/m7/tracking";
-import { addParticipant, assignManpower, setProjectStatus, upsertCreatorMetric, upsertDailyMetric } from "../actions";
+import { addParticipant, assignManpower, setProjectStatus, updateProject, upsertCreatorMetric, upsertDailyMetric } from "../actions";
 
 const STATUS_LABELS: Record<string, string> = {
   on_track: "On-track", behind: "Behind", ahead: "Ahead",
@@ -25,32 +25,64 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
   const canMetrics = hasPermission("m7.metrics", member.role);
 
   const supabase = await createClient();
-  const { data: project } = await supabase
-    .from("special_projects")
-    .select("id, name, type, start_date, end_date, target_gmv, ads_budget_cap, target_creators, daily_target_curve, status, result_summary")
-    .eq("id", projectId)
-    .maybeSingle();
-  if (!project) notFound();
+  const monthAgo = new Date(Date.now() - 35 * 86400000).toISOString().slice(0, 10);
 
-  const [{ data: metrics }, { data: participants }, { data: manpower }, { data: alerts }, tolerance, liveMin] =
-    await Promise.all([
-      supabase.from("project_daily_metrics")
-        .select("date, gmv_actual, ads_spend, creator_commission, mea_revenue")
-        .eq("project_id", projectId).order("date"),
-      supabase.from("project_participants")
-        .select("creator_id, is_external, tiktok_binding_status, live_type, target_gmv, creators(name)")
-        .eq("project_id", projectId),
-      supabase.from("project_manpower")
-        .select("member_id, role, involvement, team_members(name)")
-        .eq("project_id", projectId),
-      supabase.from("platform_alerts")
-        .select("id, alert_type, message, created_at")
-        .eq("entity_id", String(projectId))
-        .in("alert_type", ["project_rugi", "project_over_cap"])
-        .eq("resolved", false),
-      getConfig<number>("m7.status_tolerance"),
-      getConfig<number>("m7.live_active_min"),
-    ]);
+  // ===== Wave 1: independent lookups =====
+  // None of these depend on `project`'s data (only on projectId, which is
+  // already known), on each other, or on `canManage`/`monthAgo` beyond their
+  // own inputs — so all fetch in parallel. `project` itself is included since
+  // nothing here needs its columns yet; the notFound() gate just runs after.
+  const [
+    { data: project },
+    { data: metrics },
+    { data: participants },
+    { data: manpower },
+    { data: alerts },
+    tolerance,
+    liveMin,
+    { data: liveSummaryRows },
+    { data: teamMembers },
+    { data: creatorMetricRows },
+  ] = await Promise.all([
+    supabase.from("special_projects")
+      .select("id, name, type, start_date, end_date, target_gmv, ads_budget_cap, target_creators, daily_target_curve, status, result_summary")
+      .eq("id", projectId)
+      .maybeSingle(),
+    supabase.from("project_daily_metrics")
+      .select("date, gmv_actual, ads_spend, creator_commission, mea_revenue")
+      .eq("project_id", projectId).order("date"),
+    supabase.from("project_participants")
+      .select("creator_id, is_external, tiktok_binding_status, live_type, target_gmv, creators(name)")
+      .eq("project_id", projectId),
+    supabase.from("project_manpower")
+      .select("member_id, role, involvement, team_members(name)")
+      .eq("project_id", projectId),
+    supabase.from("platform_alerts")
+      .select("id, alert_type, message, created_at")
+      .eq("entity_id", String(projectId))
+      .in("alert_type", ["project_rugi", "project_over_cap"])
+      .eq("resolved", false),
+    getCachedConfig<number>("m7.status_tolerance"),
+    getCachedConfig<number>("m7.live_active_min"),
+    // Live-active helper (PRD §2.3): live GMV ≥ config over the recent ~1 month.
+    // Module 0.5 Fase 2: creator_period_summary (satu baris per creator per
+    // periode, kolom affiliate_live_gmv langsung) menggantikan platform_metrics_raw
+    // per-hari; dipetakan ke bentuk LiveActivityRow yang sama agar filterLiveActive
+    // tidak perlu implementasi kedua (CLAUDE.md: satu sumber kebenaran).
+    supabase.from("creator_period_summary")
+      .select("creator_id, affiliate_live_gmv")
+      .gte("period_start", monthAgo)
+      .limit(1000),
+    canManage
+      ? supabase.from("team_members").select("id, name, role").eq("active", true).order("name").limit(200)
+      : Promise.resolve({ data: [] as { id: string; name: string; role: string }[] }),
+    // Performa per kreator: sum GMV dari project_creator_metrics per peserta.
+    supabase.from("project_creator_metrics")
+      .select("creator_id, gmv_actual, items_sold")
+      .eq("project_id", projectId),
+  ]);
+
+  if (!project) notFound();
 
   const shape = ((project.daily_target_curve as { shape?: CurveShape } | null)?.shape ?? "ramp") as CurveShape;
   const today = new Date().toISOString().slice(0, 10);
@@ -63,36 +95,18 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
   const cumMea = (metrics ?? []).reduce((s, m) => s + Number(m.mea_revenue ?? 0), 0);
   const cumKomisiCreator = (metrics ?? []).reduce((s, m) => s + Number(m.creator_commission ?? 0), 0);
 
-  // Live-active helper (PRD §2.3): live GMV ≥ config over the recent ~1 month.
-  // Module 0.5 Fase 2: creator_period_summary (satu baris per creator per
-  // periode, kolom affiliate_live_gmv langsung) menggantikan platform_metrics_raw
-  // per-hari; dipetakan ke bentuk LiveActivityRow yang sama agar filterLiveActive
-  // tidak perlu implementasi kedua (CLAUDE.md: satu sumber kebenaran).
-  const monthAgo = new Date(Date.now() - 35 * 86400000).toISOString().slice(0, 10);
-  const { data: liveSummaryRows } = await supabase
-    .from("creator_period_summary")
-    .select("creator_id, affiliate_live_gmv")
-    .gte("period_start", monthAgo)
-    .limit(1000);
   const liveRows: LiveActivityRow[] = (liveSummaryRows ?? []).map((r) => ({
     creator_id: r.creator_id, metric: "affiliate_live_gmv", value: r.affiliate_live_gmv,
   }));
   const liveActive = filterLiveActive(liveRows, liveMin);
   const participantIds = new Set((participants ?? []).map((p) => p.creator_id));
   const liveActiveIds = [...liveActive.keys()].filter((cid) => !participantIds.has(cid)).slice(0, 30);
+
+  // ===== Wave 2: depends on wave-1 results (participants + liveActive) =====
   const { data: liveActiveCreators } = liveActiveIds.length
     ? await supabase.from("creators").select("id, name").in("id", liveActiveIds)
     : { data: [] as { id: string; name: string }[] };
 
-  const { data: teamMembers } = canManage
-    ? await supabase.from("team_members").select("id, name, role").eq("active", true).order("name").limit(200)
-    : { data: [] as { id: string; name: string; role: string }[] };
-
-  // Performa per kreator: sum GMV dari project_creator_metrics per peserta.
-  const { data: creatorMetricRows } = await supabase
-    .from("project_creator_metrics")
-    .select("creator_id, gmv_actual, items_sold")
-    .eq("project_id", projectId);
   const creatorGmv = new Map<string, { gmv: number; items: number }>();
   for (const r of creatorMetricRows ?? []) {
     const cur = creatorGmv.get(r.creator_id) ?? { gmv: 0, items: 0 };
@@ -129,6 +143,39 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
             </button>
           )}
         </form>
+      )}
+
+      {canManage && (
+        <details className="mt-3 rounded-lg border border-slate-200 bg-white p-4">
+          <summary className="cursor-pointer text-sm font-medium">Edit Project</summary>
+          <form action={updateProject} className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            <input type="hidden" name="project_id" value={project.id} />
+            <input name="name" required defaultValue={project.name} placeholder="Nama project"
+              className="rounded-md border border-slate-300 px-3 py-2 text-sm" />
+            <input name="type" defaultValue={project.type ?? ""} placeholder="Tipe (showcase/bootcamp/China trip)"
+              className="rounded-md border border-slate-300 px-3 py-2 text-sm" />
+            <label className="flex items-center gap-2 text-xs text-slate-500">
+              Mulai
+              <input type="date" name="start_date" required defaultValue={project.start_date}
+                className="flex-1 rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-900" />
+            </label>
+            <label className="flex items-center gap-2 text-xs text-slate-500">
+              Selesai
+              <input type="date" name="end_date" required defaultValue={project.end_date}
+                className="flex-1 rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-900" />
+            </label>
+            <input name="target_gmv" required defaultValue={String(project.target_gmv ?? "")} placeholder="Target GMV (Rp)"
+              className="rounded-md border border-slate-300 px-3 py-2 text-sm" />
+            <input name="target_creators" type="number" min="1" defaultValue={project.target_creators ?? ""} placeholder="Target jumlah creator"
+              className="rounded-md border border-slate-300 px-3 py-2 text-sm" />
+            <input name="ads_budget_cap" defaultValue={project.ads_budget_cap === null ? "" : String(project.ads_budget_cap)} placeholder="Ads budget cap (Rp, opsional)"
+              className="rounded-md border border-slate-300 px-3 py-2 text-sm" />
+            <button type="submit"
+              className="rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-700">
+              Simpan Perubahan
+            </button>
+          </form>
+        </details>
       )}
 
       {(alerts ?? []).length > 0 && (
@@ -395,8 +442,11 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
                   <option key={t.id} value={t.id}>{t.name} ({t.role})</option>
                 ))}
               </select>
-              <input name="role" placeholder="Peran di project (mis. Campaign Ops)"
-                className="rounded-md border border-slate-300 px-3 py-2" />
+              <select name="role" required defaultValue="" className="rounded-md border border-slate-300 px-3 py-2">
+                <option value="" disabled>— Pilih peran —</option>
+                <option value="PIC">PIC</option>
+                <option value="Anggota">Anggota</option>
+              </select>
               <input name="involvement" placeholder="Porsi keterlibatan (mis. 50%)"
                 className="rounded-md border border-slate-300 px-3 py-2" />
               <button type="submit"
@@ -415,15 +465,23 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {(manpower ?? []).map((m) => (
-                  <tr key={m.member_id}>
-                    <td className="px-4 py-2 font-medium">
-                      {(m.team_members as unknown as { name: string } | null)?.name ?? m.member_id}
-                    </td>
-                    <td className="px-4 py-2">{m.role ?? "—"}</td>
-                    <td className="px-4 py-2">{m.involvement ?? "—"}</td>
-                  </tr>
-                ))}
+                {[...(manpower ?? [])]
+                  .sort((a, b) => (a.role === "PIC" ? -1 : 0) - (b.role === "PIC" ? -1 : 0))
+                  .map((m) => (
+                    <tr key={m.member_id}>
+                      <td className="px-4 py-2 font-medium">
+                        {(m.team_members as unknown as { name: string } | null)?.name ?? m.member_id}
+                      </td>
+                      <td className="px-4 py-2">
+                        {m.role === "PIC" ? (
+                          <span className="rounded-full bg-slate-900 px-2 py-0.5 text-xs font-medium text-white">PIC</span>
+                        ) : m.role ? (
+                          <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-600">{m.role}</span>
+                        ) : "—"}
+                      </td>
+                      <td className="px-4 py-2">{m.involvement ?? "—"}</td>
+                    </tr>
+                  ))}
                 {(manpower ?? []).length === 0 && (
                   <tr><td colSpan={3} className="px-4 py-6 text-center text-slate-400">Belum ada man power.</td></tr>
                 )}

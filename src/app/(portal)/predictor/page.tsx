@@ -7,22 +7,24 @@ export default async function PredictorPage() {
   const canRun = hasPermission("m6.run", member.role);
 
   const supabase = await createClient();
-  // Distinct Level 2 categories for the datalist helper — Module 0.5 Fase 2:
-  // creator_subcat_segment_gmv (transactions_all is dropped after ingest,
-  // §2.7, so it would go stale/empty as the source for this list).
-  const { data: catRows } = await supabase
-    .from("creator_subcat_segment_gmv")
-    .select("level2_category")
-    .not("level2_category", "is", null)
-    .order("level2_category")
-    .limit(1000);
+  // ===== Wave 1: independent lookups =====
+  const [{ data: catRows }, { data: runs }] = await Promise.all([
+    // Distinct Level 2 categories for the datalist helper — Module 0.5 Fase 2:
+    // creator_subcat_segment_gmv (transactions_all is dropped after ingest,
+    // §2.7, so it would go stale/empty as the source for this list).
+    supabase
+      .from("creator_subcat_segment_gmv")
+      .select("level2_category")
+      .not("level2_category", "is", null)
+      .order("level2_category")
+      .limit(1000),
+    supabase
+      .from("deal_projections")
+      .select("id, input, result, created_at")
+      .order("created_at", { ascending: false })
+      .limit(10),
+  ]);
   const subCategories = [...new Set((catRows ?? []).map((r) => r.level2_category as string))];
-
-  const { data: runs } = await supabase
-    .from("deal_projections")
-    .select("id, input, result, created_at")
-    .order("created_at", { ascending: false })
-    .limit(10);
 
   const rupiah = (n: number) => `Rp${Math.round(n).toLocaleString("id-ID")}`;
 

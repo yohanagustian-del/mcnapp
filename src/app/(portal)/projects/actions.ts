@@ -65,6 +65,57 @@ export async function createProject(formData: FormData): Promise<void> {
   revalidatePath("/projects");
 }
 
+/**
+ * Edit project fields (user request "tambahkan fitur edit"). Status TIDAK diubah lewat sini —
+ * transisi status tetap lewat setProjectStatus (transition engine, CLAUDE.md #2).
+ */
+export async function updateProject(formData: FormData): Promise<void> {
+  const actor = await requirePermission("m7.manage");
+  const projectId = Number(formData.get("project_id"));
+  if (!Number.isInteger(projectId)) throw new Error("Project tidak valid");
+
+  const name = String(formData.get("name") ?? "").trim();
+  const type = String(formData.get("type") ?? "").trim() || null;
+  const startDate = String(formData.get("start_date") ?? "");
+  const endDate = String(formData.get("end_date") ?? "");
+  const targetGmv = parseRupiah(String(formData.get("target_gmv") ?? ""));
+  const adsCap = parseRupiah(String(formData.get("ads_budget_cap") ?? ""));
+  const targetCreatorsRaw = String(formData.get("target_creators") ?? "").trim();
+  const targetCreators = targetCreatorsRaw ? Number(targetCreatorsRaw) : null;
+  if (targetCreators !== null && (!Number.isInteger(targetCreators) || targetCreators < 1)) {
+    throw new Error("Target creator harus bilangan bulat ≥ 1");
+  }
+
+  if (!name) throw new Error("Nama project wajib diisi");
+  if (!isIsoDate(startDate) || !isIsoDate(endDate) || endDate < startDate) {
+    throw new Error("Periode project tidak valid (start ≤ end)");
+  }
+  if (targetGmv === null || targetGmv <= 0) throw new Error("Target GMV wajib diisi");
+
+  const admin = createAdminClient();
+  const { data: existing, error: fetchError } = await admin
+    .from("special_projects")
+    .select("name, type, start_date, end_date, target_gmv, ads_budget_cap, target_creators")
+    .eq("id", projectId)
+    .single();
+  if (fetchError || !existing) throw new Error("Project tidak ditemukan");
+
+  const patch = {
+    name, type, start_date: startDate, end_date: endDate,
+    target_gmv: targetGmv, ads_budget_cap: adsCap, target_creators: targetCreators,
+  };
+  const { error } = await admin.from("special_projects").update(patch).eq("id", projectId);
+  if (error) throw new Error(`Gagal menyimpan perubahan project: ${error.message}`);
+
+  await writeAudit({
+    actorId: actor.id, action: "m7.update_project", entityType: "special_projects",
+    entityId: String(projectId), before: existing, after: patch,
+    type: "auto",
+  });
+  revalidatePath("/projects");
+  revalidatePath(`/projects/${projectId}`);
+}
+
 /** Status transition planning → aktif → selesai; closing stores the result summary (PRD §2.6). */
 export async function setProjectStatus(formData: FormData): Promise<void> {
   const actor = await requirePermission("m7.manage");
@@ -209,14 +260,16 @@ export async function upsertCreatorMetric(formData: FormData): Promise<void> {
   revalidatePath(`/projects/${projectId}`);
 }
 
-/** Assign man power in-charge (PRD §2.5) + audit. */
+/** Assign man power in-charge (PRD §2.5) + audit. Role: PIC (penanggung jawab) atau Anggota. */
 export async function assignManpower(formData: FormData): Promise<void> {
   const actor = await requirePermission("m7.manage");
   const projectId = Number(formData.get("project_id"));
   const memberId = String(formData.get("member_id") ?? "").trim();
-  const role = String(formData.get("role") ?? "").trim() || null;
+  const roleRaw = String(formData.get("role") ?? "").trim();
+  const role = roleRaw === "PIC" ? "PIC" : roleRaw === "Anggota" ? "Anggota" : null;
   const involvement = String(formData.get("involvement") ?? "").trim() || null;
   if (!projectId || !memberId) throw new Error("Project & anggota tim wajib dipilih");
+  if (!role) throw new Error("Peran wajib dipilih (PIC/Anggota)");
 
   const admin = createAdminClient();
   const { error } = await admin.from("project_manpower").upsert(

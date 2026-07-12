@@ -9,13 +9,14 @@ export default async function RetentionAdminPage() {
   if (!["director", "head", "spv", "od_viewer"].includes(member.role)) redirect("/dashboard");
   const admin = createAdminClient();
 
-  const { data: health } = await admin
-    .from("db_table_health_v").select("table_name, total_size, approx_rows");
-  const { data: cfg } = await admin
-    .from("app_config").select("key, value").like("key", "retention.%");
-  const { data: lastPurge } = await admin
-    .from("audit_logs").select("created_at, after")
-    .eq("action", "m12.purge_recorded").order("created_at", { ascending: false }).limit(1).maybeSingle();
+  // ===== Wave 1: independent lookups =====
+  const [{ data: health }, { data: cfg }, { data: lastPurge }] = await Promise.all([
+    admin.from("db_table_health_v").select("table_name, total_size, approx_rows"),
+    admin.from("app_config").select("key, value").like("key", "retention.%"),
+    admin
+      .from("audit_logs").select("created_at, after")
+      .eq("action", "m12.purge_recorded").order("created_at", { ascending: false }).limit(1).maybeSingle(),
+  ]);
 
   const configMap = new Map((cfg ?? []).map((c) => [c.key, JSON.stringify(c.value)]));
   const canConfig = hasPermission("m12.set_policy", member.role);

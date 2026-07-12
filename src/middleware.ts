@@ -1,5 +1,5 @@
 import { createServerClient } from "@supabase/ssr";
-import { NextResponse, type NextRequest } from "next/server";
+import { after, NextResponse, type NextRequest } from "next/server";
 
 /**
  * Session refresh + auth gate. Role-level checks happen server-side in
@@ -41,7 +41,7 @@ export async function middleware(request: NextRequest) {
   }
 
   // Log adopsi sistem (M3/QA): page-view per user → tool_usage_logs (RLS: insert own).
-  // Await singkat; kegagalan log tidak boleh mengganggu request (catch → abaikan).
+  // Non-blocking via after() — halaman tidak menunggu penulisan log selesai; kegagalan diabaikan.
   if (
     user &&
     !isPublic &&
@@ -50,13 +50,15 @@ export async function middleware(request: NextRequest) {
     request.headers.get("next-router-prefetch") === null &&
     (request.headers.get("accept") ?? "").includes("text/html")
   ) {
-    try {
-      await supabase
-        .from("tool_usage_logs")
-        .insert({ member_id: user.id, path: request.nextUrl.pathname });
-    } catch {
-      // ignore — usage log is best-effort
-    }
+    after(async () => {
+      try {
+        await supabase
+          .from("tool_usage_logs")
+          .insert({ member_id: user.id, path: request.nextUrl.pathname });
+      } catch {
+        // abaikan — usage log adalah best-effort
+      }
+    });
   }
 
   return supabaseResponse;

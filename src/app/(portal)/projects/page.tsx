@@ -20,44 +20,61 @@ export default async function ProjectsPage() {
   const canDecideJoin = hasPermission("m9.project_join_decide", member.role);
 
   const supabase = await createClient();
-  const { data: projects } = await supabase
-    .from("special_projects")
-    .select("id, name, type, start_date, end_date, target_gmv, ads_budget_cap, target_creators, status, result_summary")
-    .order("start_date", { ascending: false })
-    .limit(100);
 
+  // ===== Wave 1: independent lookups =====
   // Pending creator join requests across all projects (M9 §2.6): platform surfaces every
-  // request, but the accept/reject decision is a human PM/lead call.
-  let joinRequestRows: JoinRequestRow[] = [];
-  if (canDecideJoin) {
-    // No RLS policy grants team_members read access on project_join_requests (only
-    // is_creator_user() self-read exists) — service-role client is required here.
-    const admin = createAdminClient();
-    const { data: pendingRequests } = await admin
-      .from("project_join_requests")
-      .select("id, project_id, creator_id, created_at, special_projects(name), creators(name)")
-      .eq("status", "diajukan")
-      .order("created_at", { ascending: true })
-      .limit(100);
-    joinRequestRows = (pendingRequests ?? []).map((r) => ({
-      id: r.id,
-      projectId: r.project_id,
-      projectName: (r.special_projects as unknown as { name: string } | null)?.name ?? `#${r.project_id}`,
-      creatorId: r.creator_id,
-      creatorName: (r.creators as unknown as { name: string } | null)?.name ?? r.creator_id,
-      createdAt: r.created_at,
-    }));
-  }
+  // request, but the accept/reject decision is a human PM/lead call. Independent of `projects`.
+  // No RLS policy grants team_members read access on project_join_requests (only
+  // is_creator_user() self-read exists) — service-role client is required for that read,
+  // constructed only when canDecideJoin (createAdminClient throws without the key).
+  const [{ data: projects }, { data: pendingRequests }] = await Promise.all([
+    supabase
+      .from("special_projects")
+      .select("id, name, type, start_date, end_date, target_gmv, ads_budget_cap, target_creators, status, result_summary")
+      .order("start_date", { ascending: false })
+      .limit(100),
+    canDecideJoin
+      ? createAdminClient()
+          .from("project_join_requests")
+          .select("id, project_id, creator_id, created_at, special_projects(name), creators(name)")
+          .eq("status", "diajukan")
+          .order("created_at", { ascending: true })
+          .limit(100)
+      : Promise.resolve({ data: null }),
+  ]);
+
+  const joinRequestRows: JoinRequestRow[] = (pendingRequests ?? []).map((r) => ({
+    id: r.id,
+    projectId: r.project_id,
+    projectName: (r.special_projects as unknown as { name: string } | null)?.name ?? `#${r.project_id}`,
+    creatorId: r.creator_id,
+    creatorName: (r.creators as unknown as { name: string } | null)?.name ?? r.creator_id,
+    createdAt: r.created_at,
+  }));
 
   // Jumlah peserta aktual per project (vs target_creators)
   const participantCounts = new Map<number, number>();
+  // PIC per project (man power dengan role='PIC') — satu query .in() untuk semua project, no N+1.
+  const picByProject = new Map<number, string>();
   if ((projects ?? []).length > 0) {
-    const { data: parts } = await supabase
-      .from("project_participants")
-      .select("project_id")
-      .in("project_id", (projects ?? []).map((p) => p.id));
+    const projectIds = (projects ?? []).map((p) => p.id);
+    const [{ data: parts }, { data: picRows }] = await Promise.all([
+      supabase
+        .from("project_participants")
+        .select("project_id")
+        .in("project_id", projectIds),
+      supabase
+        .from("project_manpower")
+        .select("project_id, team_members(name)")
+        .in("project_id", projectIds)
+        .eq("role", "PIC"),
+    ]);
     for (const pt of parts ?? []) {
       participantCounts.set(pt.project_id, (participantCounts.get(pt.project_id) ?? 0) + 1);
+    }
+    for (const row of picRows ?? []) {
+      const name = (row.team_members as unknown as { name: string } | null)?.name;
+      if (name && !picByProject.has(row.project_id)) picByProject.set(row.project_id, name);
     }
   }
 
@@ -120,6 +137,7 @@ export default async function ProjectsPage() {
               <th className="px-4 py-3">Periode</th>
               <th className="px-4 py-3">Target GMV</th>
               <th className="px-4 py-3">Target Creator</th>
+              <th className="px-4 py-3">PIC</th>
               <th className="px-4 py-3">Ads Cap</th>
               <th className="px-4 py-3">Status</th>
               <th className="px-4 py-3">Achievement</th>
@@ -150,6 +168,7 @@ export default async function ProjectsPage() {
                       `${participantCounts.get(p.id) ?? 0}`
                     )}
                   </td>
+                  <td className="px-4 py-2">{picByProject.get(p.id) ?? "—"}</td>
                   <td className="px-4 py-2">{rupiah(p.ads_budget_cap)}</td>
                   <td className="px-4 py-2">
                     <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${STATUS_STYLES[p.status] ?? ""}`}>
@@ -166,7 +185,7 @@ export default async function ProjectsPage() {
             })}
             {(projects ?? []).length === 0 && (
               <tr>
-                <td colSpan={7} className="px-4 py-6 text-center text-slate-400">Belum ada project.</td>
+                <td colSpan={8} className="px-4 py-6 text-center text-slate-400">Belum ada project.</td>
               </tr>
             )}
           </tbody>

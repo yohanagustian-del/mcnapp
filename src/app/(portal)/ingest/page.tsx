@@ -93,21 +93,23 @@ export default async function IngestPage() {
   const canUploadLeak = hasPermission("leak.upload_artifact", member.role);
 
   const supabase = await createClient();
-  const { data: batches } = await supabase
-    .from("upload_batches")
-    .select("batch_id, source_type, uploaded_at, row_count_raw, creators_count, period_start, period_end, status, processed_at, error")
-    .order("uploaded_at", { ascending: false })
-    .limit(20);
-
-  // Kalender cakupan minggu: pola query sama (upload_batches, service via RLS
-  // select-all policy), diurutkan by period_start supaya bulan-bulan dengan
-  // data historis (bukan cuma 20 upload terakhir) ikut terhitung.
-  const { data: calendarBatches } = await supabase
-    .from("upload_batches")
-    .select("period_start, period_end, status")
-    .not("period_start", "is", null)
-    .order("period_start", { ascending: false })
-    .limit(500);
+  // ===== Wave 1: independent lookups =====
+  const [{ data: batches }, { data: calendarBatches }] = await Promise.all([
+    supabase
+      .from("upload_batches")
+      .select("batch_id, source_type, uploaded_at, row_count_raw, creators_count, period_start, period_end, status, processed_at, error")
+      .order("uploaded_at", { ascending: false })
+      .limit(20),
+    // Kalender cakupan minggu: pola query sama (upload_batches, service via RLS
+    // select-all policy), diurutkan by period_start supaya bulan-bulan dengan
+    // data historis (bukan cuma 20 upload terakhir) ikut terhitung.
+    supabase
+      .from("upload_batches")
+      .select("period_start, period_end, status")
+      .not("period_start", "is", null)
+      .order("period_start", { ascending: false })
+      .limit(500),
+  ]);
   const weekCalendar = buildWeekCalendar(calendarBatches ?? [], 3);
 
   return (

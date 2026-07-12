@@ -12,15 +12,17 @@ export default async function AdsWorkspacePage() {
   const member = await requireMember();
   const admin = createAdminClient();
 
-  const { data: briefs } = await admin
-    .from("ads_briefs")
-    .select("id, source, creator_id, deal_id, objective, budget_requested, status, assigned_to")
-    .order("created_at", { ascending: false }).limit(50);
-
-  const { data: results } = await admin
-    .from("ads_campaign_results")
-    .select("id, brief_id, period, ads_spent, gmv, roas, flagged, status")
-    .order("period", { ascending: false }).limit(50);
+  // ===== Wave 1: independent lookups =====
+  const [{ data: briefs }, { data: results }] = await Promise.all([
+    admin
+      .from("ads_briefs")
+      .select("id, source, creator_id, deal_id, objective, budget_requested, status, assigned_to")
+      .order("created_at", { ascending: false }).limit(50),
+    admin
+      .from("ads_campaign_results")
+      .select("id, brief_id, period, ads_spent, gmv, roas, flagged, status")
+      .order("period", { ascending: false }).limit(50),
+  ]);
 
   const canApprove = hasPermission("m10.budget_approve", member.role);
   const canExecute = hasPermission("m10.brief_execute", member.role);

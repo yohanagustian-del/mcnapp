@@ -4,18 +4,25 @@ import { createClient } from "@/lib/supabase/server";
 import { CsvUploadForm } from "@/components/csv-upload-form";
 import { uploadDealProducts } from "../actions";
 import { DealForm } from "./deal-form";
+import { getCachedNicheOptions } from "@/lib/cached";
 
 export default async function DealBaruPage() {
   const member = await requireMember();
   if (!hasPermission("deals.register", member.role)) redirect("/deals");
 
   const supabase = await createClient();
-  const { data: picOptions } = await supabase
-    .from("team_members")
-    .select("id, name")
-    .eq("active", true)
-    .in("team_group", ["bizdev", "management"])
-    .order("name");
+
+  // Kandidat niche untuk datalist search: union distinct brand_deals.niche &
+  // products_tap.level2_category (pola sama dengan filter kategori di /products).
+  const [{ data: picOptions }, nicheOptions] = await Promise.all([
+    supabase
+      .from("team_members")
+      .select("id, name")
+      .eq("active", true)
+      .in("team_group", ["bizdev", "management"])
+      .order("name"),
+    getCachedNicheOptions(),
+  ]);
 
   return (
     <div>
@@ -26,7 +33,7 @@ export default async function DealBaruPage() {
         cooperating_shops untuk alert kadaluarsa M4.
       </p>
       <div className="mt-6">
-        <DealForm picOptions={picOptions ?? []} />
+        <DealForm picOptions={picOptions ?? []} nicheOptions={nicheOptions} />
       </div>
 
       <h2 className="mt-10 text-lg font-semibold">Upload Produk via Excel</h2>

@@ -4,10 +4,23 @@ import { requireMember, canAccessNav, hasPermission, NAV_ITEMS } from "@/lib/rba
 import { createClient } from "@/lib/supabase/server";
 import { CsvUploadForm } from "@/components/csv-upload-form";
 import { addDealSession, uploadDealSessions, uploadCreatorProposals } from "./report-actions";
+import { EditDealForm } from "./edit-deal-form";
 
 function formatRp(v: number | null | undefined): string {
   return v ? `Rp${Number(v).toLocaleString("id-ID")}` : "—";
 }
+
+// Tipe campaign: 4 pilihan baru + 3 nilai lama yang tetap tersimpan di baris lama
+// (supabase/migrations/0024_campaign_types.sql — nilai lama tidak dimigrasikan).
+const CAMPAIGN_TYPE_LABEL: Record<string, string> = {
+  paid_endorsement: "Paid / Endorsement",
+  bulking_ads_endorse: "Bulking Ads & Endorse",
+  bulking_ads: "Bulking Ads",
+  cps: "CPS (Sample, Voucher, Ads) — bertahap",
+  paid: "Paid (lama)",
+  sample: "Sample (non-berbayar, lama)",
+  extra_commission: "Komisi Extra (non-berbayar, lama)",
+};
 
 const input = "rounded-md border border-slate-300 px-3 py-2 text-sm";
 
@@ -23,21 +36,38 @@ export default async function DealDetailPage({
   const navItem = NAV_ITEMS.find((n) => n.href === "/deals")!;
   if (!canAccessNav(navItem, member.role)) redirect("/dashboard");
   const canReport = hasPermission("m8.brand_report", member.role);
+  const canEdit = hasPermission("deals.register", member.role);
 
   const { id } = await params;
   const { creator: creatorFilter } = await searchParams;
   const supabase = await createClient();
 
-  const { data: deal } = await supabase
-    .from("brand_deals")
-    .select(
-      "id, brand_name, shop_id, niche, exp_date, campaign_name, komisi_kreator_raw, komisi_mea_raw, ads_budget, service_fee, campaign_type, sourced_by_role, status, contact_pic_brand"
-    )
-    .eq("id", id)
-    .maybeSingle();
-  if (!deal) notFound();
-
-  const [{ data: products }, { data: sessions }, { data: proposals }] = await Promise.all([
+  // ===== Wave 1: independent lookups =====
+  // `deal`, `picOptions` (canEdit only), and products/sessions/proposals (all
+  // scoped by the `id` URL param, not by `deal`'s fetched columns) don't depend
+  // on each other — fetch together.
+  const [
+    { data: deal },
+    { data: picOptions },
+    { data: products },
+    { data: sessions },
+    { data: proposals },
+  ] = await Promise.all([
+    supabase
+      .from("brand_deals")
+      .select(
+        "id, brand_name, shop_id, niche, exp_date, campaign_name, komisi_kreator_raw, komisi_kreator_pct, komisi_mea_raw, komisi_mea_pct, pic_tap, brand_link, gmv_tap, avg_price, notes, ads_budget, service_fee, campaign_type, sourced_by_role, status, contact_pic_brand"
+      )
+      .eq("id", id)
+      .maybeSingle(),
+    // PIC Campaign options untuk form edit (pola sama dengan deals/baru/page.tsx).
+    canEdit
+      ? supabase
+          .from("team_members")
+          .select("id, name")
+          .in("team_group", ["bizdev", "management"])
+          .order("name")
+      : Promise.resolve({ data: [] as { id: string; name: string }[] }),
     supabase
       .from("deal_products")
       .select(
@@ -58,6 +88,7 @@ export default async function DealDetailPage({
       .order("gmv_l30d", { ascending: false, nullsFirst: false })
       .limit(300),
   ]);
+  if (!deal) notFound();
 
   // Report all creator vs report khusus per creator (exclusive MEA bisa >1).
   const creatorNames = [...new Set((sessions ?? []).map((s) => s.creator_name))].sort();
@@ -80,7 +111,7 @@ export default async function DealDetailPage({
     ["Komisi MEA", deal.komisi_mea_raw ?? "—"],
     ["Ads Budget", formatRp(deal.ads_budget)],
     ["Service Fee", formatRp(deal.service_fee)],
-    ["Tipe Campaign", deal.campaign_type === "sample" ? "Sample (non-berbayar)" : deal.campaign_type === "extra_commission" ? "Komisi Extra (non-berbayar)" : "Paid"],
+    ["Tipe Campaign", deal.campaign_type ? (CAMPAIGN_TYPE_LABEL[deal.campaign_type] ?? deal.campaign_type) : "—"],
     ["Didaftarkan oleh", deal.sourced_by_role === "cm" ? "CM (tanpa BizDev)" : "BizDev"],
     ["PIC Brand", deal.contact_pic_brand ?? "—"],
     ["Status", deal.status ?? "—"],
@@ -102,6 +133,39 @@ export default async function DealDetailPage({
           </div>
         ))}
       </div>
+
+      {canEdit && (
+        <details className="mt-4 rounded-lg border border-slate-200 bg-white p-4">
+          <summary className="cursor-pointer text-sm font-medium">
+            Edit Deal (perbaiki salah input)
+          </summary>
+          <div className="mt-4">
+            <EditDealForm
+              deal={{
+                id: deal.id,
+                brand_name: deal.brand_name,
+                shop_id: deal.shop_id,
+                niche: deal.niche,
+                exp_date: deal.exp_date,
+                komisi_kreator_raw: deal.komisi_kreator_raw,
+                komisi_kreator_pct: deal.komisi_kreator_pct,
+                komisi_mea_raw: deal.komisi_mea_raw,
+                komisi_mea_pct: deal.komisi_mea_pct,
+                pic_tap: deal.pic_tap,
+                campaign_name: deal.campaign_name,
+                campaign_type: deal.campaign_type,
+                brand_link: deal.brand_link,
+                gmv_tap: deal.gmv_tap,
+                avg_price: deal.avg_price,
+                ads_budget: deal.ads_budget,
+                service_fee: deal.service_fee,
+                notes: deal.notes,
+              }}
+              picOptions={picOptions ?? []}
+            />
+          </div>
+        </details>
+      )}
 
       <h2 className="mt-8 text-lg font-semibold">
         Produk yang Dikerjasamakan ({(products ?? []).length})
