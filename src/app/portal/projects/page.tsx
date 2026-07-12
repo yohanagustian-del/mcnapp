@@ -7,22 +7,23 @@ export default async function ProjectsPage() {
   const { creatorId } = await requireCreator();
   const admin = createAdminClient();
 
-  // `planning` projects always need more creators, so they show regardless of
-  // open_for_signup; `aktif` projects only show once explicitly opened for signup.
-  const { data: open } = await admin
-    .from("special_projects")
-    .select("id, name, type, start_date, end_date, target_gmv, join_requirements, status, open_for_signup")
-    .in("status", ["planning", "aktif"])
-    .or("status.eq.planning,open_for_signup.eq.true");
-
-  const { data: myReqs } = await admin
-    .from("project_join_requests").select("project_id, status").eq("creator_id", creatorId);
+  // ===== Wave 1: independent lookups =====
+  const [{ data: open }, { data: myReqs }, { data: progress }] = await Promise.all([
+    // `planning` projects always need more creators, so they show regardless of
+    // open_for_signup; `aktif` projects only show once explicitly opened for signup.
+    admin
+      .from("special_projects")
+      .select("id, name, type, start_date, end_date, target_gmv, join_requirements, status, open_for_signup")
+      .in("status", ["planning", "aktif"])
+      .or("status.eq.planning,open_for_signup.eq.true"),
+    admin
+      .from("project_join_requests").select("project_id, status").eq("creator_id", creatorId),
+    admin
+      .from("creator_project_progress_v")
+      .select("project_name, gmv_actual, target_gmv, date")
+      .eq("creator_id", creatorId).order("date", { ascending: false }).limit(10),
+  ]);
   const reqByProject = new Map((myReqs ?? []).map((r) => [r.project_id, r.status]));
-
-  const { data: progress } = await admin
-    .from("creator_project_progress_v")
-    .select("project_name, gmv_actual, target_gmv, date")
-    .eq("creator_id", creatorId).order("date", { ascending: false }).limit(10);
 
   return (
     <div className="space-y-6">

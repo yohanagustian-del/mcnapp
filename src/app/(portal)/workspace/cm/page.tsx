@@ -159,6 +159,15 @@ export default async function CmWorkspacePage({
   const canManageComplaints = hasPermission("m9.complaint_manage", member.role);
 
   const supabase = await createClient();
+  const { bulan: bulanParam } = await searchParams;
+
+  // ===== M13 Jadwal Live — compact read-only preview (scope: sama seperti creators di atas) =====
+  const todayIso = new Date().toISOString().slice(0, 10);
+  const tomorrowIso = new Date(Date.now() + 86_400_000).toISOString().slice(0, 10);
+
+  // RLS on creator_complaints/complaint_replies only grants creator self-read —
+  // internal reads must go through the service-role client; scoping enforced below.
+  const complaintsAdmin = createAdminClient();
 
   // Scope: CPM lihat creator sendiri; CM Lead/management lintas (§2F).
   let creatorsQuery = supabase
@@ -167,31 +176,165 @@ export default async function CmWorkspacePage({
     .order("gmv", { ascending: false })
     .limit(100);
   if (isCpm) creatorsQuery = creatorsQuery.eq("owner_cpm_id", member.id);
-  const { data: creators } = await creatorsQuery;
-  const creatorIds = (creators ?? []).map((c) => c.id);
 
-  // ===== M13 Jadwal Live — compact read-only preview (scope: sama seperti creators di atas) =====
-  const todayIso = new Date().toISOString().slice(0, 10);
-  const tomorrowIso = new Date(Date.now() + 86_400_000).toISOString().slice(0, 10);
   let rosterQuery = supabase
     .from("creators")
     .select("id, name, live_roster")
     .eq("live_roster", true)
     .limit(300);
   if (isCpm) rosterQuery = rosterQuery.eq("owner_cpm_id", member.id);
-  const { data: rosterCreators } = canViewSchedule
-    ? await rosterQuery
-    : { data: [] as { id: string; name: string; live_roster: boolean }[] };
+
+  // Deal hasil sourcing CM langsung (tanpa BizDev) — QA feedback.
+  let cmDealsQuery = supabase
+    .from("brand_deals")
+    .select("id, brand_name, shop_id, niche, exp_date, komisi_kreator_raw, campaign_type, status, notes, sourced_by, created_at")
+    .eq("sourced_by_role", "cm")
+    .order("created_at", { ascending: false })
+    .limit(30);
+  if (isCpm) cmDealsQuery = cmDealsQuery.eq("sourced_by", member.id);
+
+  // ===== M9 Komplain Kreator — surfaced ke CM Workspace (sebelumnya tak tampil di mana pun) =====
+  // Scope: CPM hanya lihat komplain yang ditargetkan ke dirinya (target_cpm_id); CM Lead/
+  // management lintas (§2F, sama seperti section lain di halaman ini).
+  let complaintsQuery = complaintsAdmin
+    .from("creator_complaints")
+    .select("id, creator_id, category, severity, body, status, target_cpm_id, created_at, closed_at")
+    .order("created_at", { ascending: false })
+    .limit(100);
+  if (isCpm) complaintsQuery = complaintsQuery.eq("target_cpm_id", member.id);
+
+  // ===== Wave 1: independent lookups (none of these depend on each other) =====
+  const [
+    { data: creators },
+    { data: rosterCreators },
+    { data: cmDeals },
+    projectReqs,
+    { data: complaintRows },
+  ] = await Promise.all([
+    creatorsQuery,
+    canViewSchedule
+      ? rosterQuery
+      : Promise.resolve({ data: [] as { id: string; name: string; live_roster: boolean }[] }),
+    cmDealsQuery,
+    // M7 creator requirements surfaced so CM knows who to recruit/bind.
+    getProjectRequirements(supabase),
+    complaintsQuery,
+  ]);
+
+  const creatorIds = (creators ?? []).map((c) => c.id);
   const rosterIds = (rosterCreators ?? []).map((c) => c.id);
   const rosterNameById = new Map((rosterCreators ?? []).map((c) => [c.id, c.name]));
-  const { data: todayTomorrowSlots } = rosterIds.length
-    ? await supabase
-        .from("live_schedule_slots")
-        .select("*")
-        .in("creator_id", rosterIds)
-        .in("schedule_date", [todayIso, tomorrowIso])
-        .order("schedule_date", { ascending: true })
-    : { data: [] as LiveScheduleSlot[] };
+  const complaints = (complaintRows ?? []) as ComplaintRow[];
+  const complaintCreatorIds = [...new Set(complaints.map((c) => c.creator_id))];
+  const complaintIds = complaints.map((c) => c.id);
+
+  let campaignReqQuery = supabase
+    .from("campaign_requests")
+    .select("id, deal_id, creator_id, owner_cpm_id, cm_confirm_status, needs_brand_acc, brand_acc_status, final_status, handed_over_at, notes, created_at, brand_deals(brand_name), creators(name)")
+    .order("created_at", { ascending: false })
+    .limit(50);
+  if (isCpm) campaignReqQuery = campaignReqQuery.eq("owner_cpm_id", member.id);
+
+  let creatorReqQuery = supabase
+    .from("creator_requests")
+    .select("id, creator_id, type, target_brand, status, amount, approval_status, notes, creators(name, owner_cpm_id)")
+    .order("created_at", { ascending: false })
+    .limit(50);
+  if (isCpm && creatorIds.length) creatorReqQuery = creatorReqQuery.in("creator_id", creatorIds);
+
+  // ===== Wave 2: depend only on wave-1 results (creatorIds / rosterIds /
+  // complaints), independent of each other =====
+  const [
+    { data: todayTomorrowSlots },
+    { data: periodRows },
+    { data: campaignReqs },
+    { data: creatorReqs },
+    { data: alerts },
+    { data: reports },
+    { data: contracts },
+    { data: cpms },
+    { data: leakWeekSummary },
+    { data: leakStatusRows },
+    { data: complaintCreators },
+    { data: complaintReplyRows },
+  ] = await Promise.all([
+    rosterIds.length
+      ? supabase
+          .from("live_schedule_slots")
+          .select("*")
+          .in("creator_id", rosterIds)
+          .in("schedule_date", [todayIso, tomorrowIso])
+          .order("schedule_date", { ascending: true })
+      : Promise.resolve({ data: [] as LiveScheduleSlot[] }),
+    // Growth mingguan per creator (§2A.2) — Module 0.5 Fase 2: creator_period_summary
+    // adalah source of truth (1 baris per creator per periode per batch), bukan
+    // platform_metrics_raw per-hari (bug lama: "1 hari" tampil sebagai "1 minggu").
+    creatorIds.length
+      ? supabase
+          .from("creator_period_summary")
+          .select("creator_id, period_start, period_end, upload_batch, affiliate_gmv, created_at")
+          .in("creator_id", creatorIds)
+          .order("period_start", { ascending: false })
+          .limit(1000)
+      : Promise.resolve({ data: [] as { creator_id: string; period_start: string; period_end: string; upload_batch: string; affiliate_gmv: number | null; created_at: string }[] }),
+    campaignReqQuery,
+    creatorReqQuery,
+    supabase
+      .from("platform_alerts")
+      .select("id, entity_id, message, week, created_at")
+      .eq("alert_type", "perf_drop")
+      .eq("resolved", false)
+      .order("created_at", { ascending: false })
+      .limit(50),
+    creatorIds.length
+      ? supabase
+          .from("creator_reports")
+          .select("id, creator_id, period_type, period_start, status, token_used, creators(name)")
+          .in("creator_id", creatorIds)
+          .order("generated_at", { ascending: false })
+          .limit(10)
+      : Promise.resolve({ data: [] as never[] }),
+    creatorIds.length
+      ? supabase
+          .from("creator_contracts")
+          .select("id, creator_id, segment, esign_status, provider, sent_at, signed_at, expires_at, creators(name)")
+          .in("creator_id", creatorIds)
+          .order("id", { ascending: false })
+          .limit(30)
+      : Promise.resolve({ data: [] as never[] }),
+    canAssign
+      ? supabase.from("team_members").select("id, name, role").in("role", ["cpm", "cm_lead"]).eq("active", true)
+      : Promise.resolve({ data: [] as never[] }),
+    // Ringkasan CM-level minggu terbaru dari artifak Agency Leaked Generator (format v1/v2).
+    supabase
+      .from("leak_week_summary")
+      .select("week, period_end, gmv_affiliate_total, gmv_tap, gmv_leak_potential, source_format, uploaded_by, created_at")
+      .order("week", { ascending: false })
+      .limit(1),
+    // Link leakage rollup per creator (creator_link_status) — latest week per creator
+    // in scope. Management/CM Lead lihat semua creator yang diambil di atas; CPM sudah
+    // ter-scope ke owner_cpm_id via creatorIds. Read-only (CLAUDE.md #3 — engine/artifak
+    // yang menulis, tidak ada edit manual).
+    creatorIds.length
+      ? supabase
+          .from("creator_link_status")
+          .select("creator_id, week, link_status, gmv_bocor, leak_ratio, gmv_tap, gmv_affiliate_total, source, computed_at")
+          .in("creator_id", creatorIds)
+          .order("week", { ascending: false })
+          .limit(2000)
+      : Promise.resolve({ data: [] as LeakStatusRow[] }),
+    complaintCreatorIds.length
+      ? supabase.from("creators").select("id, name").in("id", complaintCreatorIds)
+      : Promise.resolve({ data: [] as { id: string; name: string }[] }),
+    complaintIds.length
+      ? complaintsAdmin
+          .from("complaint_replies")
+          .select("complaint_id, author_role, body, created_at")
+          .in("complaint_id", complaintIds)
+          .order("created_at", { ascending: true })
+      : Promise.resolve({ data: [] as ComplaintReplyRow[] }),
+  ]);
+
   const scheduleRows: CompactSlotRow[] = ((todayTomorrowSlots ?? []) as LiveScheduleSlot[]).map((s) => ({
     slot: s,
     creatorName: rosterNameById.get(s.creator_id) ?? s.creator_id,
@@ -205,17 +348,6 @@ export default async function CmWorkspacePage({
     .filter((c) => !creatorsWithTomorrowSlot.has(c.id))
     .map((c) => c.name);
 
-  // Growth mingguan per creator (§2A.2) — Module 0.5 Fase 2: creator_period_summary
-  // adalah source of truth (1 baris per creator per periode per batch), bukan
-  // platform_metrics_raw per-hari (bug lama: "1 hari" tampil sebagai "1 minggu").
-  const { data: periodRows } = creatorIds.length
-    ? await supabase
-        .from("creator_period_summary")
-        .select("creator_id, period_start, period_end, upload_batch, affiliate_gmv, created_at")
-        .in("creator_id", creatorIds)
-        .order("period_start", { ascending: false })
-        .limit(1000)
-    : { data: [] as { creator_id: string; period_start: string; period_end: string; upload_batch: string; affiliate_gmv: number | null; created_at: string }[] };
   const growth = new Map<string, { current: number; previous: number | null; periodStart: string; periodEnd: string }>();
   {
     const byCreator = new Map<string, PeriodSummaryPoint[]>();
@@ -252,11 +384,10 @@ export default async function CmWorkspacePage({
       createdAt: r.created_at,
     }))
   );
-  const { bulan: bulanParam } = await searchParams;
   const selectedMonth = bulanParam?.trim() || monthsFromLimitedRows[0] || null;
 
-  // Query kedua ter-scope bulan (jangan andalkan limit 1000 global — bulan lama
-  // bisa terpotong kalau creator/minggu banyak).
+  // ===== Wave 3: query kedua ter-scope bulan — depends on selectedMonth (wave 2 output) =====
+  // (jangan andalkan limit 1000 global — bulan lama bisa terpotong kalau creator/minggu banyak).
   let monthlyRows: WeeklyGrowthInputRow[] = [];
   if (selectedMonth && creatorIds.length) {
     const monthStart = `${selectedMonth}-01`;
@@ -304,86 +435,9 @@ export default async function CmWorkspacePage({
     }
   }
 
-  let campaignReqQuery = supabase
-    .from("campaign_requests")
-    .select("id, deal_id, creator_id, owner_cpm_id, cm_confirm_status, needs_brand_acc, brand_acc_status, final_status, handed_over_at, notes, created_at, brand_deals(brand_name), creators(name)")
-    .order("created_at", { ascending: false })
-    .limit(50);
-  if (isCpm) campaignReqQuery = campaignReqQuery.eq("owner_cpm_id", member.id);
-
-  let creatorReqQuery = supabase
-    .from("creator_requests")
-    .select("id, creator_id, type, target_brand, status, amount, approval_status, notes, creators(name, owner_cpm_id)")
-    .order("created_at", { ascending: false })
-    .limit(50);
-  if (isCpm && creatorIds.length) creatorReqQuery = creatorReqQuery.in("creator_id", creatorIds);
-
-  const [{ data: campaignReqs }, { data: creatorReqs }, { data: alerts }, { data: reports }, { data: contracts }, { data: cpms }, { data: leakWeekSummary }] =
-    await Promise.all([
-      campaignReqQuery,
-      creatorReqQuery,
-      supabase
-        .from("platform_alerts")
-        .select("id, entity_id, message, week, created_at")
-        .eq("alert_type", "perf_drop")
-        .eq("resolved", false)
-        .order("created_at", { ascending: false })
-        .limit(50),
-      creatorIds.length
-        ? supabase
-            .from("creator_reports")
-            .select("id, creator_id, period_type, period_start, status, token_used, creators(name)")
-            .in("creator_id", creatorIds)
-            .order("generated_at", { ascending: false })
-            .limit(10)
-        : Promise.resolve({ data: [] as never[] }),
-      creatorIds.length
-        ? supabase
-            .from("creator_contracts")
-            .select("id, creator_id, segment, esign_status, provider, sent_at, signed_at, expires_at, creators(name)")
-            .in("creator_id", creatorIds)
-            .order("id", { ascending: false })
-            .limit(30)
-        : Promise.resolve({ data: [] as never[] }),
-      canAssign
-        ? supabase.from("team_members").select("id, name, role").in("role", ["cpm", "cm_lead"]).eq("active", true)
-        : Promise.resolve({ data: [] as never[] }),
-      // Ringkasan CM-level minggu terbaru dari artifak Agency Leaked Generator (format v1/v2).
-      supabase
-        .from("leak_week_summary")
-        .select("week, period_end, gmv_affiliate_total, gmv_tap, gmv_leak_potential, source_format, uploaded_by, created_at")
-        .order("week", { ascending: false })
-        .limit(1),
-    ]);
-
   const scopedAlerts = (alerts ?? []).filter((a) => !isCpm || creatorIds.includes(a.entity_id ?? ""));
   const name = (rel: unknown) => (rel as { name?: string } | null)?.name ?? "—";
 
-  // M7 creator requirements surfaced so CM knows who to recruit/bind.
-  const projectReqs = await getProjectRequirements(supabase);
-
-  // Deal hasil sourcing CM langsung (tanpa BizDev) — QA feedback.
-  let cmDealsQuery = supabase
-    .from("brand_deals")
-    .select("id, brand_name, shop_id, niche, exp_date, komisi_kreator_raw, campaign_type, status, notes, sourced_by, created_at")
-    .eq("sourced_by_role", "cm")
-    .order("created_at", { ascending: false })
-    .limit(30);
-  if (isCpm) cmDealsQuery = cmDealsQuery.eq("sourced_by", member.id);
-  const { data: cmDeals } = await cmDealsQuery;
-
-  // Link leakage rollup per creator (creator_link_status) — latest week per creator
-  // in scope. Management/CM Lead lihat semua creator yang diambil di atas; CPM sudah
-  // ter-scope ke owner_cpm_id via creatorIds. Read-only (CLAUDE.md #3 — engine/artifak
-  // yang menulis, tidak ada edit manual).
-  const { data: leakStatusRows } = creatorIds.length
-    ? await supabase
-        .from("creator_link_status")
-        .select("creator_id, week, link_status, gmv_bocor, leak_ratio, gmv_tap, gmv_affiliate_total, source, computed_at")
-        .in("creator_id", creatorIds)
-        .order("week", { ascending: false })
-        .limit(2000)
-    : { data: [] as LeakStatusRow[] };
   // Keep only the newest week per creator (rows already sorted desc by week).
   const latestLeakByCreator = new Map<string, LeakStatusRow>();
   for (const r of (leakStatusRows ?? []) as LeakStatusRow[]) {
@@ -395,35 +449,7 @@ export default async function CmWorkspacePage({
   );
   const latestLeakWeek: LeakWeekSummaryRow | null = (leakWeekSummary?.[0] as LeakWeekSummaryRow) ?? null;
 
-  // ===== M9 Komplain Kreator — surfaced ke CM Workspace (sebelumnya tak tampil di mana pun) =====
-  // Scope: CPM hanya lihat komplain yang ditargetkan ke dirinya (target_cpm_id); CM Lead/
-  // management lintas (§2F, sama seperti section lain di halaman ini).
-  // RLS on creator_complaints/complaint_replies only grants creator self-read — internal
-  // reads must go through the service-role client; scoping enforced in code above/below.
-  const complaintsAdmin = createAdminClient();
-  let complaintsQuery = complaintsAdmin
-    .from("creator_complaints")
-    .select("id, creator_id, category, severity, body, status, target_cpm_id, created_at, closed_at")
-    .order("created_at", { ascending: false })
-    .limit(100);
-  if (isCpm) complaintsQuery = complaintsQuery.eq("target_cpm_id", member.id);
-  const { data: complaintRows } = await complaintsQuery;
-  const complaints = (complaintRows ?? []) as ComplaintRow[];
-
-  const complaintCreatorIds = [...new Set(complaints.map((c) => c.creator_id))];
-  const { data: complaintCreators } = complaintCreatorIds.length
-    ? await supabase.from("creators").select("id, name").in("id", complaintCreatorIds)
-    : { data: [] as { id: string; name: string }[] };
   const complaintCreatorNameById = new Map((complaintCreators ?? []).map((c) => [c.id, c.name]));
-
-  const complaintIds = complaints.map((c) => c.id);
-  const { data: complaintReplyRows } = complaintIds.length
-    ? await complaintsAdmin
-        .from("complaint_replies")
-        .select("complaint_id, author_role, body, created_at")
-        .in("complaint_id", complaintIds)
-        .order("created_at", { ascending: true })
-    : { data: [] as ComplaintReplyRow[] };
   const repliesByComplaint = new Map<number, ComplaintReplyRow[]>();
   for (const r of (complaintReplyRows ?? []) as ComplaintReplyRow[]) {
     const list = repliesByComplaint.get(r.complaint_id) ?? [];

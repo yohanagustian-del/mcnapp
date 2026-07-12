@@ -3,6 +3,7 @@ import { requireMember, hasPermission, canAccessNav, NAV_ITEMS } from "@/lib/rba
 import { createClient } from "@/lib/supabase/server";
 import { CsvUploadForm } from "@/components/csv-upload-form";
 import { uploadMasterProducts } from "./actions";
+import { getCachedLevel2Categories } from "@/lib/cached";
 
 export const dynamic = "force-dynamic";
 
@@ -66,18 +67,12 @@ export default async function ProductsPage({
     .select("product_id", { count: "exact", head: true })
     .eq("needs_review", true);
 
-  const [{ data: products }, { count: resultCount }, { count: reviewCount }] = await Promise.all([
+  const [{ data: products }, { count: resultCount }, { count: reviewCount }, categories] = await Promise.all([
     query,
     resultCountQuery,
     reviewCountQuery,
+    getCachedLevel2Categories(),
   ]);
-
-  const { data: categoryRows } = await supabase
-    .from("products_tap")
-    .select("level2_category")
-    .not("level2_category", "is", null)
-    .limit(1000);
-  const categories = [...new Set((categoryRows ?? []).map((r) => r.level2_category).filter(Boolean))].sort();
 
   const exportParams = new URLSearchParams();
   if (isReviewMode) {

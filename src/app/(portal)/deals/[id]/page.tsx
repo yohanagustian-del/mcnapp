@@ -42,25 +42,32 @@ export default async function DealDetailPage({
   const { creator: creatorFilter } = await searchParams;
   const supabase = await createClient();
 
-  const { data: deal } = await supabase
-    .from("brand_deals")
-    .select(
-      "id, brand_name, shop_id, niche, exp_date, campaign_name, komisi_kreator_raw, komisi_kreator_pct, komisi_mea_raw, komisi_mea_pct, pic_tap, brand_link, gmv_tap, avg_price, notes, ads_budget, service_fee, campaign_type, sourced_by_role, status, contact_pic_brand"
-    )
-    .eq("id", id)
-    .maybeSingle();
-  if (!deal) notFound();
-
-  // PIC Campaign options untuk form edit (pola sama dengan deals/baru/page.tsx).
-  const { data: picOptions } = canEdit
-    ? await supabase
-        .from("team_members")
-        .select("id, name")
-        .in("team_group", ["bizdev", "management"])
-        .order("name")
-    : { data: [] as { id: string; name: string }[] };
-
-  const [{ data: products }, { data: sessions }, { data: proposals }] = await Promise.all([
+  // ===== Wave 1: independent lookups =====
+  // `deal`, `picOptions` (canEdit only), and products/sessions/proposals (all
+  // scoped by the `id` URL param, not by `deal`'s fetched columns) don't depend
+  // on each other — fetch together.
+  const [
+    { data: deal },
+    { data: picOptions },
+    { data: products },
+    { data: sessions },
+    { data: proposals },
+  ] = await Promise.all([
+    supabase
+      .from("brand_deals")
+      .select(
+        "id, brand_name, shop_id, niche, exp_date, campaign_name, komisi_kreator_raw, komisi_kreator_pct, komisi_mea_raw, komisi_mea_pct, pic_tap, brand_link, gmv_tap, avg_price, notes, ads_budget, service_fee, campaign_type, sourced_by_role, status, contact_pic_brand"
+      )
+      .eq("id", id)
+      .maybeSingle(),
+    // PIC Campaign options untuk form edit (pola sama dengan deals/baru/page.tsx).
+    canEdit
+      ? supabase
+          .from("team_members")
+          .select("id, name")
+          .in("team_group", ["bizdev", "management"])
+          .order("name")
+      : Promise.resolve({ data: [] as { id: string; name: string }[] }),
     supabase
       .from("deal_products")
       .select(
@@ -81,6 +88,7 @@ export default async function DealDetailPage({
       .order("gmv_l30d", { ascending: false, nullsFirst: false })
       .limit(300),
   ]);
+  if (!deal) notFound();
 
   // Report all creator vs report khusus per creator (exclusive MEA bisa >1).
   const creatorNames = [...new Set((sessions ?? []).map((s) => s.creator_name))].sort();

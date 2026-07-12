@@ -4,33 +4,25 @@ import { createClient } from "@/lib/supabase/server";
 import { CsvUploadForm } from "@/components/csv-upload-form";
 import { uploadDealProducts } from "../actions";
 import { DealForm } from "./deal-form";
+import { getCachedNicheOptions } from "@/lib/cached";
 
 export default async function DealBaruPage() {
   const member = await requireMember();
   if (!hasPermission("deals.register", member.role)) redirect("/deals");
 
   const supabase = await createClient();
-  const { data: picOptions } = await supabase
-    .from("team_members")
-    .select("id, name")
-    .eq("active", true)
-    .in("team_group", ["bizdev", "management"])
-    .order("name");
 
   // Kandidat niche untuk datalist search: union distinct brand_deals.niche &
   // products_tap.level2_category (pola sama dengan filter kategori di /products).
-  const [{ data: dealNicheRows }, { data: productNicheRows }] = await Promise.all([
-    supabase.from("brand_deals").select("niche").not("niche", "is", null).limit(1000),
-    supabase.from("products_tap").select("level2_category").not("level2_category", "is", null).limit(1000),
+  const [{ data: picOptions }, nicheOptions] = await Promise.all([
+    supabase
+      .from("team_members")
+      .select("id, name")
+      .eq("active", true)
+      .in("team_group", ["bizdev", "management"])
+      .order("name"),
+    getCachedNicheOptions(),
   ]);
-  const nicheOptions = [
-    ...new Set(
-      [
-        ...(dealNicheRows ?? []).map((r) => r.niche),
-        ...(productNicheRows ?? []).map((r) => r.level2_category),
-      ].filter((v): v is string => Boolean(v && v.trim()))
-    ),
-  ].sort();
 
   return (
     <div>

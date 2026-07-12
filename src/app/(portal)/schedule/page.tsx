@@ -112,9 +112,22 @@ export default async function SchedulePage({
   if (rosterCreatorIds.length > 0) {
     slotsQuery = slotsQuery.in("creator_id", rosterCreatorIds);
   }
-  const { data: weekSlots } = rosterCreatorIds.length
-    ? await slotsQuery
-    : { data: [] as LiveScheduleSlot[] };
+
+  // ===== Wave 2: both scoped to rosterCreatorIds from wave 1, independent of
+  // each other (week matrix slots vs. pending-verification slots) =====
+  const [{ data: weekSlots }, { data: pendingSlots }] = await Promise.all([
+    rosterCreatorIds.length ? slotsQuery : Promise.resolve({ data: [] as LiveScheduleSlot[] }),
+    canVerify && rosterCreatorIds.length > 0
+      ? supabase
+          .from("live_schedule_slots")
+          .select("*")
+          .in("creator_id", rosterCreatorIds)
+          .in("status", ["scheduled", "tentative"])
+          .lte("schedule_date", today)
+          .order("schedule_date", { ascending: true })
+          .limit(300)
+      : Promise.resolve({ data: [] as LiveScheduleSlot[] }),
+  ]);
 
   const matrixCreators = ((rosterCreators ?? []) as CreatorRow[]).map((c) => ({
     id: c.id,
@@ -132,15 +145,6 @@ export default async function SchedulePage({
   let verifyRows: VerifyRow[] = [];
   let overdueRows: VerifyRow[] = [];
   if (canVerify && rosterCreatorIds.length > 0) {
-    const { data: pendingSlots } = await supabase
-      .from("live_schedule_slots")
-      .select("*")
-      .in("creator_id", rosterCreatorIds)
-      .in("status", ["scheduled", "tentative"])
-      .lte("schedule_date", today)
-      .order("schedule_date", { ascending: true })
-      .limit(300);
-
     const nameById = new Map(((rosterCreators ?? []) as CreatorRow[]).map((c) => [c.id, c.name]));
     for (const s of (pendingSlots ?? []) as LiveScheduleSlot[]) {
       const row: VerifyRow = { slot: s, creatorName: nameById.get(s.creator_id) ?? s.creator_id };

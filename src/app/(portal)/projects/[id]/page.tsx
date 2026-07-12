@@ -1,7 +1,7 @@
 import { notFound } from "next/navigation";
 import { requireMember, hasPermission } from "@/lib/rbac";
 import { createClient } from "@/lib/supabase/server";
-import { getConfig } from "@/lib/config";
+import { getCachedConfig } from "@/lib/cached";
 import { filterLiveActive, trackDaily, type CurveShape, type LiveActivityRow } from "@/lib/m7/tracking";
 import { addParticipant, assignManpower, setProjectStatus, updateProject, upsertCreatorMetric, upsertDailyMetric } from "../actions";
 
@@ -25,32 +25,64 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
   const canMetrics = hasPermission("m7.metrics", member.role);
 
   const supabase = await createClient();
-  const { data: project } = await supabase
-    .from("special_projects")
-    .select("id, name, type, start_date, end_date, target_gmv, ads_budget_cap, target_creators, daily_target_curve, status, result_summary")
-    .eq("id", projectId)
-    .maybeSingle();
-  if (!project) notFound();
+  const monthAgo = new Date(Date.now() - 35 * 86400000).toISOString().slice(0, 10);
 
-  const [{ data: metrics }, { data: participants }, { data: manpower }, { data: alerts }, tolerance, liveMin] =
-    await Promise.all([
-      supabase.from("project_daily_metrics")
-        .select("date, gmv_actual, ads_spend, creator_commission, mea_revenue")
-        .eq("project_id", projectId).order("date"),
-      supabase.from("project_participants")
-        .select("creator_id, is_external, tiktok_binding_status, live_type, target_gmv, creators(name)")
-        .eq("project_id", projectId),
-      supabase.from("project_manpower")
-        .select("member_id, role, involvement, team_members(name)")
-        .eq("project_id", projectId),
-      supabase.from("platform_alerts")
-        .select("id, alert_type, message, created_at")
-        .eq("entity_id", String(projectId))
-        .in("alert_type", ["project_rugi", "project_over_cap"])
-        .eq("resolved", false),
-      getConfig<number>("m7.status_tolerance"),
-      getConfig<number>("m7.live_active_min"),
-    ]);
+  // ===== Wave 1: independent lookups =====
+  // None of these depend on `project`'s data (only on projectId, which is
+  // already known), on each other, or on `canManage`/`monthAgo` beyond their
+  // own inputs — so all fetch in parallel. `project` itself is included since
+  // nothing here needs its columns yet; the notFound() gate just runs after.
+  const [
+    { data: project },
+    { data: metrics },
+    { data: participants },
+    { data: manpower },
+    { data: alerts },
+    tolerance,
+    liveMin,
+    { data: liveSummaryRows },
+    { data: teamMembers },
+    { data: creatorMetricRows },
+  ] = await Promise.all([
+    supabase.from("special_projects")
+      .select("id, name, type, start_date, end_date, target_gmv, ads_budget_cap, target_creators, daily_target_curve, status, result_summary")
+      .eq("id", projectId)
+      .maybeSingle(),
+    supabase.from("project_daily_metrics")
+      .select("date, gmv_actual, ads_spend, creator_commission, mea_revenue")
+      .eq("project_id", projectId).order("date"),
+    supabase.from("project_participants")
+      .select("creator_id, is_external, tiktok_binding_status, live_type, target_gmv, creators(name)")
+      .eq("project_id", projectId),
+    supabase.from("project_manpower")
+      .select("member_id, role, involvement, team_members(name)")
+      .eq("project_id", projectId),
+    supabase.from("platform_alerts")
+      .select("id, alert_type, message, created_at")
+      .eq("entity_id", String(projectId))
+      .in("alert_type", ["project_rugi", "project_over_cap"])
+      .eq("resolved", false),
+    getCachedConfig<number>("m7.status_tolerance"),
+    getCachedConfig<number>("m7.live_active_min"),
+    // Live-active helper (PRD §2.3): live GMV ≥ config over the recent ~1 month.
+    // Module 0.5 Fase 2: creator_period_summary (satu baris per creator per
+    // periode, kolom affiliate_live_gmv langsung) menggantikan platform_metrics_raw
+    // per-hari; dipetakan ke bentuk LiveActivityRow yang sama agar filterLiveActive
+    // tidak perlu implementasi kedua (CLAUDE.md: satu sumber kebenaran).
+    supabase.from("creator_period_summary")
+      .select("creator_id, affiliate_live_gmv")
+      .gte("period_start", monthAgo)
+      .limit(1000),
+    canManage
+      ? supabase.from("team_members").select("id, name, role").eq("active", true).order("name").limit(200)
+      : Promise.resolve({ data: [] as { id: string; name: string; role: string }[] }),
+    // Performa per kreator: sum GMV dari project_creator_metrics per peserta.
+    supabase.from("project_creator_metrics")
+      .select("creator_id, gmv_actual, items_sold")
+      .eq("project_id", projectId),
+  ]);
+
+  if (!project) notFound();
 
   const shape = ((project.daily_target_curve as { shape?: CurveShape } | null)?.shape ?? "ramp") as CurveShape;
   const today = new Date().toISOString().slice(0, 10);
@@ -63,36 +95,18 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
   const cumMea = (metrics ?? []).reduce((s, m) => s + Number(m.mea_revenue ?? 0), 0);
   const cumKomisiCreator = (metrics ?? []).reduce((s, m) => s + Number(m.creator_commission ?? 0), 0);
 
-  // Live-active helper (PRD §2.3): live GMV ≥ config over the recent ~1 month.
-  // Module 0.5 Fase 2: creator_period_summary (satu baris per creator per
-  // periode, kolom affiliate_live_gmv langsung) menggantikan platform_metrics_raw
-  // per-hari; dipetakan ke bentuk LiveActivityRow yang sama agar filterLiveActive
-  // tidak perlu implementasi kedua (CLAUDE.md: satu sumber kebenaran).
-  const monthAgo = new Date(Date.now() - 35 * 86400000).toISOString().slice(0, 10);
-  const { data: liveSummaryRows } = await supabase
-    .from("creator_period_summary")
-    .select("creator_id, affiliate_live_gmv")
-    .gte("period_start", monthAgo)
-    .limit(1000);
   const liveRows: LiveActivityRow[] = (liveSummaryRows ?? []).map((r) => ({
     creator_id: r.creator_id, metric: "affiliate_live_gmv", value: r.affiliate_live_gmv,
   }));
   const liveActive = filterLiveActive(liveRows, liveMin);
   const participantIds = new Set((participants ?? []).map((p) => p.creator_id));
   const liveActiveIds = [...liveActive.keys()].filter((cid) => !participantIds.has(cid)).slice(0, 30);
+
+  // ===== Wave 2: depends on wave-1 results (participants + liveActive) =====
   const { data: liveActiveCreators } = liveActiveIds.length
     ? await supabase.from("creators").select("id, name").in("id", liveActiveIds)
     : { data: [] as { id: string; name: string }[] };
 
-  const { data: teamMembers } = canManage
-    ? await supabase.from("team_members").select("id, name, role").eq("active", true).order("name").limit(200)
-    : { data: [] as { id: string; name: string; role: string }[] };
-
-  // Performa per kreator: sum GMV dari project_creator_metrics per peserta.
-  const { data: creatorMetricRows } = await supabase
-    .from("project_creator_metrics")
-    .select("creator_id, gmv_actual, items_sold")
-    .eq("project_id", projectId);
   const creatorGmv = new Map<string, { gmv: number; items: number }>();
   for (const r of creatorMetricRows ?? []) {
     const cur = creatorGmv.get(r.creator_id) ?? { gmv: 0, items: 0 };

@@ -20,34 +20,37 @@ export default async function ProjectsPage() {
   const canDecideJoin = hasPermission("m9.project_join_decide", member.role);
 
   const supabase = await createClient();
-  const { data: projects } = await supabase
-    .from("special_projects")
-    .select("id, name, type, start_date, end_date, target_gmv, ads_budget_cap, target_creators, status, result_summary")
-    .order("start_date", { ascending: false })
-    .limit(100);
 
+  // ===== Wave 1: independent lookups =====
   // Pending creator join requests across all projects (M9 §2.6): platform surfaces every
-  // request, but the accept/reject decision is a human PM/lead call.
-  let joinRequestRows: JoinRequestRow[] = [];
-  if (canDecideJoin) {
-    // No RLS policy grants team_members read access on project_join_requests (only
-    // is_creator_user() self-read exists) — service-role client is required here.
-    const admin = createAdminClient();
-    const { data: pendingRequests } = await admin
-      .from("project_join_requests")
-      .select("id, project_id, creator_id, created_at, special_projects(name), creators(name)")
-      .eq("status", "diajukan")
-      .order("created_at", { ascending: true })
-      .limit(100);
-    joinRequestRows = (pendingRequests ?? []).map((r) => ({
-      id: r.id,
-      projectId: r.project_id,
-      projectName: (r.special_projects as unknown as { name: string } | null)?.name ?? `#${r.project_id}`,
-      creatorId: r.creator_id,
-      creatorName: (r.creators as unknown as { name: string } | null)?.name ?? r.creator_id,
-      createdAt: r.created_at,
-    }));
-  }
+  // request, but the accept/reject decision is a human PM/lead call. Independent of `projects`.
+  // No RLS policy grants team_members read access on project_join_requests (only
+  // is_creator_user() self-read exists) — service-role client is required for that read,
+  // constructed only when canDecideJoin (createAdminClient throws without the key).
+  const [{ data: projects }, { data: pendingRequests }] = await Promise.all([
+    supabase
+      .from("special_projects")
+      .select("id, name, type, start_date, end_date, target_gmv, ads_budget_cap, target_creators, status, result_summary")
+      .order("start_date", { ascending: false })
+      .limit(100),
+    canDecideJoin
+      ? createAdminClient()
+          .from("project_join_requests")
+          .select("id, project_id, creator_id, created_at, special_projects(name), creators(name)")
+          .eq("status", "diajukan")
+          .order("created_at", { ascending: true })
+          .limit(100)
+      : Promise.resolve({ data: null }),
+  ]);
+
+  const joinRequestRows: JoinRequestRow[] = (pendingRequests ?? []).map((r) => ({
+    id: r.id,
+    projectId: r.project_id,
+    projectName: (r.special_projects as unknown as { name: string } | null)?.name ?? `#${r.project_id}`,
+    creatorId: r.creator_id,
+    creatorName: (r.creators as unknown as { name: string } | null)?.name ?? r.creator_id,
+    createdAt: r.created_at,
+  }));
 
   // Jumlah peserta aktual per project (vs target_creators)
   const participantCounts = new Map<number, number>();
