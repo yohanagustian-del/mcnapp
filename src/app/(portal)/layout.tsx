@@ -46,11 +46,19 @@ export default async function PortalLayout({ children }: { children: React.React
           <p className="truncate text-xs text-slate-500">
             {ROLE_LABELS[member.role] ?? member.role}
           </p>
-          <form action={logout} className="mt-3">
-            <button type="submit" className="text-xs text-slate-500 underline hover:text-slate-800">
-              Keluar
-            </button>
-          </form>
+          <div className="mt-3 flex items-center gap-3">
+            <Link
+              href="/akun/password"
+              className="text-xs text-slate-500 underline hover:text-slate-800"
+            >
+              Ganti Password
+            </Link>
+            <form action={logout}>
+              <button type="submit" className="text-xs text-slate-500 underline hover:text-slate-800">
+                Keluar
+              </button>
+            </form>
+          </div>
         </div>
       </aside>
       <main className="flex-1 p-8">{children}</main>
