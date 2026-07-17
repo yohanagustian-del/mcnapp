@@ -8,6 +8,7 @@ import {
   recordAcquisition,
   recordReferral,
   refreshGmvPostJoin,
+  registerCreator,
 } from "./actions";
 
 export const dynamic = "force-dynamic";
@@ -24,7 +25,7 @@ export default async function AcquisitionWorkspacePage() {
   const canPay = hasPermission("m8.referral_pay", member.role);
 
   const supabase = await createClient();
-  const [{ data: acquisitions }, { data: referrals }, { data: creators }] = await Promise.all([
+  const [{ data: acquisitions }, { data: referrals }, { data: creators }, { data: cmMembers }] = await Promise.all([
     supabase
       .from("acquisitions")
       .select("id, creator_id, lead_source, binding_date, gmv_post_join, commission_share_at_binding, gmv_last_30d, quarter_end, gmv_quarter_actual, handoff_done, creators(name, level, niche, status, owner_cpm_id), team_members(name)")
@@ -36,6 +37,12 @@ export default async function AcquisitionWorkspacePage() {
       .order("id", { ascending: false })
       .limit(50),
     supabase.from("creators").select("id, name, status").order("name").limit(500),
+    supabase
+      .from("team_members")
+      .select("id, name, role")
+      .in("role", ["cm_lead", "cpm"])
+      .eq("active", true)
+      .order("name"),
   ]);
 
   const name = (rel: unknown) => (rel as { name?: string } | null)?.name ?? "—";
@@ -81,6 +88,63 @@ export default async function AcquisitionWorkspacePage() {
           );
         })}
       </section>
+
+      {/* ===== Registrasi creator baru (manual) ===== */}
+      {canRecord && (
+        <section>
+          <h2 className="text-lg font-medium">Daftarkan Creator Baru</h2>
+          <p className="mt-1 text-sm text-slate-500">
+            Creator baru langsung berstatus bergabung (binding) dan tersedia di master kreator sampai
+            di-assign ke CM.
+          </p>
+          <form action={registerCreator} className="mt-3 grid gap-2 rounded-lg border border-slate-200 bg-white p-4 sm:grid-cols-2">
+            {/* --- Wajib --- */}
+            <input name="username" required placeholder="Username" className={input} />
+            <input name="name" required placeholder="Nama Creator" className={input} />
+            <input name="phone" required placeholder="No HP" className={input} />
+            <input name="followers" required placeholder="Followers (cth: 20.100 - 50.000)" className={input} />
+            <input
+              type="number" name="commission_share" required step="0.1" min="0" max="100"
+              placeholder="Sharing Komisi % (cth: 22 untuk 22%)" className={input}
+            />
+            <select name="owner_cpm_id" required className={input}>
+              <option value="">— CM (owner) —</option>
+              {(cmMembers ?? []).map((m) => (
+                <option key={m.id} value={m.id}>{m.name} ({m.role})</option>
+              ))}
+            </select>
+            <label className="flex items-center gap-2 text-xs text-slate-500">Join
+              <input type="date" name="join_date" required className={`${input} flex-1 text-slate-900`} />
+            </label>
+            <label className="flex items-center gap-2 text-xs text-slate-500">Akhir Kontrak
+              <input type="date" name="contract_end_date" required className={`${input} flex-1 text-slate-900`} />
+            </label>
+            <input name="domisili" required placeholder="Domisili" className={input} />
+            <input name="uid" required placeholder="UID" className={input} />
+
+            {/* --- Opsional --- */}
+            <select name="platform" className={input}>
+              <option value="">Platform (opsional)</option>
+              <option value="tiktok">TikTok</option>
+              <option value="shopee">Shopee</option>
+            </select>
+            <input name="jenis_creator" placeholder="Jenis (opsional, cth: live & vt)" className={input} />
+            <input name="top_niches" placeholder="Niche Top 3 (opsional, cth: beauty; skincare, fashion)" className={`${input} sm:col-span-2`} />
+            <input name="content_quality" placeholder="Kualitas (opsional)" className={input} />
+            <select name="level" className={input}>
+              <option value="">Level (opsional)</option>
+              {[1, 2, 3, 4, 5, 6].map((l) => <option key={l} value={l}>Level {l}</option>)}
+            </select>
+            <input name="gmv" placeholder="GMV Total avg/bln (opsional)" className={input} />
+            <input name="gmv_live" placeholder="GMV Live avg/bln (opsional)" className={input} />
+            <input name="gmv_video" placeholder="GMV Video avg/bln (opsional)" className={input} />
+            <input name="rc_live" placeholder="RC Live (opsional)" className={input} />
+            <input name="rc_video" placeholder="RC Video (opsional)" className={input} />
+            <input name="rate_card" placeholder="Rate Card Rp (opsional)" className={input} />
+            <button type="submit" className={`${btn} sm:col-span-2`}>Daftarkan Creator</button>
+          </form>
+        </section>
+      )}
 
       <section className="grid gap-6 lg:grid-cols-2">
         <div>

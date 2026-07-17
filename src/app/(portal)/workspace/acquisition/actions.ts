@@ -6,6 +6,16 @@ import { writeAudit } from "@/lib/audit";
 import { getConfig } from "@/lib/config";
 import { requirePermission } from "@/lib/rbac";
 import { fetchAll } from "@/lib/supabase/fetch-all";
+import { genId } from "@/lib/utils/id";
+import { parseRupiah } from "@/lib/utils/rupiah";
+
+const PLATFORMS = ["tiktok", "shopee"] as const;
+
+/** "beauty; skincare, fashion" → up to top-3 level-2 categories (null if empty). */
+function parseNiches(raw: string): string[] | null {
+  const parts = raw.split(/[;,|]/).map((s) => s.trim()).filter(Boolean);
+  return parts.length ? parts.slice(0, 3) : null;
+}
 
 /** Akhir quartal kalender dari tanggal ISO (binding 20 Feb → 31 Mar). */
 function quarterEnd(isoDate: string): string {
@@ -235,4 +245,163 @@ export async function refreshGmvPostJoin(formData: FormData): Promise<void> {
     entityId: null, after: { updated, window_days: windowDays }, type: "auto",
   });
   revalidatePath("/workspace/acquisition");
+}
+
+/**
+ * Daftarkan creator baru dari akuisisi (manual, bukan upload sheet). Creator
+ * baru langsung status 'binding' (user: "bergabung") sampai handoff ke CM lewat
+ * markHandoffDone menaikkan ke 'aktif'. Deterministik, 0 token AI.
+ *
+ * Aturan username (case-insensitive, ada index lower(username)):
+ *  - belum ada          → INSERT baris baru (id CRT- terpusat, retry tabrakan).
+ *  - ada + kontrak habis → RENEWAL: UPDATE baris yang sama (tanpa duplikat id).
+ *  - ada + kontrak aktif → tolak dengan pesan berisi identitas creator lama.
+ */
+export async function registerCreator(formData: FormData): Promise<void> {
+  const actor = await requirePermission("m8.acquisition");
+
+  // ---- WAJIB ----
+  const username = String(formData.get("username") ?? "").trim();
+  const name = String(formData.get("name") ?? "").trim();
+  const phone = String(formData.get("phone") ?? "").trim();
+  const followers = String(formData.get("followers") ?? "").trim();
+  const ownerCpmId = String(formData.get("owner_cpm_id") ?? "").trim();
+  const joinDate = String(formData.get("join_date") ?? "").trim();
+  const contractEndDate = String(formData.get("contract_end_date") ?? "").trim();
+  const domisili = String(formData.get("domisili") ?? "").trim();
+  const uid = String(formData.get("uid") ?? "").trim();
+  const shareRaw = String(formData.get("commission_share") ?? "").trim();
+
+  if (!username) throw new Error("Username wajib diisi");
+  if (!name) throw new Error("Nama Creator wajib diisi");
+  if (!phone) throw new Error("No HP wajib diisi");
+  if (!followers) throw new Error("Followers wajib diisi");
+  if (!ownerCpmId) throw new Error("CM wajib dipilih");
+  if (!domisili) throw new Error("Domisili wajib diisi");
+  if (!uid) throw new Error("UID wajib diisi");
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(joinDate)) throw new Error("Tanggal Join wajib diisi");
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(contractEndDate)) throw new Error("Akhir Kontrak wajib diisi");
+  if (contractEndDate <= joinDate) throw new Error("Akhir Kontrak harus setelah tanggal Join");
+
+  // Sharing Komisi diinput sebagai persen (22 = 22%).
+  const sharePct = Number(shareRaw);
+  if (!shareRaw || Number.isNaN(sharePct) || sharePct < 0 || sharePct > 100) {
+    throw new Error("Sharing Komisi wajib diisi angka 0–100 (mis. 22 untuk 22%)");
+  }
+  // commission_share disimpan sebagai fraksi (0.22 = 22%), sama seperti sumber
+  // sync platform (lihat formatShare). Ini nilai AWAL saat registrasi saja —
+  // TIDAK ADA endpoint edit/update untuk commission_share (CLAUDE.md #3): setelah
+  // ini kolomnya read-only dan perubahan hanya datang dari sync platform. INSERT
+  // & RENEWAL lewat service-role client (bypass trigger protect_commission_share).
+  const commissionShare = sharePct / 100;
+
+  // Level opsional; bila diisi harus 1–6.
+  const levelRaw = String(formData.get("level") ?? "").trim();
+  let level: number | null = null;
+  if (levelRaw) {
+    const n = Number(levelRaw);
+    if (!Number.isInteger(n) || n < 1 || n > 6) throw new Error("Level harus antara 1–6");
+    level = n;
+  }
+
+  // ---- OPSIONAL (kosong → null / omit) ----
+  const platformRaw = String(formData.get("platform") ?? "").trim().toLowerCase();
+  const platform = PLATFORMS.includes(platformRaw as (typeof PLATFORMS)[number]) ? platformRaw : null;
+  const topNiches = parseNiches(String(formData.get("top_niches") ?? "").trim());
+  const payload: Record<string, unknown> = {
+    username,
+    name,
+    phone,
+    followers,
+    owner_cpm_id: ownerCpmId,
+    join_date: joinDate,
+    contract_end_date: contractEndDate,
+    domisili,
+    uid,
+    level,
+    platform,
+    jenis_creator: String(formData.get("jenis_creator") ?? "").trim() || null,
+    niche: topNiches?.[0] ?? null,
+    top_niches: topNiches,
+    content_quality: String(formData.get("content_quality") ?? "").trim() || null,
+    gmv: parseRupiah(String(formData.get("gmv") ?? "")),
+    gmv_live: parseRupiah(String(formData.get("gmv_live") ?? "")),
+    gmv_video: parseRupiah(String(formData.get("gmv_video") ?? "")),
+    rc_live: String(formData.get("rc_live") ?? "").trim() || null,
+    rc_video: String(formData.get("rc_video") ?? "").trim() || null,
+    rate_card: parseRupiah(String(formData.get("rate_card") ?? "")),
+  };
+
+  const admin = createAdminClient();
+
+  // CM harus benar-benar CM Lead / CPM aktif (owner_cpm_id → team_members).
+  const { data: cm } = await admin
+    .from("team_members").select("id, role").eq("id", ownerCpmId).maybeSingle();
+  if (!cm || !["cm_lead", "cpm"].includes(cm.role)) {
+    throw new Error("CM yang dipilih tidak valid (harus CM Lead / CPM)");
+  }
+
+  // Username match case-insensitive; escape wildcard ilike lalu verifikasi di JS
+  // (handle bisa mengandung "_"/"." yang jadi wildcard pattern ilike).
+  const escaped = username.replace(/[\\%_]/g, (c) => `\\${c}`);
+  const { data: matches } = await admin
+    .from("creators")
+    .select("id, name, status, join_date, contract_end_date, commission_share, username")
+    .ilike("username", escaped);
+  const existing =
+    (matches ?? []).find((c) => (c.username ?? "").toLowerCase() === username.toLowerCase()) ?? null;
+
+  const today = new Date().toISOString().slice(0, 10);
+
+  if (!existing) {
+    // ---- INSERT baru; retry pada tabrakan id CRT- yang langka. ----
+    let insertedId = "";
+    let lastError = "";
+    for (let attempt = 0; attempt < 3 && !insertedId; attempt++) {
+      const id = genId("CRT");
+      const { error } = await admin.from("creators").insert({
+        id, status: "binding", commission_share: commissionShare, ...payload,
+      });
+      if (!error) insertedId = id;
+      else if (error.code === "23505") lastError = error.message; // id collision → retry
+      else throw new Error(`Gagal mendaftarkan creator: ${error.message}`);
+    }
+    if (!insertedId) throw new Error(`Gagal mendaftarkan creator: ${lastError}`);
+
+    await writeAudit({
+      actorId: actor.id, action: "m8.creator_register", entityType: "creators",
+      entityId: insertedId,
+      after: { id: insertedId, status: "binding", commission_share: commissionShare, ...payload },
+      type: "auto",
+    });
+  } else if (existing.contract_end_date != null && String(existing.contract_end_date) < today) {
+    // ---- RENEWAL (perpanjangan): kontrak sudah habis → pakai baris & id yang sama. ----
+    const before = {
+      status: existing.status, join_date: existing.join_date,
+      contract_end_date: existing.contract_end_date, commission_share: existing.commission_share,
+    };
+    // Drop empty optional fields so a blank renewal form doesn't erase existing
+    // master data (same rule as uploadCreators). Required fields are never null.
+    const renewal: Record<string, unknown> = {
+      status: "binding", commission_share: commissionShare, ...payload,
+    };
+    for (const k of Object.keys(renewal)) if (renewal[k] === null) delete renewal[k];
+    const { error } = await admin.from("creators").update(renewal).eq("id", existing.id);
+    if (error) throw new Error(`Gagal memperpanjang creator: ${error.message}`);
+
+    await writeAudit({
+      actorId: actor.id, action: "m8.creator_reregister", entityType: "creators",
+      entityId: existing.id, before,
+      after: { id: existing.id, ...renewal },
+      type: "auto",
+    });
+  } else {
+    // ---- Username terpakai & kontrak masih aktif / tanpa akhir kontrak → tolak. ----
+    throw new Error(
+      `Username "${username}" sudah terdaftar: ${existing.name} (${existing.id}, status ${existing.status}, kontrak s/d ${existing.contract_end_date ?? "tidak ada"}). Registrasi baru hanya untuk kreator yang kontraknya sudah habis.`
+    );
+  }
+
+  revalidatePath("/workspace/acquisition");
+  revalidatePath("/creators");
 }
