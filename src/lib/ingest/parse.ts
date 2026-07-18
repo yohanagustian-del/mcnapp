@@ -77,6 +77,7 @@ export async function parseMcnFile(file: File): Promise<ParseResult<McnRow>> {
       periodStart: range?.start ?? null,
       periodEnd: range?.end ?? null,
       creatorName,
+      followerCount: parseCount(r[MCN_COLUMNS.followerCount] ?? ""),
       productId,
       productInfo: r[MCN_COLUMNS.productInfo]?.trim() || null,
       shopId,

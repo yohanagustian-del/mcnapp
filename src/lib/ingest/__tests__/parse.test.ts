@@ -223,6 +223,113 @@ describe("parseTapFile — header Indonesia (QA e2e bug)", () => {
   });
 });
 
+// ─── 2026-07 "Custom report" export (renamed columns) ───
+// The platform renamed the attribution columns in the exported table:
+// "Affiliate GMV" → "Creator-attributed GMV", "Orders" → "Creator-attributed orders",
+// "Items sold" → "Creator-attributed items sold", "CTOR" → "CTOR (SKU order)", plus
+// new columns (Shop code, Creator follower count, Affiliate partner creator attributed
+// GMV, ...). Fixture values mirror the 2026-07 sample exports (data_mcn.xlsx /
+// data_tap.xlsx) verbatim.
+const MCN_V2_SUMMARY_ROW = {
+  Date: "Summary", "Comparison date": "--", "Creator username": "-", "Creator follower count": "--",
+  "Product ID": "-", "Product info": "-", "Shop code": "-", "Shop ID": "-", "Shop name": "-",
+  "Level 1 category": "-", "Level 2 category": "-", "Creator-attributed GMV": "Rp52.172.592",
+  "Creator LIVE-attributed GMV": "Rp40.135.873", "Affiliate video-attributed GMV": "Rp12.000.720",
+  "Creator-attributed orders": "1050", "Creator LIVE-attributed orders": "881",
+  "Creator video-attributed orders": "168", "Direct GMV": "Rp51.378.194",
+  "Creator-attributed items sold": "1084", "Direct refund GMV": "Rp332.087",
+  CTR: "5.71%", "CTOR (SKU order)": "3.88%",
+  "Affiliate partner creator attributed GMV": "Rp50.083.880",
+};
+
+const MCN_V2_DATA_ROW = {
+  Date: "2026-07-01-2026-07-07", "Comparison date": "--", "Creator username": "lenasahara1",
+  "Creator follower count": "431936", "Product ID": "1735717065031714129",
+  "Product info": "SPECIAL NEW LAUNCHING PARFUM BY DVARA 35 ML", "Shop code": "IDLCJYL2H7",
+  "Shop ID": "7494906156684446033", "Shop name": "DVARA", "Level 1 category": "Beauty & Personal Care",
+  "Level 2 category": "Fragrance", "Creator-attributed GMV": "Rp24.223.732",
+  "Creator LIVE-attributed GMV": "Rp24.223.732", "Affiliate video-attributed GMV": "Rp0",
+  "Creator-attributed orders": "698", "Creator LIVE-attributed orders": "698",
+  "Creator video-attributed orders": "0", "Direct GMV": "Rp24.027.798",
+  "Creator-attributed items sold": "732", "Direct refund GMV": "Rp71.598",
+  CTR: "7.01%", "CTOR (SKU order)": "7.67%",
+  "Affiliate partner creator attributed GMV": "Rp24.223.735",
+};
+
+const TAP_V2_DATA_ROW = {
+  Date: "2026-07-01-2026-07-07", "Comparison date": "--", "Creator name": "lenasahara1",
+  "Creator follower count": "431936", "Product ID": "1735717065031714129",
+  "Product name": "SPECIAL NEW LAUNCHING PARFUM BY DVARA 35 ML", "Shop code": "IDLCJYL2H7",
+  "Shop ID": "7494906156684446033", "Shop name": "DVARA", "Level 1 category": "Beauty & Personal Care",
+  "Level 2 category": "Fragrance", "Creator-attributed GMV": "Rp24.223.735",
+  "Affiliate video-attributed GMV": "Rp0", "Creator LIVE-attributed GMV": "Rp24.223.735",
+  "Creator-attributed orders": "698", "Video views": "0", "LIVE views": "50098",
+  "Estimated affiliate partner commission ": "Rp0",
+  "Actual affiliate partner commission": "Rp0",
+  "Estimated creator commission ": "Rp1.879.313",
+  "Actual creator commission ": "Rp17.556",
+  "GMV (refund)": "Rp71.598", "Settled GMV": "Rp0",
+  "Creator-attributed items sold": "732",
+};
+
+describe("parseMcnFile — 2026-07 Custom report headers", () => {
+  it("maps renamed Creator-attributed columns and skips the Summary row", async () => {
+    const file = xlsxFile([MCN_V2_SUMMARY_ROW, MCN_V2_DATA_ROW]);
+    const { rows, skipped } = await parseMcnFile(file);
+    expect(rows).toHaveLength(1);
+    expect(skipped).toEqual([]);
+
+    const [row] = rows;
+    expect(row.creatorName).toBe("lenasahara1");
+    expect(row.followerCount).toBe(431_936);
+    expect(row.productId).toBe("1735717065031714129");
+    expect(row.shopId).toBe("7494906156684446033");
+    expect(row.shopName).toBe("DVARA");
+    expect(row.level1Category).toBe("Beauty & Personal Care");
+    expect(row.level2Category).toBe("Fragrance");
+    // ALL measure = Creator-attributed GMV, NOT "Affiliate partner creator attributed GMV"
+    expect(row.affiliateGmv).toBe(24_223_732);
+    expect(row.affiliateLiveGmv).toBe(24_223_732);
+    expect(row.affiliateVideoGmv).toBe(0);
+    expect(row.orders).toBe(698);
+    expect(row.liveOrders).toBe(698);
+    expect(row.videoOrders).toBe(0);
+    expect(row.directGmv).toBe(24_027_798);
+    expect(row.itemsSold).toBe(732);
+    expect(row.refundGmv).toBe(71_598);
+    expect(row.ctr).toBeCloseTo(7.01);
+    expect(row.ctor).toBeCloseTo(7.67); // from "CTOR (SKU order)"
+    expect(row.periodStart).toBe("2026-07-01");
+    expect(row.periodEnd).toBe("2026-07-07");
+  });
+});
+
+describe("parseTapFile — 2026-07 Custom report headers", () => {
+  it("maps renamed Creator-attributed columns; commission columns unchanged", async () => {
+    const file = xlsxFile([TAP_V2_DATA_ROW]);
+    const { rows, skipped } = await parseTapFile(file);
+    expect(rows).toHaveLength(1);
+    expect(skipped).toEqual([]);
+
+    const [row] = rows;
+    expect(row.creatorName).toBe("lenasahara1");
+    expect(row.productId).toBe("1735717065031714129");
+    expect(row.shopId).toBe("7494906156684446033");
+    expect(row.affiliateGmv).toBe(24_223_735);
+    expect(row.affiliateLiveGmv).toBe(24_223_735);
+    expect(row.affiliateVideoGmv).toBe(0);
+    expect(row.orders).toBe(698);
+    expect(row.itemsSold).toBe(732);
+    expect(row.estPartnerCommission).toBe(0);
+    expect(row.actualPartnerCommission).toBe(0);
+    expect(row.estCreatorCommission).toBe(1_879_313);
+    expect(row.actualCreatorCommission).toBe(17_556);
+    expect(row.refundGmv).toBe(71_598);
+    expect(row.periodStart).toBe("2026-07-01");
+    expect(row.periodEnd).toBe("2026-07-07");
+  });
+});
+
 describe("English header path unaffected by ID alias translation", () => {
   it("parseMcnFile still parses pure-English headers correctly", async () => {
     const file = xlsxFile([MCN_DATA_ROW]);
@@ -230,6 +337,7 @@ describe("English header path unaffected by ID alias translation", () => {
     expect(rows).toHaveLength(1);
     expect(rows[0].affiliateGmv).toBe(5_835_187_681);
     expect(rows[0].creatorName).toBe("toko_makmur58");
+    expect(rows[0].followerCount).toBeNull(); // legacy export has no follower column
   });
 
   it("parseTapFile still parses pure-English (trailing-space) headers correctly", async () => {

@@ -18,6 +18,8 @@
 export const MCN_COLUMNS = {
   date: "date",
   creator: "creator_username",
+  // Only present in the 2026-07 "Custom report" export; legacy exports lack it → null.
+  followerCount: "creator_follower_count",
   productId: "product_id",
   productInfo: "product_info",
   shopId: "shop_id",
@@ -65,6 +67,8 @@ export interface McnRow {
   periodStart: string | null;
   periodEnd: string | null;
   creatorName: string;
+  /** From "Creator follower count" (2026-07 export only) — null on legacy exports. */
+  followerCount: number | null;
   productId: string;
   productInfo: string | null;
   shopId: string;
@@ -107,19 +111,33 @@ export interface TapRow {
 }
 
 /**
- * ID→EN header aliases (Module 0.5 QA bug). TikTok Shop platform exports can be in
- * Bahasa Indonesia depending on account language setting — the sheet still has the
- * same columns/order, only the header text differs. Keys are NORMALIZED Indonesian
- * headers (already trim→lowercase→spaces→"_", same normalization as parseCsv/parseSheet),
- * values are the normalized ENGLISH header used by MCN_COLUMNS/TAP_COLUMNS above.
- * Applied in parse.ts via translateRowKeys AFTER parseSheet, BEFORE reading MCN_COLUMNS/
- * TAP_COLUMNS fields — an EN key already present on the row is never overwritten (so
- * a file that happens to mix both, or the pure-English path, is unaffected).
+ * Header aliases (alias → internal header used by MCN_COLUMNS/TAP_COLUMNS above).
+ * Two alias families live in one map per file type, both NORMALIZED
+ * (trim→lowercase→spaces→"_", same normalization as parseCsv/parseSheet):
+ *
+ * 1. ID→EN (Module 0.5 QA bug): TikTok Shop platform exports can be in Bahasa
+ *    Indonesia depending on account language setting — same columns/order, only
+ *    the header text differs.
+ * 2. 2026-07 "Custom report" renames: the platform renamed the attribution
+ *    columns in the exported table ("Affiliate GMV" → "Creator-attributed GMV",
+ *    "Orders" → "Creator-attributed orders", "Items sold" →
+ *    "Creator-attributed items sold", "CTOR" → "CTOR (SKU order)", dst.).
+ *    Normalization keeps "-"/"()" as-is, so "Creator-attributed GMV" →
+ *    "creator-attributed_gmv". Confirmed against the 2026-07 sample exports
+ *    (data_mcn.xlsx / data_tap.xlsx) — do not re-guess column names.
+ *
+ * Applied in parse.ts via translateRowKeys AFTER parseSheet, BEFORE reading
+ * MCN_COLUMNS/TAP_COLUMNS fields — a canonical key already present on the row is
+ * never overwritten (so a file that happens to mix both, or the legacy-English
+ * path, is unaffected).
  *
  * Only maps headers this module actually reads (MCN_COLUMNS / TAP_COLUMNS values).
- * Other Indonesian columns present in the real export (tanggal_perbandingan,
- * pesanan_langsung, gmv_langsung_dari_live, dll) are intentionally NOT mapped —
- * they're not read by this module either in English or Indonesian.
+ * Other columns present in the real exports (comparison_date, shop_code,
+ * video_views, tanggal_perbandingan, dll) are intentionally NOT mapped —
+ * they're not read by this module. In particular the
+ * new MCN column "Affiliate partner creator attributed GMV" (the agency-link
+ * portion inside the ALL file) must NOT alias to affiliate_gmv — the ALL measure
+ * is "Creator-attributed GMV".
  */
 export const MCN_HEADER_ALIASES: Record<string, string> = {
   tanggal: "date",
@@ -141,9 +159,18 @@ export const MCN_HEADER_ALIASES: Record<string, string> = {
   gmv_pengembalian_dana_langsung: "direct_refund_gmv",
   ctr: "ctr",
   ctor: "ctor",
+  // 2026-07 "Custom report" export renames (see doc above).
+  "creator-attributed_gmv": "affiliate_gmv",
+  "creator_live-attributed_gmv": "affiliate_live_gmv",
+  "affiliate_video-attributed_gmv": "affiliate_video_gmv",
+  "creator-attributed_orders": "affiliate_orders",
+  "creator_live-attributed_orders": "affiliate_live_orders",
+  "creator_video-attributed_orders": "affiliate_video_orders",
+  "creator-attributed_items_sold": "items_sold",
+  "ctor_(sku_order)": "ctor",
 };
 
-/** TAP (CSV-2 / agency-link) ID→EN header aliases. See MCN_HEADER_ALIASES doc above. */
+/** TAP (CSV-2 / agency-link) header aliases. See MCN_HEADER_ALIASES doc above. */
 export const TAP_HEADER_ALIASES: Record<string, string> = {
   tanggal: "date",
   nama_produk: "product_name",
@@ -162,6 +189,12 @@ export const TAP_HEADER_ALIASES: Record<string, string> = {
   perkiraan_komisi_kreator: "estimated_creator_commission",
   komisi_aktual_untuk_kreator: "actual_creator_commission",
   "gmv_(pengembalian_dana)": "gmv_(refund)",
+  // 2026-07 "Custom report" export renames (see MCN_HEADER_ALIASES doc).
+  "creator-attributed_gmv": "affiliate_gmv",
+  "affiliate_video-attributed_gmv": "affiliate_video_gmv",
+  "creator_live-attributed_gmv": "affiliate_live_gmv",
+  "creator-attributed_orders": "orders",
+  "creator-attributed_items_sold": "items_sold",
 };
 
 /** Percentage cell ("5.45%" / "13.19%") → number (5.45). null when unreadable (never crash). */
