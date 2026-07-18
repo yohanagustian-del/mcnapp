@@ -11,6 +11,7 @@ function row(overrides: Partial<McnRow>): McnRow {
     periodStart: "2026-06-28",
     periodEnd: "2026-06-28",
     creatorName: "CRT-001",
+    followerCount: null,
     productId: "P1",
     productInfo: "Produk A",
     shopId: "S1",

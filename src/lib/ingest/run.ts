@@ -251,7 +251,19 @@ export async function runIngest(input: RunIngestInput): Promise<RunIngestResult>
     );
 
     // ---- 5. Auto-fill creators master ----
-    await autoFillCreators(admin, actorId, periodSummary, subcatSegment);
+    // Follower count per creator from the MCN file ("Creator follower count",
+    // 2026-07 export — legacy exports lack the column → map stays empty and the
+    // followers field is left untouched). Same value repeats on every row of a
+    // creator; max() is a cheap tie-break in case rows disagree within one file.
+    const followersByCreator = new Map<string, number>();
+    for (const r of resolvedMcnRows) {
+      if (r.followerCount === null) continue;
+      const prev = followersByCreator.get(r.creatorName);
+      if (prev === undefined || r.followerCount > prev) {
+        followersByCreator.set(r.creatorName, r.followerCount);
+      }
+    }
+    await autoFillCreators(admin, actorId, periodSummary, subcatSegment, followersByCreator);
 
     // ---- 6. upload_batches: processed ----
     const { error: doneError } = await admin
@@ -421,6 +433,11 @@ export async function writeAggregates(
   }
 }
 
+/** 431936 → "431.936" (dot-thousands, matches the free-text creators.followers convention). */
+function formatFollowerCount(n: number): string {
+  return String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ".");
+}
+
 /** Subtract `weeks * 7` days from an ISO date (YYYY-MM-DD) → ISO date string. */
 function minusWeeks(isoDate: string, weeks: number): string {
   const d = new Date(`${isoDate}T00:00:00Z`);
@@ -489,7 +506,9 @@ export async function enforceLeakRetention(
  * is always TikTok custom report per Module 0.5), jenis_creator from THIS BATCH's
  * merged live/video GMV (unchanged behavior — task A.2 decision: jenis_creator
  * stays batch-derived, not averaged), niche/top_niches from this batch's subcat
- * GMV combined with prior creator_subcat_segment_gmv history.
+ * GMV combined with prior creator_subcat_segment_gmv history, followers from the
+ * MCN file's "Creator follower count" column (2026-07 export; absent on legacy
+ * exports → untouched).
  *
  * gmv/gmv_live/gmv_video (task A.1, CLAUDE.md #4 — one averaging implementation,
  * reused from src/lib/m8/weekly-growth.ts): no longer this batch's total — each
@@ -511,14 +530,15 @@ async function autoFillCreators(
   admin: SupabaseClient,
   actorId: string,
   periodSummary: ReturnType<typeof buildPeriodSummary>,
-  subcatSegment: ReturnType<typeof buildSubcatSegment>
+  subcatSegment: ReturnType<typeof buildSubcatSegment>,
+  followersByCreator: Map<string, number>
 ): Promise<void> {
   if (periodSummary.length === 0) return;
   const creatorIds = periodSummary.map((s) => s.creatorId);
 
   const { data: existingCreators, error: existingError } = await admin
     .from("creators")
-    .select("id, status, platform, jenis_creator, niche, top_niches")
+    .select("id, status, platform, jenis_creator, niche, top_niches, followers")
     .in("id", creatorIds);
   if (existingError) throw new Error(`Gagal membaca master creator: ${existingError.message}`);
   const existingById = new Map((existingCreators ?? []).map((c) => [c.id, c]));
@@ -557,6 +577,21 @@ async function autoFillCreators(
     const platformValue = platformFromReportSource("mcn_tiktok_product");
 
     const { updates, before, after } = computeSharedAutoFillFields(existing, platformValue, jenisCreator, avgGmv);
+
+    // followers ← "Creator follower count" from the MCN file (2026-07 export).
+    // creators.followers is free-text (legacy acquisition ranges like
+    // "20.100 - 50.000"); the platform count is exact, stored dot-thousands
+    // ("431.936") to match the existing display convention. Absent column
+    // (legacy export) → no entry in the map → field untouched.
+    const followerCount = followersByCreator.get(s.creatorId);
+    if (followerCount !== undefined) {
+      const followersText = formatFollowerCount(followerCount);
+      if (followersText !== (existing?.followers ?? null)) {
+        updates.followers = followersText;
+        before.followers = existing?.followers ?? null;
+        after.followers = followersText;
+      }
+    }
 
     const nichesChanged =
       topNiches && topNiches.length > 0 &&
