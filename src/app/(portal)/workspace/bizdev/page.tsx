@@ -74,7 +74,7 @@ export default async function BizdevWorkspacePage() {
         .limit(50),
       supabase
         .from("campaign_requests")
-        .select("id, deal_id, creator_id, owner_cpm_id, cm_confirm_status, needs_brand_acc, brand_acc_status, final_status, handed_over_at, creator_sourced_by, brand_deals(brand_name), creators(name), team_members!campaign_requests_owner_cpm_id_fkey(name)")
+        .select("id, deal_id, creator_id, owner_cpm_id, route_type, level2_category, request_text, cm_confirm_status, needs_brand_acc, brand_acc_status, final_status, handed_over_at, creator_sourced_by, brand_deals(brand_name), creators(name), team_members!campaign_requests_owner_cpm_id_fkey(name)")
         .order("created_at", { ascending: false })
         .limit(50),
       supabase
@@ -91,6 +91,30 @@ export default async function BizdevWorkspacePage() {
 
   const name = (rel: unknown) => (rel as { name?: string } | null)?.name ?? "—";
   const dealOptions = (deals ?? []).map((d) => ({ id: d.id, brand_name: d.brand_name }));
+
+  // Kolom 1 (kreator) + kolom 2 (kategori) untuk form routing — BizDev mencentang,
+  // tidak lagi mengetik ID manual. Kategori dari penjualan nyata (creator_subcat_segment_gmv).
+  const [{ data: routeCreators }, { data: catRows }] = canRoute
+    ? await Promise.all([
+        supabase
+          .from("creators")
+          .select("id, name, username, owner_cpm_id")
+          .order("name", { ascending: true })
+          .limit(1000),
+        supabase
+          .from("creator_subcat_segment_gmv")
+          .select("level2_category")
+          .gt("gmv", 0)
+          .limit(5000),
+      ])
+    : [{ data: [] as { id: string; name: string; username: string | null; owner_cpm_id: string | null }[] }, { data: [] as { level2_category: string }[] }];
+  const creatorOptions = (routeCreators ?? []).map((c) => ({
+    id: c.id,
+    name: c.name,
+    username: c.username,
+    hasOwner: Boolean(c.owner_cpm_id),
+  }));
+  const categoryOptions = [...new Set((catRows ?? []).map((r) => r.level2_category).filter(Boolean))].sort();
 
   // M7 ads budget requirements — BizDev secures/allocates the ads spend.
   const projectReqs = await getProjectRequirements(supabase);
@@ -122,9 +146,13 @@ export default async function BizdevWorkspacePage() {
         <section>
           <h2 className="text-lg font-medium">Routing Req Campaign → CM Pemilik Creator</h2>
           <p className="mt-1 text-xs text-slate-500">
-            Sistem cek owner_cpm_id tiap creator — req otomatis muncul di CM Workspace pemilik, bukan CM lain (§2E.1).
+            3 kolom: (1) kreator → CM pemilik (cek owner_cpm_id, bukan CM lain); (2) kategori →
+            semua CM yang punya kreator dengan penjualan di kategori itu; (3) teks bebas → broadcast
+            semua CM. Tidak perlu hafal creator ID — cari & centang (§2E.1).
           </p>
-          <div className="mt-3"><RouteCampaignForm deals={dealOptions} /></div>
+          <div className="mt-3">
+            <RouteCampaignForm deals={dealOptions} creators={creatorOptions} categories={categoryOptions} />
+          </div>
         </section>
       )}
 
@@ -144,8 +172,30 @@ export default async function BizdevWorkspacePage() {
             <tbody className="divide-y divide-slate-100">
               {(campaignReqs ?? []).map((r) => (
                 <tr key={r.id}>
-                  <td className="px-4 py-2">{name(r.brand_deals)}</td>
-                  <td className="px-4 py-2">{name(r.creators)} <span className="text-xs text-slate-400">{r.creator_id}</span></td>
+                  <td className="px-4 py-2">
+                    {r.deal_id ? name(r.brand_deals) : <span className="text-slate-400">tanpa deal</span>}
+                    {r.request_text && (
+                      <span className="mt-0.5 block max-w-xs truncate text-xs text-slate-500" title={r.request_text}>
+                        “{r.request_text}”
+                      </span>
+                    )}
+                  </td>
+                  <td className="px-4 py-2">
+                    {r.route_type === "category" ? (
+                      <span className="rounded-full bg-teal-100 px-2 py-0.5 text-xs font-medium text-teal-800">
+                        Kategori: {r.level2_category}
+                      </span>
+                    ) : r.route_type === "broadcast" ? (
+                      <span className="rounded-full bg-purple-100 px-2 py-0.5 text-xs font-medium text-purple-800">
+                        Broadcast
+                      </span>
+                    ) : (
+                      <>{name(r.creators)} <span className="text-xs text-slate-400">{r.creator_id}</span></>
+                    )}
+                    {r.route_type !== "creator" && r.creator_id && (
+                      <span className="mt-0.5 block text-xs text-slate-500">→ {name(r.creators)} {r.creator_id}</span>
+                    )}
+                  </td>
                   <td className="px-4 py-2">
                     {r.creator_sourced_by === "bizdev" ? (
                       <span className="rounded-full bg-indigo-100 px-2 py-0.5 text-xs font-medium text-indigo-800">

@@ -10,7 +10,7 @@ import {
   buildMonthlyGrowth,
   type WeeklyGrowthInputRow,
 } from "@/lib/m8/weekly-growth";
-import { cmConfirmCampaign } from "../campaign-actions";
+import { cmConfirmCampaign, cmClaimBroadcastRequest } from "../campaign-actions";
 import {
   approveAdsRequest,
   assignCreator,
@@ -306,7 +306,7 @@ export default async function CmWorkspacePage({
 
   let campaignReqQuery = supabase
     .from("campaign_requests")
-    .select("id, deal_id, creator_id, owner_cpm_id, cm_confirm_status, needs_brand_acc, brand_acc_status, final_status, handed_over_at, notes, created_at, brand_deals(brand_name), creators(name)")
+    .select("id, deal_id, creator_id, owner_cpm_id, route_type, level2_category, request_text, cm_confirm_status, needs_brand_acc, brand_acc_status, final_status, handed_over_at, notes, created_at, brand_deals(brand_name), creators(name)")
     .order("created_at", { ascending: false })
     .limit(50);
   if (isCpm) campaignReqQuery = campaignReqQuery.eq("owner_cpm_id", member.id);
@@ -744,12 +744,16 @@ export default async function CmWorkspacePage({
       {/* ===== §2A.6 Campaign dari BizDev (routing §2E) ===== */}
       <section>
         <h2 className="text-lg font-medium">Campaign dari BizDev — perlu konfirmasi</h2>
+        <p className="mt-1 text-xs text-slate-500">
+          Req kreator (langsung ke Anda) + req kategori/broadcast (BizDev tidak sebut kreator —
+          Anda pilih kreator sendiri lalu konfirmasi). §2E.1.
+        </p>
         <div className="mt-3 overflow-x-auto rounded-lg border border-slate-200 bg-white">
           <table className="min-w-full text-sm">
             <thead className="bg-slate-50 text-left text-xs uppercase text-slate-500">
               <tr>
                 <th className="px-4 py-3">Brand / Deal</th>
-                <th className="px-4 py-3">Creator</th>
+                <th className="px-4 py-3">Sumber / Creator</th>
                 <th className="px-4 py-3">Konfirmasi CM</th>
                 <th className="px-4 py-3">Acc Brand</th>
                 <th className="px-4 py-3">Status</th>
@@ -757,10 +761,29 @@ export default async function CmWorkspacePage({
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {(campaignReqs ?? []).map((r) => (
+              {(campaignReqs ?? []).map((r) => {
+                const isBroadcast = r.route_type === "category" || r.route_type === "broadcast";
+                const needsPick = isBroadcast && !r.creator_id;
+                return (
                 <tr key={r.id}>
-                  <td className="px-4 py-2">{name(r.brand_deals)} <span className="text-xs text-slate-400">{r.deal_id}</span></td>
-                  <td className="px-4 py-2">{name(r.creators)} <span className="text-xs text-slate-400">{r.creator_id}</span></td>
+                  <td className="px-4 py-2">
+                    {r.deal_id ? <>{name(r.brand_deals)} <span className="text-xs text-slate-400">{r.deal_id}</span></> : <span className="text-slate-400">tanpa deal</span>}
+                    {r.request_text && (
+                      <span className="mt-0.5 block max-w-xs text-xs text-slate-500">“{r.request_text}”</span>
+                    )}
+                  </td>
+                  <td className="px-4 py-2">
+                    {r.route_type === "category" ? (
+                      <span className="rounded-full bg-teal-100 px-2 py-0.5 text-xs font-medium text-teal-800">Kategori: {r.level2_category}</span>
+                    ) : r.route_type === "broadcast" ? (
+                      <span className="rounded-full bg-purple-100 px-2 py-0.5 text-xs font-medium text-purple-800">Broadcast</span>
+                    ) : (
+                      <>{name(r.creators)} <span className="text-xs text-slate-400">{r.creator_id}</span></>
+                    )}
+                    {isBroadcast && r.creator_id && (
+                      <span className="mt-0.5 block text-xs text-slate-600">→ {name(r.creators)} <span className="text-slate-400">{r.creator_id}</span></span>
+                    )}
+                  </td>
                   <td className="px-4 py-2">{r.cm_confirm_status}</td>
                   <td className="px-4 py-2">{r.needs_brand_acc ? r.brand_acc_status : "tidak perlu"}</td>
                   <td className="px-4 py-2">
@@ -772,7 +795,7 @@ export default async function CmWorkspacePage({
                     </span>
                   </td>
                   <td className="px-4 py-2">
-                    {r.final_status === "proses" && r.cm_confirm_status === "menunggu" && (
+                    {r.final_status === "proses" && r.cm_confirm_status === "menunggu" && !needsPick && (
                       <div className="flex gap-1">
                         {(["mau", "tidak"] as const).map((d) => (
                           <form key={d} action={cmConfirmCampaign}>
@@ -785,9 +808,28 @@ export default async function CmWorkspacePage({
                         ))}
                       </div>
                     )}
+                    {r.final_status === "proses" && r.cm_confirm_status === "menunggu" && needsPick && (
+                      <div className="flex flex-col gap-1">
+                        <form action={cmClaimBroadcastRequest} className="flex items-center gap-1">
+                          <input type="hidden" name="req_id" value={r.id} />
+                          <input type="hidden" name="decision" value="mau" />
+                          <select name="creator_id" required className="rounded-md border border-slate-300 px-2 py-1 text-xs">
+                            <option value="">— pilih kreator —</option>
+                            {(creators ?? []).map((c) => <option key={c.id} value={c.id}>{c.name} ({c.id})</option>)}
+                          </select>
+                          <button type="submit" className={`${btnSmall} bg-green-600 text-white hover:bg-green-500`}>Pilih & mau</button>
+                        </form>
+                        <form action={cmClaimBroadcastRequest}>
+                          <input type="hidden" name="req_id" value={r.id} />
+                          <input type="hidden" name="decision" value="tidak" />
+                          <button type="submit" className={`${btnSmall} bg-red-100 text-red-700 hover:bg-red-200`}>Tidak ada yang cocok</button>
+                        </form>
+                      </div>
+                    )}
                   </td>
                 </tr>
-              ))}
+                );
+              })}
               {(campaignReqs ?? []).length === 0 && (
                 <tr><td colSpan={6} className="px-4 py-6 text-center text-slate-400">Belum ada req campaign masuk.</td></tr>
               )}
