@@ -2,7 +2,8 @@
 
 import { useState, useTransition } from "react";
 import type { RunShopeeIngestResult } from "@/lib/ingest/shopee-run";
-import { runShopeeIngestAction } from "./shopee-actions";
+import { uploadIngestFile } from "@/lib/ingest/upload-client";
+import { runShopeeIngestFromStorageAction } from "./shopee-actions";
 
 const FILE_ACCEPT = ".csv,text/csv";
 
@@ -10,17 +11,32 @@ const FILE_ACCEPT = ".csv,text/csv";
 export function ShopeeIngestForm() {
   const [result, setResult] = useState<RunShopeeIngestResult | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [stage, setStage] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
 
   function onSubmit(formData: FormData) {
     setError(null);
     setResult(null);
+    const file = formData.get("shopee_file");
+    if (!(file instanceof File) || file.size === 0) {
+      setError("File Conversion Report Shopee (gabungan MCN + SAP) wajib diunggah");
+      return;
+    }
     startTransition(async () => {
-      const res = await runShopeeIngestAction(formData);
-      if (res.ok) {
-        setResult(res.result);
-      } else {
-        setError(res.error);
+      try {
+        setStage("Mengunggah file ke storage…");
+        const ref = await uploadIngestFile(file, "shopee");
+        setStage("Memproses agregat di server…");
+        const res = await runShopeeIngestFromStorageAction(ref);
+        if (res.ok) {
+          setResult(res.result);
+        } else {
+          setError(res.error);
+        }
+      } catch (e) {
+        setError(e instanceof Error ? e.message : "Terjadi kesalahan tidak terduga saat mengunggah.");
+      } finally {
+        setStage(null);
       }
     });
   }
@@ -41,7 +57,7 @@ export function ShopeeIngestForm() {
           type="submit" disabled={pending}
           className="rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-700 disabled:opacity-50"
         >
-          {pending ? "Memproses..." : "Proses Upload Mingguan"}
+          {pending ? (stage ?? "Memproses...") : "Proses Upload Mingguan"}
         </button>
       </form>
       <p className="mt-2 text-xs text-slate-500">

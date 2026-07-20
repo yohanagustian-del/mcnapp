@@ -2,7 +2,8 @@
 
 import { useState, useTransition } from "react";
 import type { RunIngestResult } from "@/lib/ingest/run";
-import { runIngestAction } from "./actions";
+import { uploadIngestFile } from "@/lib/ingest/upload-client";
+import { runIngestFromStorageAction } from "./actions";
 
 const FILE_ACCEPT =
   ".xlsx,.xls,.csv,.numbers,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.apple.numbers,text/csv";
@@ -12,17 +13,41 @@ export function IngestForm() {
   const [result, setResult] = useState<RunIngestResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [tapChosen, setTapChosen] = useState(false);
+  const [stage, setStage] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
 
   function onSubmit(formData: FormData) {
     setError(null);
     setResult(null);
+    const mcnFile = formData.get("mcn_file");
+    if (!(mcnFile instanceof File) || mcnFile.size === 0) {
+      setError("File MCN report (semua transaksi) wajib diunggah");
+      return;
+    }
+    const tapRaw = formData.get("tap_file");
+    const tapFile = tapRaw instanceof File && tapRaw.size > 0 ? tapRaw : null;
+
     startTransition(async () => {
-      const res = await runIngestAction(formData);
-      if (res.ok) {
-        setResult(res.result);
-      } else {
-        setError(res.error);
+      try {
+        // 1. Upload whole file(s) straight to Storage (bypasses the serverless
+        //    body limit so ~61k-row exports go up in one piece).
+        setStage("Mengunggah file ke storage…");
+        const mcnRef = await uploadIngestFile(mcnFile, "mcn");
+        const tapRef = tapFile ? await uploadIngestFile(tapFile, "tap") : null;
+
+        // 2. Server downloads + processes the file WHOLE (no splitting → no
+        //    replace-loss) then removes the transient objects.
+        setStage("Memproses agregat di server…");
+        const res = await runIngestFromStorageAction(mcnRef, tapRef);
+        if (res.ok) {
+          setResult(res.result);
+        } else {
+          setError(res.error);
+        }
+      } catch (e) {
+        setError(e instanceof Error ? e.message : "Terjadi kesalahan tidak terduga saat mengunggah.");
+      } finally {
+        setStage(null);
       }
     });
   }
@@ -59,10 +84,12 @@ export function IngestForm() {
           type="submit" disabled={pending}
           className="rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-700 disabled:opacity-50"
         >
-          {pending ? "Memproses..." : "Proses Upload Mingguan"}
+          {pending ? (stage ?? "Memproses...") : "Proses Upload Mingguan"}
         </button>
       </form>
       <p className="mt-2 text-xs text-slate-500">
+        File diunggah UTUH langsung ke storage lebih dulu (tidak lewat batas ukuran server), jadi
+        file export besar sampai puluhan ribu baris bisa diunggah sekaligus — tidak perlu dipecah.
         Pipeline deterministik (0 token AI): parse → tabel agregat performa → raw dibuang (tidak
         pernah disimpan ke DB). Periode terdeteksi otomatis dari kolom Date. Idempotent per periode —
         upload ulang menimpa hasil lama. Analisis kebocoran link agency kini dilakukan lewat artifak

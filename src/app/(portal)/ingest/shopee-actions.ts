@@ -3,6 +3,10 @@
 import { revalidatePath } from "next/cache";
 import { requirePermission } from "@/lib/rbac";
 import { runShopeeIngest, type RunShopeeIngestResult } from "@/lib/ingest/shopee-run";
+import { createAdminClient } from "@/lib/supabase/admin";
+import {
+  assertValidObjectRef, downloadIngestFile, removeIngestFiles, type IngestObjectRef,
+} from "@/lib/ingest/storage";
 
 /**
  * Discriminated-union return (never throw across the server-action boundary —
@@ -38,5 +42,39 @@ export async function runShopeeIngestAction(formData: FormData): Promise<RunShop
     return { ok: true, result };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : "Terjadi kesalahan tidak terduga." };
+  }
+}
+
+/**
+ * Storage-based Shopee upload (large-file path) — same mechanism as
+ * runIngestFromStorageAction: the browser uploads the whole Conversion Report
+ * to Supabase Storage first, so a large file no longer hits the serverless body
+ * limit. This action downloads it server-side, runs the existing Shopee
+ * pipeline, and removes the transient object afterward.
+ */
+export async function runShopeeIngestFromStorageAction(
+  fileRef: unknown
+): Promise<RunShopeeIngestActionResult> {
+  const paths: string[] = [];
+  try {
+    const actor = await requirePermission("ingest.run");
+
+    assertValidObjectRef(fileRef, "Shopee");
+    const ref: IngestObjectRef = fileRef;
+    paths.push(ref.path);
+
+    const admin = createAdminClient();
+    const file = await downloadIngestFile(admin, ref);
+
+    const result = await runShopeeIngest({ file, actorId: actor.id });
+
+    revalidatePath("/ingest");
+    revalidatePath("/creators");
+    revalidatePath("/dashboard");
+    return { ok: true, result };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "Terjadi kesalahan tidak terduga." };
+  } finally {
+    if (paths.length > 0) await removeIngestFiles(createAdminClient(), paths);
   }
 }
