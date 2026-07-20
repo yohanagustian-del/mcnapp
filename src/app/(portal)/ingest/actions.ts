@@ -3,6 +3,10 @@
 import { revalidatePath } from "next/cache";
 import { requirePermission } from "@/lib/rbac";
 import { runIngest, type RunIngestResult } from "@/lib/ingest/run";
+import { createAdminClient } from "@/lib/supabase/admin";
+import {
+  assertValidObjectRef, downloadIngestFile, removeIngestFiles, type IngestObjectRef,
+} from "@/lib/ingest/storage";
 
 /**
  * Discriminated-union return (never throw across the server-action boundary): Next.js
@@ -42,5 +46,53 @@ export async function runIngestAction(formData: FormData): Promise<RunIngestActi
     return { ok: true, result };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : "Terjadi kesalahan tidak terduga." };
+  }
+}
+
+/**
+ * Storage-based weekly upload (large-file path). The browser has already pushed
+ * the WHOLE MCN file (and optional TAP file) straight to Supabase Storage —
+ * bypassing the ~4,5MB serverless body limit that blocked ~61k-row exports — so
+ * this action receives only the object refs. It downloads the files server-side
+ * (service-role, RLS-bypass), runs the SAME parse → aggregate → drop-raw
+ * pipeline as runIngestAction over the file WHOLE (no splitting ⇒ no
+ * replace-loss), then removes the transient objects (raw never persisted).
+ *
+ * Cleanup is best-effort and always runs (success or failure); a leftover
+ * object in the private transient bucket is harmless and never masks the result.
+ */
+export async function runIngestFromStorageAction(
+  mcnRef: unknown,
+  tapRef: unknown
+): Promise<RunIngestActionResult> {
+  const paths: string[] = [];
+  try {
+    const actor = await requirePermission("ingest.run");
+
+    assertValidObjectRef(mcnRef, "MCN");
+    const mcn: IngestObjectRef = mcnRef;
+    paths.push(mcn.path);
+
+    let tap: IngestObjectRef | null = null;
+    if (tapRef != null) {
+      assertValidObjectRef(tapRef, "TAP");
+      tap = tapRef;
+      paths.push(tap.path);
+    }
+
+    const admin = createAdminClient();
+    const mcnFile = await downloadIngestFile(admin, mcn);
+    const tapFile = tap ? await downloadIngestFile(admin, tap) : null;
+
+    const result = await runIngest({ mcnFile, tapFile, actorId: actor.id });
+
+    revalidatePath("/ingest");
+    revalidatePath("/creators");
+    revalidatePath("/dashboard");
+    return { ok: true, result };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "Terjadi kesalahan tidak terduga." };
+  } finally {
+    if (paths.length > 0) await removeIngestFiles(createAdminClient(), paths);
   }
 }
