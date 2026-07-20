@@ -86,6 +86,10 @@ export const NAV_ITEMS: NavItem[] = [
 export const PERMISSIONS: Record<string, Role[]> = {
   "team.bulk_upload": MANAGEMENT_ROLES,
   "creators.bulk_upload": [...MANAGEMENT_ROLES, ...ACQUISITION_ROLES],
+  // Edit master data kreator per-row (username sering ganti, no HP, RC, level, dll).
+  // Dimiliki CM (Creator Manager) + management + akuisisi + creator_support — sejajar
+  // dengan RLS creators_update (0002). commission_share TETAP read-only (CLAUDE.md #3).
+  "creators.edit": [...MANAGEMENT_ROLES, ...CM_ROLES, ...ACQUISITION_ROLES, "creator_support"],
   "deals.register": [...MANAGEMENT_ROLES, "bizdev_lead", "bizdev"],
   "deals.import_legacy": [...MANAGEMENT_ROLES, "bizdev_lead", "bd_admin"],
   // M4 §2.8: weekly CSV upload + engine run (Director/Head/SPV/CM Lead/CPM/Campaign Ops/External)

@@ -295,12 +295,12 @@ export async function registerCreator(formData: FormData): Promise<void> {
   // & RENEWAL lewat service-role client (bypass trigger protect_commission_share).
   const commissionShare = sharePct / 100;
 
-  // Level opsional; bila diisi harus 1–6.
+  // Level opsional; bila diisi harus 1–8.
   const levelRaw = String(formData.get("level") ?? "").trim();
   let level: number | null = null;
   if (levelRaw) {
     const n = Number(levelRaw);
-    if (!Number.isInteger(n) || n < 1 || n > 6) throw new Error("Level harus antara 1–6");
+    if (!Number.isInteger(n) || n < 1 || n > 8) throw new Error("Level harus antara 1–8");
     level = n;
   }
 
