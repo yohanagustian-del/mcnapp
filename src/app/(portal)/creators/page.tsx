@@ -3,6 +3,7 @@ import { requireMember, hasPermission } from "@/lib/rbac";
 import { createClient } from "@/lib/supabase/server";
 import { CsvUploadForm } from "@/components/csv-upload-form";
 import { uploadCreators, updateRateCard } from "./actions";
+import { CreatorEditButton } from "./creator-edit-button";
 
 export const dynamic = "force-dynamic";
 
@@ -31,6 +32,7 @@ const td = "px-3 py-2 whitespace-nowrap";
 export default async function CreatorsPage() {
   const member = await requireMember();
   const canUpload = hasPermission("creators.bulk_upload", member.role);
+  const canEdit = hasPermission("creators.edit", member.role);
 
   const supabase = await createClient();
   const { data: creators } = await supabase
@@ -50,6 +52,14 @@ export default async function CreatorsPage() {
         <a href="/ingest" className="underline">/ingest</a> (rata-rata dari seluruh bulan yang punya
         data, bukan total sekali batch). Sharing komisi sync dari platform (read-only) — turun =
         alert, bukan edit.
+        {canEdit && (
+          <>
+            {" "}
+            CM bisa mengedit data kreator (username, no HP, RC, rate card, level, domisili, UID,
+            status) lewat tombol <strong>Edit</strong> di setiap baris — setiap perubahan tercatat di
+            audit log.
+          </>
+        )}
       </p>
 
       {canUpload && (
@@ -88,6 +98,7 @@ export default async function CreatorsPage() {
               <th className="px-3 py-3">Domisili</th>
               <th className="px-3 py-3">UID</th>
               <th className="px-3 py-3">Status</th>
+              {canEdit && <th className="px-3 py-3">Aksi</th>}
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
@@ -164,12 +175,31 @@ export default async function CreatorsPage() {
                   <td className={td}>{c.domisili ?? "—"}</td>
                   <td className={`${td} font-mono text-[10px] text-slate-400`}>{c.uid ?? "—"}</td>
                   <td className={td}>{c.status}</td>
+                  {canEdit && (
+                    <td className={td}>
+                      <CreatorEditButton
+                        creator={{
+                          id: c.id,
+                          name: c.name,
+                          username: c.username,
+                          phone: c.phone,
+                          rc_live: c.rc_live,
+                          rc_video: c.rc_video,
+                          rate_card: c.rate_card,
+                          level: c.level,
+                          domisili: c.domisili,
+                          uid: c.uid,
+                          status: c.status,
+                        }}
+                      />
+                    </td>
+                  )}
                 </tr>
               );
             })}
             {(creators ?? []).length === 0 && (
               <tr>
-                <td colSpan={22} className="px-4 py-6 text-center text-slate-400">
+                <td colSpan={canEdit ? 23 : 22} className="px-4 py-6 text-center text-slate-400">
                   Belum ada kreator.
                 </td>
               </tr>

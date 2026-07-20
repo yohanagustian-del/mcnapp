@@ -160,6 +160,106 @@ export async function uploadCreators(formData: FormData): Promise<UploadReport> 
   return report;
 }
 
+/** State untuk form edit inline (useActionState). */
+export type CreatorEditState = { ok: boolean; error?: string };
+
+/**
+ * Edit master data kreator per-row oleh Creator Manager (CLAUDE.md: creator suka
+ * ganti username, no HP berubah, dll). Field editable: name, username, phone,
+ * rc_live, rc_video, rate_card, level, domisili, uid, status.
+ *
+ * commission_share SENGAJA tidak termasuk — read-only sync platform (CLAUDE.md #3):
+ * turun = alert, bukan edit. Diproteksi juga oleh trigger DB protect_commission_share.
+ *
+ * Setiap perubahan dicatat ke audit_logs (type: auto) dengan diff before/after,
+ * hanya field yang benar-benar berubah.
+ */
+export async function updateCreatorProfile(
+  _prev: CreatorEditState | null,
+  formData: FormData
+): Promise<CreatorEditState> {
+  const actor = await requirePermission("creators.edit");
+  const creatorId = String(formData.get("creator_id") ?? "").trim();
+  if (!creatorId) return { ok: false, error: "creator_id wajib" };
+
+  // Normalisasi helper: string kosong → null (agar UPDATE tidak menyimpan "").
+  const text = (key: string): string | null => {
+    const v = String(formData.get(key) ?? "").trim();
+    return v || null;
+  };
+
+  const name = text("name");
+  if (!name) return { ok: false, error: "Nama Creator wajib diisi" };
+
+  // Level: kosong → null; selain itu harus 1..6.
+  const levelRaw = String(formData.get("level") ?? "").trim();
+  let level: number | null = null;
+  if (levelRaw) {
+    const n = Number(levelRaw);
+    if (!Number.isInteger(n) || n < 1 || n > 6) {
+      return { ok: false, error: "Level harus angka 1–6 (atau kosong)" };
+    }
+    level = n;
+  }
+
+  const statusRaw = String(formData.get("status") ?? "").trim().toLowerCase();
+  if (!STATUSES.includes(statusRaw as (typeof STATUSES)[number])) {
+    return { ok: false, error: `Status tidak valid: ${statusRaw || "(kosong)"}` };
+  }
+
+  const payload = {
+    name,
+    username: text("username"),
+    phone: text("phone"),
+    rc_live: text("rc_live"),
+    rc_video: text("rc_video"),
+    rate_card: parseRupiah(String(formData.get("rate_card") ?? "")),
+    level,
+    domisili: text("domisili"),
+    uid: text("uid"),
+    status: statusRaw,
+  } as const;
+
+  const admin = createAdminClient();
+  const editableCols = Object.keys(payload).join(", ");
+  const { data: before } = await admin
+    .from("creators")
+    .select(editableCols)
+    .eq("id", creatorId)
+    .maybeSingle<Record<string, unknown>>();
+  if (!before) return { ok: false, error: `Creator ${creatorId} tidak ditemukan` };
+
+  // Hanya catat field yang berubah agar audit log bermakna. Numeric (rate_card)
+  // bisa kembali sebagai string dari Postgres — bandingkan lewat normalisasi
+  // string supaya tidak salah deteksi "berubah".
+  const norm = (x: unknown): string | null => (x == null ? null : String(x));
+  const beforeDiff: Record<string, unknown> = {};
+  const afterDiff: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(payload)) {
+    if (norm(before[k]) !== norm(v)) {
+      beforeDiff[k] = before[k] ?? null;
+      afterDiff[k] = v ?? null;
+    }
+  }
+
+  if (Object.keys(afterDiff).length === 0) return { ok: true };
+
+  const { error } = await admin.from("creators").update(payload).eq("id", creatorId);
+  if (error) return { ok: false, error: `Gagal menyimpan: ${error.message}` };
+
+  await writeAudit({
+    actorId: actor.id,
+    action: "creator.profile_update",
+    entityType: "creators",
+    entityId: creatorId,
+    before: beforeDiff,
+    after: afterDiff,
+    type: "auto",
+  });
+  revalidatePath("/creators");
+  return { ok: true };
+}
+
 /** Rate card diisi manual per creator (QA feedback). Kosong = belum ada. */
 export async function updateRateCard(formData: FormData): Promise<void> {
   const actor = await requirePermission("creators.bulk_upload");
