@@ -168,14 +168,14 @@ export function CreatorEditButton({ creator }: { creator: EditableCreator }) {
 
               <div>
                 <label className={labelCls} htmlFor={`level-${creator.id}`}>
-                  Level (1–6)
+                  Level (1–8)
                 </label>
                 <input
                   id={`level-${creator.id}`}
                   name="level"
                   type="number"
                   min={1}
-                  max={6}
+                  max={8}
                   defaultValue={creator.level ?? ""}
                   className={inputCls}
                 />

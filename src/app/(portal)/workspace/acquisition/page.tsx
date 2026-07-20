@@ -133,7 +133,7 @@ export default async function AcquisitionWorkspacePage() {
             <input name="content_quality" placeholder="Kualitas (opsional)" className={input} />
             <select name="level" className={input}>
               <option value="">Level (opsional)</option>
-              {[1, 2, 3, 4, 5, 6].map((l) => <option key={l} value={l}>Level {l}</option>)}
+              {[1, 2, 3, 4, 5, 6, 7, 8].map((l) => <option key={l} value={l}>Level {l}</option>)}
             </select>
             <input name="gmv" placeholder="GMV Total avg/bln (opsional)" className={input} />
             <input name="gmv_live" placeholder="GMV Live avg/bln (opsional)" className={input} />

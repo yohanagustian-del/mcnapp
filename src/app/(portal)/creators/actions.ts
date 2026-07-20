@@ -23,12 +23,12 @@ function parseNiches(raw: string | undefined): string[] | null {
   return parts.length ? parts.slice(0, 3) : null;
 }
 
-/** "Lv 0" / "Lv 3" / "3" → level int 1..6 (0 / kosong / tak valid → null). */
+/** "Lv 0" / "Lv 3" / "3" → level int 1..8 (0 / kosong / tak valid → null). */
 function parseLevel(raw: string): number | null {
   const m = raw.match(/(\d)/);
   if (!m) return null;
   const n = Number(m[1]);
-  return n >= 1 && n <= 6 ? n : null;
+  return n >= 1 && n <= 8 ? n : null;
 }
 
 /**
@@ -196,8 +196,8 @@ export async function updateCreatorProfile(
   let level: number | null = null;
   if (levelRaw) {
     const n = Number(levelRaw);
-    if (!Number.isInteger(n) || n < 1 || n > 6) {
-      return { ok: false, error: "Level harus angka 1–6 (atau kosong)" };
+    if (!Number.isInteger(n) || n < 1 || n > 8) {
+      return { ok: false, error: "Level harus angka 1–8 (atau kosong)" };
     }
     level = n;
   }
