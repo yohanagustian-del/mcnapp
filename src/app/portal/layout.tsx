@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { requireCreator } from "@/lib/m9/creator-auth";
 import { logout } from "@/app/login/actions";
+import { ChangePasswordButton } from "@/components/change-password-button";
 
 const CREATOR_NAV = [
   { href: "/portal", label: "Performa Saya" },
@@ -31,6 +32,9 @@ export default async function CreatorPortalLayout({ children }: { children: Reac
         </nav>
         <div className="border-t border-slate-200 p-3">
           <p className="truncate text-xs text-slate-500">{creator.email}</p>
+          <div className="mt-2">
+            <ChangePasswordButton className="text-sm text-slate-600 hover:text-slate-900" />
+          </div>
           <form action={logout}>
             <button className="mt-2 text-sm text-slate-600 hover:text-slate-900">Keluar</button>
           </form>

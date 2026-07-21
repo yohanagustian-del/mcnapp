@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { requireMember, NAV_ITEMS, canAccessNav } from "@/lib/rbac";
 import { logout } from "@/app/login/actions";
+import { ChangePasswordButton } from "@/components/change-password-button";
 
 const ROLE_LABELS: Record<string, string> = {
   director: "Director",
@@ -46,7 +47,10 @@ export default async function PortalLayout({ children }: { children: React.React
           <p className="truncate text-xs text-slate-500">
             {ROLE_LABELS[member.role] ?? member.role}
           </p>
-          <form action={logout} className="mt-3">
+          <div className="mt-3">
+            <ChangePasswordButton className="text-xs text-slate-500 underline hover:text-slate-800" />
+          </div>
+          <form action={logout} className="mt-2">
             <button type="submit" className="text-xs text-slate-500 underline hover:text-slate-800">
               Keluar
             </button>
