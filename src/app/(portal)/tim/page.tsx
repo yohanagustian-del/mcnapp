@@ -25,7 +25,7 @@ export default async function TimPage() {
         <CsvUploadForm
           action={uploadTeamMembers}
           buttonLabel="Upload Anggota Tim"
-          helpText="Kolom CSV: name, email, role, team_group, platform_segment (opsional). Role: director|head|spv|cm_lead|cpm|bizdev_lead|bizdev|campaign_ops|bd_admin|acquisition_lead|acquisition_spec|campaign_external|creator_support|finance."
+          helpText="Kolom CSV: name, email, role (wajib); team_group & platform_segment opsional. team_group kosong akan diisi otomatis dari role (cpm/cm_lead→cm, director/head/spv→management, dst). Role: director|head|spv|cm_lead|cpm|bizdev_lead|bizdev|campaign_ops|bd_admin|ads_support|acquisition_lead|acquisition_spec|campaign_external|creator_support|finance|od_viewer. Catatan: 'cm' bukan role — pakai 'cpm' atau 'cm_lead'."
         />
       </div>
 

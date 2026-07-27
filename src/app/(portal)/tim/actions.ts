@@ -4,17 +4,65 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { writeAudit } from "@/lib/audit";
-import { requirePermission, ROLES } from "@/lib/rbac";
+import { requirePermission, ROLES, type Role } from "@/lib/rbac";
 import { parseSheet } from "@/lib/utils/sheet";
 
-const TEAM_GROUPS = ["management", "acquisition", "cm", "bizdev", "external", "support", "finance"] as const;
+// Mirrors team_group_t in the DB (0001_init_schema + 0010_rbac_foundation adds 'od').
+const TEAM_GROUPS = ["management", "acquisition", "cm", "bizdev", "external", "support", "finance", "od"] as const;
 const SEGMENTS = ["tiktok", "shopee", "celeb"] as const;
 
+/**
+ * Divisi setiap role — team_group selalu bisa diturunkan dari role, jadi kolom
+ * team_group di sheet bersifat opsional (diisi otomatis kalau kosong). Deterministik,
+ * bukan tebakan: satu role hanya milik satu divisi.
+ */
+const ROLE_TEAM_GROUP: Record<Role, (typeof TEAM_GROUPS)[number]> = {
+  director: "management",
+  head: "management",
+  spv: "management",
+  cm_lead: "cm",
+  cpm: "cm",
+  bizdev_lead: "bizdev",
+  bizdev: "bizdev",
+  campaign_ops: "bizdev",
+  bd_admin: "bizdev",
+  ads_support: "bizdev",
+  acquisition_lead: "acquisition",
+  acquisition_spec: "acquisition",
+  campaign_external: "external",
+  creator_support: "support",
+  finance: "finance",
+  od_viewer: "od",
+};
+
+/** Pesan error yang menyebut kolom + nilai yang ditolak, bukan sekadar daftar enum. */
+function roleErrorMessage(value: string): string {
+  if (!value) return `kolom 'role' kosong — wajib diisi (pilihan: ${ROLES.join(", ")})`;
+  if (value === "cm") {
+    return "role 'cm' tidak valid — 'cm' adalah nilai untuk kolom team_group. Untuk tim CM pakai 'cpm' (Creator Manager) atau 'cm_lead' (CM Lead)";
+  }
+  if ((TEAM_GROUPS as readonly string[]).includes(value)) {
+    return `role '${value}' tidak valid — itu nilai untuk kolom team_group, bukan role (pilihan role: ${ROLES.join(", ")})`;
+  }
+  return `role '${value}' tidak dikenal (pilihan: ${ROLES.join(", ")})`;
+}
+
+function teamGroupErrorMessage(value: string): string {
+  if (!value) {
+    return "kolom 'team_group' kosong dan tidak bisa diturunkan otomatis karena role tidak valid";
+  }
+  return `team_group '${value}' tidak dikenal (pilihan: ${TEAM_GROUPS.join(", ")})`;
+}
+
 const memberRowSchema = z.object({
-  name: z.string().min(1, "name kosong"),
+  name: z.string().min(1, "kolom 'name' kosong"),
   email: z.string().email("email tidak valid"),
-  role: z.enum(ROLES),
-  team_group: z.enum(TEAM_GROUPS),
+  role: z.enum(ROLES, {
+    errorMap: (_issue, ctx) => ({ message: roleErrorMessage(String(ctx.data ?? "")) }),
+  }),
+  team_group: z.enum(TEAM_GROUPS, {
+    errorMap: (_issue, ctx) => ({ message: teamGroupErrorMessage(String(ctx.data ?? "")) }),
+  }),
   platform_segment: z.enum(SEGMENTS).nullable(),
 });
 
@@ -39,11 +87,15 @@ export async function uploadTeamMembers(formData: FormData): Promise<UploadRepor
 
   for (const [i, raw] of rows.entries()) {
     const rowNum = i + 2; // header = line 1
+    const role = raw.role?.trim().toLowerCase() ?? "";
+    // team_group opsional: kalau kosong, turunkan dari role (satu role = satu divisi).
+    const teamGroup =
+      raw.team_group?.trim().toLowerCase() || ROLE_TEAM_GROUP[role as Role] || "";
     const parsed = memberRowSchema.safeParse({
       name: raw.name?.trim(),
       email: raw.email?.trim().toLowerCase(),
-      role: raw.role?.trim().toLowerCase(),
-      team_group: raw.team_group?.trim().toLowerCase(),
+      role,
+      team_group: teamGroup,
       platform_segment: raw.platform_segment?.trim().toLowerCase() || null,
     });
     if (!parsed.success) {
