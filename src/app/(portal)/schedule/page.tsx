@@ -7,6 +7,7 @@ import { ScheduleBoard, type BoardWeekMatrix } from "./schedule-board";
 import { WeekNav } from "./week-nav";
 import { VerifyPanel, type VerifyRow } from "./verify-panel";
 import { RosterPanel, type RosterRow } from "./roster-panel";
+import { CreatorFilterProvider, CreatorFilterBar, type CmOption } from "./creator-filter";
 
 export const dynamic = "force-dynamic";
 
@@ -101,6 +102,21 @@ export default async function SchedulePage({
     }
   }
 
+  // CM options for the multi-select — derived from the creators actually in view (calendar
+  // roster + "Kelola Roster" list) so the dropdown never offers a CM with zero creators.
+  const cmOptionNameById = new Map<string, string>();
+  for (const c of [
+    ...((rosterCreators ?? []) as CreatorRow[]),
+    ...((allCreatorsForRoster ?? []) as CreatorRow[]),
+  ]) {
+    if (c.owner_cpm_id) {
+      cmOptionNameById.set(c.owner_cpm_id, cpmNameById.get(c.owner_cpm_id) ?? "—");
+    }
+  }
+  const cmOptions: CmOption[] = [...cmOptionNameById]
+    .map(([id, name]) => ({ id, name }))
+    .sort((a, b) => a.name.localeCompare(b.name, "id"));
+
   const rosterCreatorIds = ((rosterCreators ?? []) as CreatorRow[]).map((c) => c.id);
 
   // Slots for this week's 7-day range, scoped to the roster creators in view.
@@ -154,6 +170,7 @@ export default async function SchedulePage({
     id: c.id,
     name: c.name,
     username: c.username,
+    owner_cpm_id: c.owner_cpm_id,
     cmName: cmNameByCreator.get(c.id) ?? null,
     jenis_creator: c.jenis_creator,
     live_roster: c.live_roster,
@@ -162,56 +179,60 @@ export default async function SchedulePage({
   const rangeLabel = `${formatDayLabel(weekStart)} – ${formatDayLabel(weekEnd)}`;
 
   return (
-    <div className="space-y-8">
-      <div>
-        <h1 className="text-2xl font-semibold">Penjadwalan Live Streaming (M13)</h1>
-        <p className="mt-1 text-sm text-slate-500">
-          Kalender mingguan jadwal live kreator celebrity/livestream — pengganti Google Sheet.
-          Deterministik, 0 token AI.
-        </p>
+    <CreatorFilterProvider cms={cmOptions}>
+      <div className="space-y-8">
+        <div>
+          <h1 className="text-2xl font-semibold">Penjadwalan Live Streaming (M13)</h1>
+          <p className="mt-1 text-sm text-slate-500">
+            Kalender mingguan jadwal live kreator celebrity/livestream — pengganti Google Sheet.
+            Deterministik, 0 token AI.
+          </p>
+        </div>
+
+        <section className="space-y-3">
+          <WeekNav
+            weekStart={weekStart}
+            prevWeekStart={prevWeek(weekStart)}
+            nextWeekStart={nextWeek(weekStart)}
+            rangeLabel={rangeLabel}
+            canEdit={canEdit}
+          />
+          <CreatorFilterBar />
+          <ScheduleBoard
+            matrix={matrix}
+            creators={matrixCreators}
+            deals={(deals ?? []) as DealRow[]}
+            todayIso={today}
+            canEdit={canEdit}
+          />
+        </section>
+
+        {canVerify && (
+          <section>
+            <h2 className="text-lg font-medium">Verifikasi Hari Ini</h2>
+            <p className="mt-1 text-xs text-slate-500">
+              CM memverifikasi selama jam kerja; Creator Support di luar jam tersebut. Slot lampau
+              yang belum diverifikasi tampil di bagian terpisah.
+            </p>
+            <div className="mt-3">
+              <VerifyPanel todayRows={verifyRows} overdueRows={overdueRows} />
+            </div>
+          </section>
+        )}
+
+        {canRoster && (
+          <section>
+            <h2 className="text-lg font-medium">Kelola Roster</h2>
+            <p className="mt-1 text-xs text-slate-500">
+              Hanya kreator dengan roster live aktif yang muncul di kalender di atas. Pencarian
+              nama &amp; filter CM di atas juga berlaku untuk daftar ini.
+            </p>
+            <div className="mt-3">
+              <RosterPanel rows={rosterRows} />
+            </div>
+          </section>
+        )}
       </div>
-
-      <section className="space-y-3">
-        <WeekNav
-          weekStart={weekStart}
-          prevWeekStart={prevWeek(weekStart)}
-          nextWeekStart={nextWeek(weekStart)}
-          rangeLabel={rangeLabel}
-          canEdit={canEdit}
-        />
-        <ScheduleBoard
-          matrix={matrix}
-          creators={matrixCreators}
-          deals={(deals ?? []) as DealRow[]}
-          todayIso={today}
-          canEdit={canEdit}
-        />
-      </section>
-
-      {canVerify && (
-        <section>
-          <h2 className="text-lg font-medium">Verifikasi Hari Ini</h2>
-          <p className="mt-1 text-xs text-slate-500">
-            CM memverifikasi selama jam kerja; Creator Support di luar jam tersebut. Slot lampau
-            yang belum diverifikasi tampil di bagian terpisah.
-          </p>
-          <div className="mt-3">
-            <VerifyPanel todayRows={verifyRows} overdueRows={overdueRows} />
-          </div>
-        </section>
-      )}
-
-      {canRoster && (
-        <section>
-          <h2 className="text-lg font-medium">Kelola Roster</h2>
-          <p className="mt-1 text-xs text-slate-500">
-            Hanya kreator dengan roster live aktif yang muncul di kalender di atas.
-          </p>
-          <div className="mt-3">
-            <RosterPanel rows={rosterRows} />
-          </div>
-        </section>
-      )}
-    </div>
+    </CreatorFilterProvider>
   );
 }

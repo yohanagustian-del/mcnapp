@@ -5,6 +5,7 @@ import { creatorDayEmpty, slotFlags } from "@/lib/schedule/indicators";
 import { formatDayLabel } from "@/lib/schedule/week";
 import type { LiveScheduleSlot } from "@/lib/schedule/types";
 import { SlotForm, type DealOption, type RosterCreatorOption } from "./slot-form";
+import { useCreatorFilter } from "./creator-filter";
 
 const btnSmall = "rounded-md px-2 py-1 text-xs font-medium";
 
@@ -16,6 +17,7 @@ interface Selected {
 
 /** Board-level creator, superset of lib RosterCreator with display fields (username, CM name). */
 export interface BoardCreator extends RosterCreatorOption {
+  owner_cpm_id: string | null;
   cmName: string | null;
 }
 
@@ -83,6 +85,11 @@ export function ScheduleBoard({
   canEdit: boolean;
 }) {
   const [selected, setSelected] = useState<Selected | null>(null);
+  const { matches, isActive: filterActive } = useCreatorFilter();
+  const visibleRows = useMemo(
+    () => matrix.rows.filter((row) => matches(row.creator.name, row.creator.owner_cpm_id)),
+    [matrix.rows, matches]
+  );
   const tomorrowIso = useMemo(() => {
     const [y, m, d] = todayIso.split("-").map(Number);
     const dt = new Date(Date.UTC(y, m - 1, d) + 86_400_000);
@@ -123,7 +130,7 @@ export function ScheduleBoard({
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
-            {matrix.rows.map((row) => (
+            {visibleRows.map((row) => (
               <tr key={row.creator.id}>
                 <td className="sticky left-0 z-10 bg-white px-4 py-2 align-top">
                   <div className="font-medium text-slate-800">{row.creator.name}</div>
@@ -170,10 +177,12 @@ export function ScheduleBoard({
                 })}
               </tr>
             ))}
-            {matrix.rows.length === 0 && (
+            {visibleRows.length === 0 && (
               <tr>
-                <td colSpan={8} className="px-4 py-6 text-center text-slate-400">
-                  Belum ada kreator di roster live — aktifkan di bagian &quot;Kelola Roster&quot; di bawah.
+                <td colSpan={matrix.days.length + 1} className="px-4 py-6 text-center text-slate-400">
+                  {filterActive
+                    ? "Tidak ada kreator yang cocok dengan pencarian / filter CM."
+                    : "Belum ada kreator di roster live — aktifkan di bagian “Kelola Roster” di bawah."}
                 </td>
               </tr>
             )}

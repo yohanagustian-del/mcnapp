@@ -1,7 +1,8 @@
 "use client";
 
-import { useTransition } from "react";
+import { useMemo, useTransition } from "react";
 import { toggleRosterAction } from "./actions";
+import { useCreatorFilter } from "./creator-filter";
 
 const btnSmall = "rounded-md px-2 py-1 text-xs font-medium";
 
@@ -9,6 +10,7 @@ export interface RosterRow {
   id: string;
   name: string;
   username: string | null;
+  owner_cpm_id: string | null;
   cmName: string | null;
   jenis_creator: string | null;
   live_roster: boolean;
@@ -17,6 +19,11 @@ export interface RosterRow {
 /** Kelola roster — toggle whether a creator appears in the M13 live-schedule calendar. */
 export function RosterPanel({ rows }: { rows: RosterRow[] }) {
   const [pending, startTransition] = useTransition();
+  const { matches, isActive: filterActive } = useCreatorFilter();
+  const visibleRows = useMemo(
+    () => rows.filter((r) => matches(r.name, r.owner_cpm_id)),
+    [rows, matches]
+  );
 
   function toggle(creatorId: string, nextOn: boolean) {
     startTransition(async () => {
@@ -30,7 +37,8 @@ export function RosterPanel({ rows }: { rows: RosterRow[] }) {
   return (
     <details className="rounded-lg border border-slate-200 bg-white">
       <summary className="cursor-pointer px-4 py-3 text-sm font-medium text-slate-700">
-        Kelola Roster ({rows.filter((r) => r.live_roster).length} aktif dari {rows.length} kreator)
+        Kelola Roster ({visibleRows.filter((r) => r.live_roster).length} aktif dari{" "}
+        {visibleRows.length} kreator{filterActive ? " (terfilter)" : ""})
       </summary>
       <div className="overflow-x-auto border-t border-slate-100">
         <table className="min-w-full text-sm">
@@ -45,7 +53,7 @@ export function RosterPanel({ rows }: { rows: RosterRow[] }) {
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
-            {rows.map((r) => (
+            {visibleRows.map((r) => (
               <tr key={r.id}>
                 <td className="px-4 py-2 font-medium">{r.name}</td>
                 <td className="px-4 py-2 text-slate-500">{r.username ? `@${r.username}` : "—"}</td>
@@ -70,10 +78,12 @@ export function RosterPanel({ rows }: { rows: RosterRow[] }) {
                 </td>
               </tr>
             ))}
-            {rows.length === 0 && (
+            {visibleRows.length === 0 && (
               <tr>
                 <td colSpan={6} className="px-4 py-5 text-center text-slate-400">
-                  Belum ada kreator.
+                  {filterActive
+                    ? "Tidak ada kreator yang cocok dengan pencarian / filter CM."
+                    : "Belum ada kreator."}
                 </td>
               </tr>
             )}
