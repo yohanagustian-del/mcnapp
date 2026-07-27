@@ -5,7 +5,7 @@ import { creatorDayEmpty, slotFlags } from "@/lib/schedule/indicators";
 import { formatDayLabel } from "@/lib/schedule/week";
 import type { LiveScheduleSlot } from "@/lib/schedule/types";
 import { SlotForm, type DealOption, type RosterCreatorOption } from "./slot-form";
-import { useCreatorFilter } from "./creator-filter";
+import { useCreatorFilter } from "@/components/creator-filter";
 
 const btnSmall = "rounded-md px-2 py-1 text-xs font-medium";
 

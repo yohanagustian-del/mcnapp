@@ -30,9 +30,10 @@ export function useCreatorFilter(): CreatorFilterValue {
 }
 
 /**
- * Client-side name search + CM multi-select shared by the schedule calendar and the
- * roster panel. Both lists are already fully loaded by the server component, so the
- * filtering is pure JS — no extra Supabase round-trip per keystroke.
+ * Client-side name search + CM multi-select shared by the schedule calendar, the
+ * schedule roster panel and the creators master table. Each list is already fully
+ * loaded by its server component, so the filtering is pure JS — no extra Supabase
+ * round-trip per keystroke.
  */
 export function CreatorFilterProvider({
   cms,

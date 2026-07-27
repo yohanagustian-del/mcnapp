@@ -7,7 +7,7 @@ import { ScheduleBoard, type BoardWeekMatrix } from "./schedule-board";
 import { WeekNav } from "./week-nav";
 import { VerifyPanel, type VerifyRow } from "./verify-panel";
 import { RosterPanel, type RosterRow } from "./roster-panel";
-import { CreatorFilterProvider, CreatorFilterBar, type CmOption } from "./creator-filter";
+import { CreatorFilterProvider, CreatorFilterBar, type CmOption } from "@/components/creator-filter";
 
 export const dynamic = "force-dynamic";
 

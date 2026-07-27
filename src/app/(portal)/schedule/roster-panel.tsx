@@ -2,7 +2,7 @@
 
 import { useMemo, useTransition } from "react";
 import { toggleRosterAction } from "./actions";
-import { useCreatorFilter } from "./creator-filter";
+import { useCreatorFilter } from "@/components/creator-filter";
 
 const btnSmall = "rounded-md px-2 py-1 text-xs font-medium";
 
