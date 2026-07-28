@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { CsvUploadForm } from "@/components/csv-upload-form";
 import { uploadTeamMembers } from "./actions";
+import { DownloadTeamTemplateButton } from "./download-template-button";
 
 export default async function TimPage() {
   const member = await requireMember();
@@ -22,6 +23,15 @@ export default async function TimPage() {
       </p>
 
       <div className="mt-6">
+        <DownloadTeamTemplateButton />
+        <p className="mt-2 text-xs text-slate-500">
+          Unduh template dulu, isi datanya, lalu unggah lewat tombol di bawah. Header template sudah
+          sesuai sistem — jangan diubah. Kolom wajib: <strong>name</strong>, <strong>email</strong>,{" "}
+          <strong>role</strong>.
+        </p>
+      </div>
+
+      <div className="mt-4">
         <CsvUploadForm
           action={uploadTeamMembers}
           buttonLabel="Upload Anggota Tim"

@@ -6,34 +6,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { writeAudit } from "@/lib/audit";
 import { requirePermission, ROLES, type Role } from "@/lib/rbac";
 import { parseSheet } from "@/lib/utils/sheet";
-
-// Mirrors team_group_t in the DB (0001_init_schema + 0010_rbac_foundation adds 'od').
-const TEAM_GROUPS = ["management", "acquisition", "cm", "bizdev", "external", "support", "finance", "od"] as const;
-const SEGMENTS = ["tiktok", "shopee", "celeb"] as const;
-
-/**
- * Divisi setiap role — team_group selalu bisa diturunkan dari role, jadi kolom
- * team_group di sheet bersifat opsional (diisi otomatis kalau kosong). Deterministik,
- * bukan tebakan: satu role hanya milik satu divisi.
- */
-const ROLE_TEAM_GROUP: Record<Role, (typeof TEAM_GROUPS)[number]> = {
-  director: "management",
-  head: "management",
-  spv: "management",
-  cm_lead: "cm",
-  cpm: "cm",
-  bizdev_lead: "bizdev",
-  bizdev: "bizdev",
-  campaign_ops: "bizdev",
-  bd_admin: "bizdev",
-  ads_support: "bizdev",
-  acquisition_lead: "acquisition",
-  acquisition_spec: "acquisition",
-  campaign_external: "external",
-  creator_support: "support",
-  finance: "finance",
-  od_viewer: "od",
-};
+import { ROLE_TEAM_GROUP, SEGMENTS, TEAM_GROUPS } from "@/lib/tim/roles";
 
 /** Pesan error yang menyebut kolom + nilai yang ditolak, bukan sekadar daftar enum. */
 function roleErrorMessage(value: string): string {
@@ -87,6 +60,9 @@ export async function uploadTeamMembers(formData: FormData): Promise<UploadRepor
 
   for (const [i, raw] of rows.entries()) {
     const rowNum = i + 2; // header = line 1
+    // Baris contoh kosong bawaan template (dan baris kosong di tengah sheet)
+    // dilewati diam-diam — bukan error yang perlu diperbaiki user.
+    if (Object.values(raw).every((v) => String(v ?? "").trim() === "")) continue;
     const role = raw.role?.trim().toLowerCase() ?? "";
     // team_group opsional: kalau kosong, turunkan dari role (satu role = satu divisi).
     const teamGroup =
