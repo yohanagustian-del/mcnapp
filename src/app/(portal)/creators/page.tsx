@@ -4,6 +4,7 @@ import { CsvUploadForm } from "@/components/csv-upload-form";
 import { CreatorFilterProvider, CreatorFilterBar, type CmOption } from "@/components/creator-filter";
 import { uploadCreators } from "./actions";
 import { CreatorsTable, type CreatorTableRow } from "./creators-table";
+import { CreatorImportPanel } from "./creator-import-panel";
 
 export const dynamic = "force-dynamic";
 
@@ -19,7 +20,9 @@ export default async function CreatorsPage() {
       "id, name, username, profile_link, phone, uid, followers, content_quality, join_date, domisili, jenis_creator, niche, top_niches, level, segment, gmv, gmv_live, gmv_video, platform, rc_live, rc_video, rate_card, commission_share, contract_end_date, status, tim_akuisisi, target_gmv_monthly, owner_cpm_id, team_members(name)"
     )
     .order("created_at", { ascending: false })
-    .limit(200);
+    // Tabel dipaginasi di klien (10/20/50/100 per halaman), jadi daftar penuh
+    // dimuat sekali — 1000 = batas satu halaman PostgREST.
+    .limit(1000);
 
   const rows: CreatorTableRow[] = (creators ?? []).map((c) => ({
     id: c.id,
@@ -83,11 +86,23 @@ export default async function CreatorsPage() {
 
         {canUpload && (
           <div className="mt-6">
-            <CsvUploadForm
-              action={uploadCreators}
-              buttonLabel="Upload Master Data Creator"
-              helpText="Terima sheet 'data creator' asli (xlsx/csv, header Indonesia: Username, Nama Creator, No HP, UID, Followers, Join Date, Niche (kategori 2), RC Live, RC Video, dll). Match by Username → update; belum ada → dibuat baru. GMV & sharing komisi TIDAK diambil dari sheet."
-            />
+            <h2 className="text-sm font-semibold text-slate-700">Import Kreator (Username + CM)</h2>
+            <div className="mt-2">
+              <CreatorImportPanel />
+            </div>
+          </div>
+        )}
+
+        {canUpload && (
+          <div className="mt-6">
+            <h2 className="text-sm font-semibold text-slate-700">Upload Master Data Creator (sheet lengkap)</h2>
+            <div className="mt-2">
+              <CsvUploadForm
+                action={uploadCreators}
+                buttonLabel="Upload Master Data Creator"
+                helpText="Terima sheet 'data creator' asli (xlsx/csv, header Indonesia: Username, Nama Creator, No HP, UID, Followers, Join Date, Niche (kategori 2), RC Live, RC Video, dll). Match by Username → update; belum ada → dibuat baru. GMV & sharing komisi TIDAK diambil dari sheet."
+              />
+            </div>
           </div>
         )}
 
