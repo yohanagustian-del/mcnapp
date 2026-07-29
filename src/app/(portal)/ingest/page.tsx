@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { requireMember, hasPermission } from "@/lib/rbac";
 import { createClient } from "@/lib/supabase/server";
 import { daysInMonth, weekOfMonth } from "@/lib/utils/date";
@@ -114,11 +115,11 @@ export default async function IngestPage() {
     <div>
       <h1 className="text-2xl font-semibold">Upload Data Platform Mingguan</h1>
       <p className="mt-1 text-sm text-slate-500">
-        Satu upload untuk agregat performa: file MCN (semua transaksi) + TAP (via agency link)
-        diproses sekali — ringkasan periode (M2/M8), GMV subkategori×segmen (M5/M6), top produk, dan
-        katalog produk TAP dihitung serentak, lalu baris mentah dibuang (tidak pernah disimpan ke
-        DB). Analisis kebocoran link agency kini lewat artifak Agency Leaked Generator terpisah,
-        bukan di halaman ini.
+        Satu upload untuk semuanya: file MCN (semua transaksi) + TAP (via agency link) diproses
+        sekali — ringkasan periode (M2/M8), GMV subkategori×segmen (M5/M6), top produk, katalog
+        produk TAP, DAN analisa kebocoran link agency (rollup per kreator, peluang BD, alert)
+        dihitung serentak dari file yang sama, lalu baris mentah dibuang (tidak pernah disimpan ke
+        DB). Tidak perlu lagi menjalankan artifak Agency Leaked Generator di luar platform.
       </p>
 
       <h2 className="mt-6 text-lg font-medium">TikTok</h2>
@@ -143,12 +144,19 @@ export default async function IngestPage() {
         </p>
       )}
 
-      <h2 className="mt-10 text-xl font-semibold">Upload Hasil Agency Leaked (Artifak)</h2>
+      <h2 className="mt-10 text-xl font-semibold">
+        Upload Hasil Agency Leaked (Artifak) — fallback data lama
+      </h2>
       <p className="mt-1 text-sm text-slate-500">
-        Analisis kebocoran link agency dijalankan CM mingguan lewat tool eksternal Agency Leaked
-        Generator (2 file Excel). Platform hanya menyimpan ROLLUP per kreator per minggu untuk
-        penilaian performa CM — detail produk tetap di file Excel. Status link & rasio bocor dihitung
-        ulang deterministik dengan ambang app_config yang sama seperti engine M4.
+        Tidak dipakai untuk upload mingguan lagi: analisa kebocoran kini dihitung platform dari file
+        MCN+TAP di atas (atau lewat halaman{" "}
+        <Link href="/link-leakage" className="text-blue-700 underline">
+          Link Leakage
+        </Link>
+        ). Jalur ini DIBIARKAN untuk memasukkan hasil artifak Excel lama (2 file, format v1/v2) —
+        mis. minggu-minggu historis yang file platform mentahnya sudah tidak ada. Platform hanya
+        menyimpan ROLLUP per kreator per minggu; status link & rasio bocor dihitung ulang
+        deterministik dengan ambang app_config yang sama.
       </p>
       {canUploadLeak ? (
         <div className="mt-4 max-w-2xl">
@@ -254,7 +262,8 @@ export default async function IngestPage() {
             {(batches ?? []).length === 0 && (
               <tr>
                 <td colSpan={6} className="px-4 py-6 text-center text-slate-400">
-                  Belum ada batch. Upload file MCN + TAP mingguan untuk memulai.
+                  Belum ada batch. Upload file MCN + TAP mingguan untuk memulai (analisa kebocoran
+                  ikut dihitung bila TAP disertakan).
                 </td>
               </tr>
             )}

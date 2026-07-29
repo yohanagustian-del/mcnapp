@@ -36,11 +36,16 @@ export async function runIngestAction(formData: FormData): Promise<RunIngestActi
     }
     const tapRaw = formData.get("tap_file");
     const tapFile = tapRaw instanceof File && tapRaw.size > 0 ? tapRaw : null;
+    const masterRaw = formData.get("master_file");
+    const masterShopFile = masterRaw instanceof File && masterRaw.size > 0 ? masterRaw : null;
 
-    const result = await runIngest({ mcnFile, tapFile, actorId: actor.id });
+    const result = await runIngest({ mcnFile, tapFile, masterShopFile, actorId: actor.id });
 
     revalidatePath("/ingest");
-    // /link-leakage no longer touched by ingest (leak analysis is an external artifact).
+    // Leak analysis runs in this pipeline again (in-platform compute) → refresh the
+    // pages that read the rollup.
+    revalidatePath("/link-leakage");
+    revalidatePath("/workspace/cm");
     revalidatePath("/creators");
     revalidatePath("/dashboard");
     return { ok: true, result };
@@ -63,7 +68,8 @@ export async function runIngestAction(formData: FormData): Promise<RunIngestActi
  */
 export async function runIngestFromStorageAction(
   mcnRef: unknown,
-  tapRef: unknown
+  tapRef: unknown,
+  masterRef?: unknown
 ): Promise<RunIngestActionResult> {
   const paths: string[] = [];
   try {
@@ -80,13 +86,24 @@ export async function runIngestFromStorageAction(
       paths.push(tap.path);
     }
 
+    // Optional "Master Data Shop" upload for the leak analysis (artifact's 3rd input).
+    let master: IngestObjectRef | null = null;
+    if (masterRef != null) {
+      assertValidObjectRef(masterRef, "Master Data Shop");
+      master = masterRef;
+      paths.push(master.path);
+    }
+
     const admin = createAdminClient();
     const mcnFile = await downloadIngestFile(admin, mcn);
     const tapFile = tap ? await downloadIngestFile(admin, tap) : null;
+    const masterShopFile = master ? await downloadIngestFile(admin, master) : null;
 
-    const result = await runIngest({ mcnFile, tapFile, actorId: actor.id });
+    const result = await runIngest({ mcnFile, tapFile, masterShopFile, actorId: actor.id });
 
     revalidatePath("/ingest");
+    revalidatePath("/link-leakage");
+    revalidatePath("/workspace/cm");
     revalidatePath("/creators");
     revalidatePath("/dashboard");
     return { ok: true, result };

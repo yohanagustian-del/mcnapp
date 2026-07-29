@@ -8,16 +8,82 @@ import { isSummaryRow } from "@/lib/utils/csv";
 import { parseSheet } from "@/lib/utils/sheet";
 import { fetchAll } from "@/lib/supabase/fetch-all";
 import { parseCount, pick } from "@/lib/platform-csv";
+import {
+  assertValidObjectRef, downloadIngestFile, removeIngestFiles, type IngestObjectRef,
+} from "@/lib/ingest/storage";
+import { runLeakAnalysisFromFiles, type LeakAnalysisResult } from "@/lib/m4/leak-analysis";
 import type { UploadReport } from "@/app/(portal)/tim/actions";
 
 /**
- * /link-leakage is READ-ONLY (Module 0.5 decision): the weekly MCN+TAP upload and
- * the M4 engine run now happen exclusively via /ingest (process-on-ingest,
- * drop-raw). The old CSV-1/CSV-2 upload actions and the manual engine-run action
- * were removed — they persisted raw transactions and confused the team. What
- * remains here is the platform Master-Shop refresh (not raw transaction data; no
- * home in /ingest) plus the leak-detail CSV export below.
+ * /link-leakage actions:
+ *   - runLeakAnalysisFromStorageAction: jalankan ANALISA KEBOCORAN mingguan di
+ *     platform (fungsi artifak "Agency Leaked Generator" yang dipindah ke dalam
+ *     platform). Rollup hasilnya langsung mengisi Link Leakage + CM Workspace.
+ *   - uploadCooperatingShops: refresh master shop platform (mingguan).
+ *   - downloadLeakageCsv: export detail historis era engine (leakage_products).
+ *
+ * Rollup per kreator tetap TIDAK bisa diedit manual (CLAUDE.md #3) — satu-satunya
+ * cara mengubahnya adalah menjalankan ulang analisa dari file platform mingguan.
  */
+
+export type RunLeakAnalysisActionResult =
+  | { ok: true; result: LeakAnalysisResult }
+  | { ok: false; error: string };
+
+/**
+ * Analisa kebocoran mingguan dari file yang SUDAH diunggah browser langsung ke
+ * Storage (mem-bypass batas body serverless ~4,5MB → file export ~61k baris aman).
+ * Action ini hanya menerima referensi objek, mengunduhnya via service-role,
+ * menjalankan pipeline yang SAMA dengan /ingest (src/lib/m4/leak-analysis.ts),
+ * lalu menghapus objek transiennya (raw tidak pernah dipersistkan).
+ *
+ * Dipakai untuk hitung-ulang / minggu yang terlewat; upload mingguan normal cukup
+ * lewat /ingest (satu upload sekalian agregat performa). Tidak pernah throw ke
+ * client (Next.js menyensor pesan error server action di production).
+ */
+export async function runLeakAnalysisFromStorageAction(
+  mcnRef: unknown,
+  tapRef: unknown,
+  masterRef?: unknown
+): Promise<RunLeakAnalysisActionResult> {
+  const paths: string[] = [];
+  try {
+    const actor = await requirePermission("m4.upload");
+
+    assertValidObjectRef(mcnRef, "MCN");
+    const mcn: IngestObjectRef = mcnRef;
+    paths.push(mcn.path);
+
+    assertValidObjectRef(tapRef, "TAP");
+    const tap: IngestObjectRef = tapRef;
+    paths.push(tap.path);
+
+    let master: IngestObjectRef | null = null;
+    if (masterRef != null) {
+      assertValidObjectRef(masterRef, "Master Data Shop");
+      master = masterRef;
+      paths.push(master.path);
+    }
+
+    const admin = createAdminClient();
+    const result = await runLeakAnalysisFromFiles({
+      mcnFile: await downloadIngestFile(admin, mcn),
+      tapFile: await downloadIngestFile(admin, tap),
+      masterFile: master ? await downloadIngestFile(admin, master) : null,
+      actorId: actor.id,
+      origin: "link_leakage",
+    });
+
+    revalidatePath("/link-leakage");
+    revalidatePath("/workspace/cm");
+    revalidatePath("/workspace/bizdev");
+    return { ok: true, result };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "Terjadi kesalahan tidak terduga." };
+  } finally {
+    if (paths.length > 0) await removeIngestFiles(createAdminClient(), paths);
+  }
+}
 
 /**
  * Weekly master refresh (PRD §2.6): Shop ID | Shop Name | Level 2 Categories |
