@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { login } from "./actions";
 
 const ERROR_MESSAGES: Record<string, string> = {
@@ -6,12 +7,16 @@ const ERROR_MESSAGES: Record<string, string> = {
   no_member: "Akun tidak terdaftar sebagai anggota tim aktif. Hubungi Management.",
 };
 
+const SUCCESS_MESSAGES: Record<string, string> = {
+  reset: "Password baru tersimpan. Silakan masuk dengan password tersebut.",
+};
+
 export default async function LoginPage({
   searchParams,
 }: {
-  searchParams: Promise<{ error?: string }>;
+  searchParams: Promise<{ error?: string; success?: string }>;
 }) {
-  const { error } = await searchParams;
+  const { error, success } = await searchParams;
 
   return (
     <main className="flex min-h-screen items-center justify-center p-6">
@@ -25,6 +30,12 @@ export default async function LoginPage({
           </p>
         )}
 
+        {success && SUCCESS_MESSAGES[success] && (
+          <p className="mt-4 rounded-md bg-emerald-50 p-3 text-sm text-emerald-800">
+            {SUCCESS_MESSAGES[success]}
+          </p>
+        )}
+
         <form action={login} className="mt-6 space-y-4">
           <div>
             <label htmlFor="email" className="block text-sm font-medium">Email</label>
@@ -35,7 +46,15 @@ export default async function LoginPage({
             />
           </div>
           <div>
-            <label htmlFor="password" className="block text-sm font-medium">Password</label>
+            <div className="flex items-baseline justify-between">
+              <label htmlFor="password" className="block text-sm font-medium">Password</label>
+              <Link
+                href="/login/lupa-password"
+                className="text-xs text-slate-500 underline hover:text-slate-800"
+              >
+                Lupa password?
+              </Link>
+            </div>
             <input
               id="password" name="password" type="password" required autoComplete="current-password"
               className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
