@@ -16,10 +16,22 @@ import { upsertDerivedFromTap } from "@/lib/m10/products";
 import {
   computeSharedAutoFillFields, fetchMonthlyAvgGmvByCreator, writeCreatorAutoFillUpdate,
 } from "./creator-autofill";
+import { runLeakAnalysis, type LeakAnalysisResult } from "@/lib/m4/leak-analysis";
+// Retention lives in its own module (leak-retention.ts) so the leak analysis can
+// import it without a cycle through this file; re-exported here for the existing
+// importers of `enforceLeakRetention` from "./run".
+export { enforceLeakRetention } from "./leak-retention";
 
 export interface RunIngestInput {
   mcnFile: File;
   tapFile?: File | null;
+  /**
+   * Optional "Master Data Shop" file for the leak analysis (the third input of the
+   * old external artifact). Omitted ⇒ the partnered-shop master is read from the
+   * platform's own cooperating_shops table. Ignored when no TAP file is uploaded
+   * (leak cannot be measured without TAP).
+   */
+  masterShopFile?: File | null;
   actorId: string;
 }
 
@@ -35,6 +47,15 @@ export interface RunIngestResult {
   aggregateRows: { periodSummary: number; subcatSegment: number; topProducts: number };
   /** Always true: this pipeline is aggregates-only — raw rows are never written to the DB. */
   droppedRaw: boolean;
+  /**
+   * Weekly link-leakage analysis computed from the SAME parsed MCN+TAP rows
+   * (src/lib/m4/leak-analysis.ts). Null when it could not run — see leakSkipped
+   * (no TAP file) or leakError (analysis failed). A leak failure NEVER fails the
+   * aggregate ingest: the batch stays 'processed' and the reason is reported here.
+   */
+  leak: LeakAnalysisResult | null;
+  leakSkipped: string | null;
+  leakError: string | null;
 }
 
 /** sha256 of the raw file bytes — cheap provenance record in upload_batches (no row content kept). */
@@ -72,10 +93,14 @@ function describeMcnParseFailure(mcnParsed: ParseResult<McnRow>): string {
 /**
  * Shared ingest orchestrator (Module 0.5 §3.1 / BUILD_PLAN Fase 1) — aggregates-only,
  * drop-raw. Raw transaction rows are NEVER written to the DB: they are parsed,
- * aggregated in-memory, and discarded. Agency-leak analysis (engine M4) has been
- * moved out of this pipeline into a separate external artifact (Agency Leaked
- * Generator); /ingest no longer computes leak. Steps (best-effort ordering;
- * Supabase JS has no cross-table transaction):
+ * aggregated in-memory, and discarded.
+ *
+ * Agency-leak analysis is back IN the platform (interview decision): the external
+ * "Agency Leaked Generator" artifact's logic now lives in src/lib/m4/leak-compute.ts
+ * and runs here (step 8) on the SAME parsed rows, so the weekly MCN+TAP files are
+ * uploaded once and parsed once. Only the rollup is persisted; the per-product
+ * detail becomes a CSV backup. Steps (best-effort ordering; Supabase JS has no
+ * cross-table transaction):
  *   1. Parse MCN (+ optional TAP) file into internal rows; resolve creator names.
  *   2. upload_batches row, status='staging'. batch_id = `ingest:${periodStart}:${hash8}`
  *      (hash8 = first 8 hex chars of the MCN file's sha256) — unique per file CONTENT,
@@ -95,10 +120,13 @@ function describeMcnParseFailure(mcnParsed: ParseResult<McnRow>): string {
  *      and aggregate tables are NOT written partially (aggregates are only written
  *      after the full in-memory computation succeeds, in one pass, per creator).
  *   7. audit_logs for ingest (type auto).
+ *   8. Link-leakage analysis (runLeakAnalysis) when a TAP file is present — its own
+ *      try/catch: the aggregates are already committed, so a leak failure is reported
+ *      in the result (leakError) instead of failing/rolling back the batch.
  */
 export async function runIngest(input: RunIngestInput): Promise<RunIngestResult> {
   const admin = createAdminClient();
-  const { mcnFile, tapFile, actorId } = input;
+  const { mcnFile, tapFile, masterShopFile, actorId } = input;
 
   // ---- 1. Parse ----
   const mcnParsed = await parseMcnFile(mcnFile);
@@ -274,8 +302,8 @@ export async function runIngest(input: RunIngestInput): Promise<RunIngestResult>
 
     // ---- 7. Audit ----
     // rows_tap = number of TAP rows actually parsed (no staging round-trip anymore).
-    // leak_engine flag records the product decision (agency-leak moved to an external
-    // artifact) so the audit trail explains why /ingest no longer runs the M4 engine.
+    // leak_engine flag records the product decision in force at ingest time; the leak
+    // analysis itself writes its own audit row (m4.leak_compute) in step 8.
     const rowsTap = tapParsed.rows.length;
     await writeAudit({
       actorId,
@@ -292,13 +320,42 @@ export async function runIngest(input: RunIngestInput): Promise<RunIngestResult>
           top_products: topProducts.length,
         },
         dropped_raw: true,
-        leak_engine: "external_artifact",
+        leak_engine: "in_platform_compute",
       },
       type: "auto",
     });
 
     for (const name of createdProspects) {
       skipped.push({ row: -1, reason: `creator "${name}" belum ada di master → dibuat otomatis (status aktif)` });
+    }
+
+    // ---- 8. Analisa link leakage dari BARIS YANG SAMA (0 LLM) ----
+    // Keputusan interview: fungsi artifak "Agency Leaked Generator" dipindah ke
+    // dalam platform, dan file MCN+TAP mingguan cukup diupload SEKALI di sini.
+    // Dijalankan setelah batch 'processed' dan dibungkus try/catch sendiri:
+    // agregat performa sudah aman tersimpan, jadi kegagalan analisa bocor tidak
+    // boleh menggagalkan (atau me-rollback) ingest — cukup dilaporkan ke UI.
+    let leak: LeakAnalysisResult | null = null;
+    let leakSkipped: string | null = null;
+    let leakError: string | null = null;
+    if (tapParsed.rows.length === 0) {
+      leakSkipped =
+        "Analisa kebocoran dilewati: file TAP (via agency link) tidak diunggah. Tanpa TAP, " +
+        "seluruh GMV di shop ber-deal akan terlihat 100% bocor — angka bocor tidak dihitung.";
+    } else {
+      try {
+        leak = await runLeakAnalysis({
+          mcnRows: mcnParsed.rows,
+          tapRows: tapParsed.rows,
+          masterFile: masterShopFile ?? null,
+          periodStart,
+          periodEnd,
+          actorId,
+          origin: "ingest",
+        });
+      } catch (e) {
+        leakError = e instanceof Error ? e.message : String(e);
+      }
     }
 
     return {
@@ -316,6 +373,9 @@ export async function runIngest(input: RunIngestInput): Promise<RunIngestResult>
         topProducts: topProducts.length,
       },
       droppedRaw: true,
+      leak,
+      leakSkipped,
+      leakError,
     };
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);
@@ -436,68 +496,6 @@ export async function writeAggregates(
 /** 431936 → "431.936" (dot-thousands, matches the free-text creators.followers convention). */
 function formatFollowerCount(n: number): string {
   return String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ".");
-}
-
-/** Subtract `weeks * 7` days from an ISO date (YYYY-MM-DD) → ISO date string. */
-function minusWeeks(isoDate: string, weeks: number): string {
-  const d = new Date(`${isoDate}T00:00:00Z`);
-  d.setUTCDate(d.getUTCDate() - weeks * 7);
-  return d.toISOString().slice(0, 10);
-}
-
-/**
- * Deterministic retention cleanup (CLAUDE.md #2, 0 LLM) for M4 leak data, run
- * after the engine succeeds. Windows come from app_config (never hardcoded):
- *   - leakage_products (per-product DETAIL, download window): retention.leak_detail_weeks
- *   - creator_link_status (per-creator SUMMARY): retention.leak_summary_weeks
- * Cutoff is relative to this period's period_start so a re-run of an old period
- * doesn't prematurely prune newer data. Audit (type auto) written only when rows
- * were actually deleted — no-op runs stay silent.
- *
- * Called by the leak-artifact upload (src/lib/ingest/leak-run.ts) after writing the
- * rollup, to prune stale leak data. No longer called from runIngest (leak analysis
- * moved to the external Agency Leaked Generator artifact). Kept exported.
- */
-export async function enforceLeakRetention(
-  admin: SupabaseClient,
-  periodStart: string
-): Promise<void> {
-  const [detailWeeks, summaryWeeks] = await Promise.all([
-    getConfig<number>("retention.leak_detail_weeks"),
-    getConfig<number>("retention.leak_summary_weeks"),
-  ]);
-  const detailCutoff = minusWeeks(periodStart, detailWeeks);
-  const summaryCutoff = minusWeeks(periodStart, summaryWeeks);
-
-  const { data: delDetail, error: detailErr } = await admin
-    .from("leakage_products").delete().lt("week", detailCutoff).select("id");
-  if (detailErr) throw new Error(`Gagal retensi leakage_products: ${detailErr.message}`);
-
-  const { data: delSummary, error: summaryErr } = await admin
-    .from("creator_link_status").delete().lt("week", summaryCutoff).select("creator_id");
-  if (summaryErr) throw new Error(`Gagal retensi creator_link_status: ${summaryErr.message}`);
-
-  const detailDeleted = delDetail?.length ?? 0;
-  const summaryDeleted = delSummary?.length ?? 0;
-  if (detailDeleted === 0 && summaryDeleted === 0) return;
-
-  await writeAudit({
-    actorId: null,
-    actorLabel: "system:retention",
-    action: "retention.leak_cleanup",
-    entityType: "leakage_products",
-    entityId: periodStart,
-    after: {
-      period_start: periodStart,
-      leak_detail_weeks: detailWeeks,
-      leak_summary_weeks: summaryWeeks,
-      detail_cutoff: detailCutoff,
-      summary_cutoff: summaryCutoff,
-      leakage_products_deleted: detailDeleted,
-      creator_link_status_deleted: summaryDeleted,
-    },
-    type: "auto",
-  });
 }
 
 /**

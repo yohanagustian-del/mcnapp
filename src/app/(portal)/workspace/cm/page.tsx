@@ -613,8 +613,9 @@ export default async function CmWorkspacePage({
       <section>
         <h2 className="text-lg font-medium">Link Leakage Kreator (per minggu)</h2>
         <p className="mt-1 text-xs text-slate-500">
-          Status link agency per kreator (minggu terbaru). Read-only — diisi engine M4 / hasil
-          artifak Agency Leaked Generator, tidak ada edit manual (CLAUDE.md #3).
+          Status link agency per kreator (minggu terbaru). Read-only — dihitung platform dari file
+          MCN+TAP mingguan (upload di /ingest atau /link-leakage); baris lama bisa berasal dari
+          artifak/engine. Tidak ada edit manual (CLAUDE.md #3).
         </p>
         {latestLeakWeek && (
           <p className="mt-2 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
@@ -645,6 +646,9 @@ export default async function CmWorkspacePage({
                     {r.week}
                     {r.source === "artifact" && (
                       <span className="ml-1 rounded bg-indigo-100 px-1 text-[10px] text-indigo-700">artifak</span>
+                    )}
+                    {r.source === "platform" && (
+                      <span className="ml-1 rounded bg-emerald-100 px-1 text-[10px] text-emerald-700">platform</span>
                     )}
                   </td>
                   <td className="px-4 py-2">
