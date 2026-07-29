@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { requireMember } from "@/lib/rbac";
+import { hasPermission, requireMember } from "@/lib/rbac";
 import { createClient } from "@/lib/supabase/server";
 import {
   computePctProgress,
@@ -27,7 +27,10 @@ export default async function OkrPage() {
   const isManagement = (MANAGEMENT_ROLES as readonly string[]).includes(member.role);
   const isLead = member.role.endsWith("_lead") || isManagement;
   const isCpm = member.role === "cpm" || member.role === "cm_lead";
-  const isDirector = member.role === "director";
+  // OD (od_viewer) menganalisa hasil OKR seluruh tim (revisi role 2026-07-29) —
+  // dapat cross-team view + akses halaman konfigurasi (m3.set_target).
+  const isOkrAnalyst = isManagement || member.role === "od_viewer";
+  const canConfigOkr = hasPermission("m3.set_target", member.role);
 
   const windowDays = Number((await getConfig("m3.hands_on_window_days")) ?? 7);
 
@@ -38,7 +41,7 @@ export default async function OkrPage() {
     .eq("active", true)
     .order("role").order("metric");
 
-  if (!isManagement) {
+  if (!isOkrAnalyst) {
     krQuery.eq("role", member.role);
   }
 
@@ -98,9 +101,9 @@ export default async function OkrPage() {
   // Hands-on ratio hanya untuk CPM
   const handsOnRatioVal = isCpm ? await getHandsOnRatio(supabase as never, member.id, windowDays) : null;
 
-  // Untuk management: ambil semua subject dalam setiap KR (cross-team view)
+  // Untuk management + OD: ambil semua subject dalam setiap KR (cross-team view)
   let crossTeam: { memberId: string; memberName: string; role: string; achieved: number; total: number }[] = [];
-  if (isManagement) {
+  if (isOkrAnalyst) {
     const { data: members } = await supabase
       .from("team_members")
       .select("id, name, role")
@@ -158,10 +161,10 @@ export default async function OkrPage() {
             Progres KR personal + proyeksi reward. Scoring deterministik, 0 token AI. Reward final = snapshot akhir quartal.
           </p>
         </div>
-        {isDirector && (
+        {canConfigOkr && (
           <Link href="/okr/director"
             className="rounded-md bg-slate-900 px-3 py-2 text-sm font-medium text-white hover:bg-slate-700">
-            Dashboard Director →
+            Konfigurasi OKR →
           </Link>
         )}
       </div>
@@ -243,8 +246,8 @@ export default async function OkrPage() {
                 <tr>
                   <td colSpan={7} className="px-4 py-6 text-center text-slate-400">
                     Belum ada KR terdefinisi untuk role ini.
-                    {isDirector && (
-                      <span> <Link href="/okr/director" className="underline">Set KR di Dashboard Director</Link>.</span>
+                    {canConfigOkr && (
+                      <span> <Link href="/okr/director" className="underline">Set KR di halaman Konfigurasi OKR</Link>.</span>
                     )}
                   </td>
                 </tr>
@@ -284,8 +287,8 @@ export default async function OkrPage() {
         </section>
       )}
 
-      {/* ===== Cross-team view (management) ===== */}
-      {isManagement && crossTeam.length > 0 && (
+      {/* ===== Cross-team view (management + OD) ===== */}
+      {isOkrAnalyst && crossTeam.length > 0 && (
         <section>
           <h2 className="text-lg font-medium">Kinerja Tim (Cross-team)</h2>
           <div className="mt-3 overflow-x-auto rounded-lg border border-slate-200 bg-white">
@@ -367,13 +370,13 @@ export default async function OkrPage() {
         </section>
       )}
 
-      {/* ===== View untuk management bila belum ada data ===== */}
-      {isManagement && crossTeam.length === 0 && (
+      {/* ===== View untuk management + OD bila belum ada data ===== */}
+      {isOkrAnalyst && crossTeam.length === 0 && (
         <section className="rounded-lg border border-slate-200 bg-white p-6 text-center text-slate-500">
-          <p>Belum ada data aktual OKR tim. Jalankan &ldquo;Score Mingguan&rdquo; dari Dashboard Director setelah KR dikonfigurasi.</p>
-          {isDirector && (
+          <p>Belum ada data aktual OKR tim. Jalankan &ldquo;Score Mingguan&rdquo; dari halaman Konfigurasi OKR setelah KR dikonfigurasi.</p>
+          {canConfigOkr && (
             <Link href="/okr/director" className="mt-3 inline-block rounded-md bg-slate-900 px-3 py-2 text-sm font-medium text-white hover:bg-slate-700">
-              Buka Dashboard Director →
+              Buka Konfigurasi OKR →
             </Link>
           )}
         </section>

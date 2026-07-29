@@ -2,6 +2,14 @@
 
 Status per sesi 2026-07-09 (sesi 5, backlog-sweep + audit deploy). Baca ini + `CLAUDE.md` sebelum lanjut.
 
+## ⚡ SESI 2026-07-29 — Revisi role OD: bisa setting OKR + analisa hasil OKR tim (M3)
+**Permintaan user (final)**: role OD (`od_viewer`) belum bisa setting OKR — harus bisa set OKR dan menganalisa hasil OKR tim MCN. Sebelumnya od_viewer = read-only ABSOLUT (M11 §2A.3).
+1. **RBAC (`src/lib/rbac.ts`)**: od_viewer kini punya TEPAT 3 write permission — `m3.set_target`, `m3.set_reward`, `m3.score` — didefinisikan sebagai konstanta `OD_OKR_PERMISSIONS` (satu-satunya pengecualian read-only; grant od_viewer di luar list ini = bug, ditegakkan test). `m3.gating_decision` & `m3.snapshot` TETAP Director-only (PRD §2.3 LOCKED). Nav `/okr/director` → label "Config OKR (Director/OD)", roles director+od_viewer.
+2. **`/okr/director`**: bisa dibuka OD; seksi Snapshot Quartal & tombol keputusan gating dirender hanya untuk role ber-permission (server action tetap re-check `requirePermission`). Judul jadi "Konfigurasi OKR (M3) — Director / OD".
+3. **`/okr`**: od_viewer dapat cross-team view (flag `isOkrAnalyst` = management + od_viewer: semua KR + tabel Kinerja Tim); link "Konfigurasi OKR →" tampil berdasar `hasPermission("m3.set_target")` (bukan hardcode director).
+4. **TANPA migration**: RLS SELECT tabel OKR sudah terbuka untuk authenticated (0007); semua mutasi via service role di server action, gate efektif = `requirePermission`. Deny-policy restriktif od_viewer (0013) hanya untuk JWT hipotetis — tidak menghalangi jalur app.
+5. **Tes**: `od-viewer.test.ts` ditulis ulang (rejected di semua endpoint NON-OKR + granted tepat di 3 pengecualian + gating/snapshot tetap Director + nav), `rbac.test.ts` disesuaikan. Verifikasi: tsc 0 error, **538 pass + 2 skip** (naik dari 502).
+
 ## ⚡ SESI 2026-07-20 — Upload data mingguan file BESAR (feedback tim ingest)
 **Masalah**: file export platform mingguan (TikTok MCN & TAP) bisa ~61.000 baris (belasan–puluhan MB). Upload lewat Server Action kena limit body serverless Vercel (~4,5MB, terlepas dari `bodySizeLimit: 10mb` di next.config) → "tidak bisa upload banyak". Kalau dipecah manual, replace PER (kreator × minggu) di `writeAggregates` menimpa potongan sebelumnya untuk kreator yang barisnya terbelah antar file → "replace bukan append".
 

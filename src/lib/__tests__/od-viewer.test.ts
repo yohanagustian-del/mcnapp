@@ -1,17 +1,29 @@
 import { describe, it, expect } from "vitest";
-import { PERMISSIONS, hasPermission, canAccessNav, NAV_ITEMS, type Role } from "@/lib/rbac";
+import {
+  PERMISSIONS,
+  OD_OKR_PERMISSIONS,
+  hasPermission,
+  canAccessNav,
+  NAV_ITEMS,
+  type Role,
+} from "@/lib/rbac";
 
 /**
- * M11 §2A.3 (CRITICAL) — od_viewer is read-only ABSOLUTE. Every mutation endpoint is gated by
- * requirePermission(<key>), which checks this matrix server-side (not just UI). These negative
- * tests assert od_viewer is rejected on each write endpoint. requirePermission throws whenever
- * hasPermission returns false, so proving the matrix rejects od_viewer proves the server rejects it.
+ * M11 §2A.3 — od_viewer is read-only, with ONE carve-out (revisi role 2026-07-29):
+ * the M3 OKR exception (OD_OKR_PERMISSIONS = set target, set reward, trigger scoring)
+ * so OD can configure OKR and analyze team results. Every OTHER mutation endpoint is
+ * gated by requirePermission(<key>), which checks this matrix server-side (not just UI).
+ * requirePermission throws whenever hasPermission returns false, so proving the matrix
+ * rejects od_viewer proves the server rejects it.
  */
 
-// Every mutation permission key in the system → od_viewer must have NONE of them.
-const MUTATION_ENDPOINTS = Object.keys(PERMISSIONS) as (keyof typeof PERMISSIONS)[];
+const OKR_EXCEPTION = new Set<string>(OD_OKR_PERMISSIONS);
 
-describe("M11 — od_viewer rejected on EVERY mutation endpoint (server-side)", () => {
+// Every mutation permission key OUTSIDE the OKR exception → od_viewer must have NONE of them.
+const MUTATION_ENDPOINTS = (Object.keys(PERMISSIONS) as (keyof typeof PERMISSIONS)[])
+  .filter((k) => !OKR_EXCEPTION.has(k));
+
+describe("M11 — od_viewer rejected on every non-OKR mutation endpoint (server-side)", () => {
   it("covers at least 15 distinct mutation endpoints", () => {
     expect(MUTATION_ENDPOINTS.length).toBeGreaterThanOrEqual(15);
   });
@@ -24,6 +36,32 @@ describe("M11 — od_viewer rejected on EVERY mutation endpoint (server-side)", 
   }
 });
 
+describe("M3 OKR exception — od_viewer sets OKR & analyzes team results (revisi 2026-07-29)", () => {
+  it("exception list is exactly set_target + set_reward + score", () => {
+    expect([...OD_OKR_PERMISSIONS].sort()).toEqual(["m3.score", "m3.set_reward", "m3.set_target"]);
+  });
+  for (const endpoint of OD_OKR_PERMISSIONS) {
+    it(`grants od_viewer '${endpoint}'`, () => {
+      expect(hasPermission(endpoint, "od_viewer")).toBe(true);
+    });
+  }
+  it("gating decision & snapshot stay Director-only (PRD §2.3 LOCKED)", () => {
+    expect(hasPermission("m3.gating_decision", "od_viewer")).toBe(false);
+    expect(hasPermission("m3.snapshot", "od_viewer")).toBe(false);
+    expect(PERMISSIONS["m3.gating_decision"]).toEqual(["director"]);
+    expect(PERMISSIONS["m3.snapshot"]).toEqual(["director"]);
+  });
+  it("can open the OKR config nav (/okr/director)", () => {
+    const cfg = NAV_ITEMS.find((n) => n.href === "/okr/director");
+    expect(cfg).toBeDefined();
+    expect(canAccessNav(cfg!, "od_viewer")).toBe(true);
+    expect(canAccessNav(cfg!, "director")).toBe(true);
+    // Not opened to other roles — Head still only proposes.
+    expect(canAccessNav(cfg!, "head")).toBe(false);
+    expect(canAccessNav(cfg!, "spv")).toBe(false);
+  });
+});
+
 describe("M11 — od_viewer read access is preserved", () => {
   it("can open the OD oversight nav", () => {
     const od = NAV_ITEMS.find((n) => n.href === "/od");
@@ -33,6 +71,10 @@ describe("M11 — od_viewer read access is preserved", () => {
   it("can view the retention (read) dashboard nav", () => {
     const ret = NAV_ITEMS.find((n) => n.href === "/admin/retention");
     expect(canAccessNav(ret!, "od_viewer")).toBe(true);
+  });
+  it("can view the OKR analysis page nav (/okr)", () => {
+    const okr = NAV_ITEMS.find((n) => n.href === "/okr");
+    expect(canAccessNav(okr!, "od_viewer")).toBe(true);
   });
 });
 

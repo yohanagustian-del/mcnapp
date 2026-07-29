@@ -1,5 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
-import { requirePermission } from "@/lib/rbac";
+import { hasPermission, requirePermission } from "@/lib/rbac";
 import {
   decidGating,
   saveKrTarget,
@@ -35,7 +35,11 @@ const ROLES_LIST = [
 ];
 
 export default async function DirectorOkrPage() {
-  await requirePermission("m3.set_target");
+  // Director + OD (revisi role 2026-07-29). Aksi Director-only di bawah tetap
+  // digate per-permission — server actions re-check via requirePermission.
+  const member = await requirePermission("m3.set_target");
+  const canGating   = hasPermission("m3.gating_decision", member.role);
+  const canSnapshot = hasPermission("m3.snapshot", member.role);
 
   const supabase = await createClient();
   const [{ data: krs }, { data: tiers }, { data: gatingEvents }] = await Promise.all([
@@ -57,10 +61,10 @@ export default async function DirectorOkrPage() {
   return (
     <div className="space-y-10">
       <div>
-        <h1 className="text-2xl font-semibold">Dashboard Director — OKR (M3)</h1>
+        <h1 className="text-2xl font-semibold">Konfigurasi OKR (M3) — Director / OD</h1>
         <p className="mt-1 text-sm text-slate-500">
-          Set target KR & reward per role, review gating, trigger scoring mingguan, ambil snapshot quartal.
-          Semua perubahan tercatat di audit_logs.
+          Set target KR & reward per role dan trigger scoring mingguan.
+          {canGating && " Review gating & snapshot quartal (Director)."} Semua perubahan tercatat di audit_logs.
         </p>
       </div>
 
@@ -74,17 +78,19 @@ export default async function DirectorOkrPage() {
             <button type="submit" className={btn}>Hitung OKR Sekarang</button>
           </form>
         </div>
-        <div className="rounded-lg border border-slate-200 bg-white p-4 space-y-3">
-          <h2 className="font-medium">Snapshot Quartal</h2>
-          <form action={snapshotQuarter} className="grid gap-2">
-            <select name="kind" className={select}>
-              <option value="baseline">Baseline (awal quartal)</option>
-              <option value="final">Final (akhir quartal)</option>
-            </select>
-            <input type="date" name="period_start" required className={input} />
-            <button type="submit" className={btn}>Ambil Snapshot</button>
-          </form>
-        </div>
+        {canSnapshot && (
+          <div className="rounded-lg border border-slate-200 bg-white p-4 space-y-3">
+            <h2 className="font-medium">Snapshot Quartal</h2>
+            <form action={snapshotQuarter} className="grid gap-2">
+              <select name="kind" className={select}>
+                <option value="baseline">Baseline (awal quartal)</option>
+                <option value="final">Final (akhir quartal)</option>
+              </select>
+              <input type="date" name="period_start" required className={input} />
+              <button type="submit" className={btn}>Ambil Snapshot</button>
+            </form>
+          </div>
+        )}
       </section>
 
       {/* ===== Add / edit KR ===== */}
@@ -284,18 +290,22 @@ export default async function DirectorOkrPage() {
                     <td className="px-4 py-2 text-xs text-slate-500">{ev.evidence_ref ?? "—"}</td>
                     <td className="px-4 py-2 text-xs">{new Date(ev.flagged_at).toLocaleDateString("id-ID")}</td>
                     <td className="px-4 py-2">
-                      <div className="flex gap-2">
-                        {(["gugur", "tidak_gugur"] as const).map((d) => (
-                          <form key={d} action={decidGating}>
-                            <input type="hidden" name="event_id" value={ev.id} />
-                            <input type="hidden" name="decision" value={d} />
-                            <button type="submit"
-                              className={`${btnSm} ${d === "gugur" ? "bg-red-600 text-white" : "bg-green-100 text-green-800"}`}>
-                              {d === "gugur" ? "Gugur" : "Tidak gugur"}
-                            </button>
-                          </form>
-                        ))}
-                      </div>
+                      {canGating ? (
+                        <div className="flex gap-2">
+                          {(["gugur", "tidak_gugur"] as const).map((d) => (
+                            <form key={d} action={decidGating}>
+                              <input type="hidden" name="event_id" value={ev.id} />
+                              <input type="hidden" name="decision" value={d} />
+                              <button type="submit"
+                                className={`${btnSm} ${d === "gugur" ? "bg-red-600 text-white" : "bg-green-100 text-green-800"}`}>
+                                {d === "gugur" ? "Gugur" : "Tidak gugur"}
+                              </button>
+                            </form>
+                          ))}
+                        </div>
+                      ) : (
+                        <span className="text-xs text-slate-400">Keputusan oleh Director</span>
+                      )}
                     </td>
                   </tr>
                 );

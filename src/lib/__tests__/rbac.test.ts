@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { ROLES, PERMISSIONS, hasPermission, MANAGEMENT_ROLES, ADS_ROLES, type Role } from "@/lib/rbac";
+import { ROLES, PERMISSIONS, OD_OKR_PERMISSIONS, hasPermission, MANAGEMENT_ROLES, ADS_ROLES, type Role } from "@/lib/rbac";
 
 describe("Phase 5.0 — RBAC foundation", () => {
   it("registers the new internal roles", () => {
@@ -11,10 +11,13 @@ describe("Phase 5.0 — RBAC foundation", () => {
     expect(ROLES).not.toContain("creator_user");
   });
 
-  // M11 §2A.3 — od_viewer must be rejected on EVERY mutation endpoint (server-side).
-  it("od_viewer holds zero write permissions across the whole matrix", () => {
+  // M11 §2A.3 — od_viewer rejected on every mutation endpoint EXCEPT the M3 OKR
+  // exception (revisi role 2026-07-29: OD sets OKR + analyzes team results).
+  it("od_viewer holds no write permission outside the M3 OKR exception", () => {
+    const okrException = new Set<string>(OD_OKR_PERMISSIONS);
     for (const perm of Object.keys(PERMISSIONS)) {
-      expect(hasPermission(perm as keyof typeof PERMISSIONS, "od_viewer")).toBe(false);
+      expect(hasPermission(perm as keyof typeof PERMISSIONS, "od_viewer"))
+        .toBe(okrException.has(perm));
     }
   });
 

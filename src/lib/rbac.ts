@@ -10,7 +10,9 @@ export const ROLES = [
   "campaign_external", "creator_support", "finance",
   // M10 §2.1: ads_support = sub-role of Campaign Ops (separate permissions, not top-level power).
   "ads_support",
-  // M11 §2A: od_viewer = read-only oversight across all divisions; rejected on every mutation.
+  // M11 §2A: od_viewer = oversight across all divisions, read-all. Rejected on every mutation
+  // EXCEPT the M3 OKR exception (revisi role 2026-07-29): OD sets KR targets/rewards and
+  // triggers weekly scoring to analyze team OKR results. See OD_OKR_PERMISSIONS.
   "od_viewer",
 ] as const;
 export type Role = (typeof ROLES)[number];
@@ -71,9 +73,9 @@ export const NAV_ITEMS: NavItem[] = [
   // M10: Campaign & Ads Support portal — Management + Campaign Ops (lead) + ads_support (execute).
   { href: "/workspace/ads", label: "Ads Support (M10)", roles: [...MANAGEMENT_ROLES, ...ADS_ROLES] },
   { href: "/tim", label: "Tim", roles: MANAGEMENT_ROLES },
-  // M3 OKR: semua anggota bisa lihat KR sendiri; Director punya dashboard konfigurasi.
+  // M3 OKR: semua anggota bisa lihat KR sendiri; Director + OD punya dashboard konfigurasi.
   { href: "/okr", label: "OKR & Kinerja", roles: "all" },
-  { href: "/okr/director", label: "Config OKR (Director)", roles: ["director"] as Role[] },
+  { href: "/okr/director", label: "Config OKR (Director/OD)", roles: ["director", "od_viewer"] as Role[] },
   // M11: OD oversight portal — read-only cross-team (od_viewer + Director export).
   { href: "/od", label: "OD Oversight (M11)", roles: ["od_viewer", "director"] as Role[] },
   // M12: data retention & DB health dashboard — Director sets policy; Head/SPV + OD view.
@@ -149,13 +151,14 @@ export const PERMISSIONS: Record<string, Role[]> = {
   // Scan growth mingguan + alert perf_drop (event, bukan approval)
   "m8.growth_scan": [...MANAGEMENT_ROLES, ...CM_ROLES],
   // ===== M3 OKR =====
-  // Set/edit target KR & reward: Director (owner) + Head (propose, tapi server action enforce Director only)
-  "m3.set_target": ["director"] as Role[],
-  "m3.set_reward": ["director"] as Role[],
+  // Set/edit target KR & reward: Director (owner) + OD (revisi role 2026-07-29 — OD mengelola
+  // OKR & menganalisa hasilnya untuk seluruh tim MCN). Head propose only (tidak di matrix).
+  "m3.set_target": ["director", "od_viewer"] as Role[],
+  "m3.set_reward": ["director", "od_viewer"] as Role[],
   // Review gating event → putuskan gugur/tidak_gugur: Director only (PRD §2.3 LOCKED)
   "m3.gating_decision": ["director"] as Role[],
-  // Trigger scoring mingguan: Director + Head/SPV
-  "m3.score": [...MANAGEMENT_ROLES],
+  // Trigger scoring mingguan: Director + Head/SPV + OD (refresh skor untuk analisa hasil OKR)
+  "m3.score": [...MANAGEMENT_ROLES, "od_viewer"],
   // Ambil snapshot quartal: Director
   "m3.snapshot": ["director"] as Role[],
   // ===== M9 Creator Portal (§2.8) =====
@@ -193,9 +196,16 @@ export const PERMISSIONS: Record<string, Role[]> = {
   "m12.run_maintenance": ["director"] as Role[],
   // Manual permanent creator-data deletion (compliance): Director only + audit.
   "m12.purge_manual": ["director"] as Role[],
-  // NOTE: od_viewer appears in NO write permission by design — every mutation is rejected
-  // server-side (requirePermission) in addition to RLS. See __tests__/rbac.test.ts.
+  // NOTE: od_viewer appears in NO write permission EXCEPT the M3 OKR exception
+  // (OD_OKR_PERMISSIONS below) — every other mutation is rejected server-side
+  // (requirePermission) in addition to RLS. See __tests__/od-viewer.test.ts.
 };
+
+/**
+ * M3 OKR exception for od_viewer (revisi role 2026-07-29): the ONLY write permissions the
+ * OD role holds. Any od_viewer grant outside this list is a bug — tests enforce it.
+ */
+export const OD_OKR_PERMISSIONS = ["m3.set_target", "m3.set_reward", "m3.score"] as const;
 
 export function canAccessNav(item: NavItem, role: Role): boolean {
   return item.roles === "all" || item.roles.includes(role);

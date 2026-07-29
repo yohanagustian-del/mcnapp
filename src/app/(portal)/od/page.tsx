@@ -4,8 +4,10 @@ import { createAdminClient } from "@/lib/supabase/admin";
 
 /**
  * M11 OD oversight — cross-team, read-only. No mutation controls anywhere on this page.
- * Access limited to od_viewer + Director (management may also review). od_viewer holds zero
- * write permissions (see od-viewer.test.ts), so every mutation endpoint rejects them server-side.
+ * Access limited to od_viewer + Director (management may also review). od_viewer holds no
+ * write permission outside the M3 OKR exception (OD_OKR_PERMISSIONS, revisi role 2026-07-29 —
+ * OKR config lives at /okr/director); every other mutation endpoint rejects them server-side
+ * (see od-viewer.test.ts).
  */
 export default async function OdOversightPage() {
   const member = await requireMember();
