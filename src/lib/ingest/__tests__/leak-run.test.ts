@@ -32,7 +32,7 @@ vi.mock("@/lib/config", () => ({
 const resolveCreatorNamesMock = vi.fn(async (_admin: unknown, names: string[]) => {
   const byName = new Map<string, string>();
   for (const n of names) byName.set(n.toLowerCase(), `CRT-${n.toLowerCase()}`);
-  return { byName, createdProspects: [] as string[] };
+  return { byName, unresolved: [] as string[] };
 });
 vi.mock("@/lib/platform-csv", () => ({
   resolveCreatorNames: (...args: unknown[]) =>
@@ -110,7 +110,7 @@ describe("uploadLeakArtifact — format routing", () => {
     resolveCreatorNamesMock.mockImplementation(async (_admin: unknown, names: string[]) => {
       const byName = new Map<string, string>();
       for (const n of names) byName.set(n.toLowerCase(), `CRT-${n.toLowerCase()}`);
-      return { byName, createdProspects: [] as string[] };
+      return { byName, unresolved: [] as string[] };
     });
   });
 

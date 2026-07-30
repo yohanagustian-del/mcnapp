@@ -10,6 +10,7 @@ import {
   refreshGmvPostJoin,
   registerCreator,
 } from "./actions";
+import { PendingCreatorsPanel } from "./pending-creators-panel";
 
 export const dynamic = "force-dynamic";
 
@@ -23,6 +24,8 @@ export default async function AcquisitionWorkspacePage() {
   const member = await requireMember();
   const canRecord = hasPermission("m8.acquisition", member.role);
   const canPay = hasPermission("m8.referral_pay", member.role);
+  // Daftar tunggu kreator (0028): siapa yang boleh approve/tolak.
+  const canReviewPending = hasPermission("creators.pending_review", member.role);
 
   const supabase = await createClient();
   const [{ data: acquisitions }, { data: referrals }, { data: creators }, { data: cmMembers }] = await Promise.all([
@@ -44,6 +47,19 @@ export default async function AcquisitionWorkspacePage() {
       .eq("active", true)
       .order("name"),
   ]);
+
+  // Daftar tunggu kreator (0028) — username dari file upload yang belum terdaftar.
+  // Pending dulu (yang perlu tindakan), lalu yang sudah diputuskan sebagai riwayat.
+  const { data: pending } = await supabase
+    .from("creator_pending_registrations")
+    .select(
+      "id, username, platform, source, status, seen_count, rows_affected, followers, gmv_snapshot, first_seen_at, last_seen_at, creator_id, review_note"
+    )
+    .order("status", { ascending: true })
+    .order("seen_count", { ascending: false })
+    .order("last_seen_at", { ascending: false })
+    .limit(200);
+  const pendingRows = pending ?? [];
 
   const name = (rel: unknown) => (rel as { name?: string } | null)?.name ?? "—";
 
@@ -72,6 +88,8 @@ export default async function AcquisitionWorkspacePage() {
           ke CM. Deterministik, 0 token AI.
         </p>
       </div>
+
+      <PendingCreatorsPanel rows={pendingRows} canReview={canReviewPending} />
 
       <ProjectRequirementsPanel requirements={projectReqs} focus="creator" />
 

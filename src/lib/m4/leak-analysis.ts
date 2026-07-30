@@ -3,6 +3,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { writeAudit } from "@/lib/audit";
 import { getConfig } from "@/lib/config";
 import { resolveCreatorNames } from "@/lib/platform-csv";
+import { recordPendingCreators, pendingSkipReason } from "@/lib/creators/pending";
 import { fetchAll } from "@/lib/supabase/fetch-all";
 import { validateW1W5Period } from "@/lib/utils/date";
 import { derivePeriod, parseMcnFile, parseTapFile, type SkippedRow } from "@/lib/ingest/parse";
@@ -47,7 +48,6 @@ export type LeakAnalysisOrigin = "ingest" | "link_leakage";
 export interface LeakAnalysisCreator {
   creatorId: string;
   creatorName: string;
-  createdProspect: boolean;
   linkStatus: string;
   leakRatio: number | null;
   leakRatioShopBasis: number | null;
@@ -78,6 +78,8 @@ export interface LeakAnalysisResult {
   detailRows: number;
   alerts: { bocor: number; dealExpiring: number; dealExpired: number };
   exports: LeakExportFile[];
+  /** Username belum terdaftar → daftar tunggu, datanya dilewati (migration 0028). */
+  pendingCreators: string[];
   warnings: string[];
   skipped: SkippedRow[];
 }
@@ -462,24 +464,31 @@ export async function runLeakAnalysis(input: RunLeakAnalysisInput): Promise<Leak
   });
   const warnings = [...masterInfo.warnings, ...result.warnings];
 
-  // Resolve usernames → creators.id (auto-create as 'aktif': a creator in a CM's
-  // weekly leak report is by definition already joined with MEA).
-  const { byName, createdProspects } = await resolveCreatorNames(
+  // Resolve usernames → creators.id. TIDAK membuat kreator baru (migration 0028):
+  // username yang belum terdaftar masuk daftar tunggu dan datanya dilewati.
+  const { byName, unresolved } = await resolveCreatorNames(
     admin,
-    result.creators.map((c) => c.creatorName),
-    actorId,
-    "aktif"
+    result.creators.map((c) => c.creatorName)
   );
-  const createdSet = new Set(createdProspects.map((n) => n.toLowerCase()));
 
   const resolved: Array<CreatorLeakRollup & { creatorId: string }> = [];
   for (const c of result.creators) {
     const id = byName.get(c.creatorName.toLowerCase());
     if (!id) {
-      skipped.push({ row: -1, reason: `Creator "${c.creatorName}" tidak dapat di-resolve → dilewati.` });
+      skipped.push({ row: -1, reason: pendingSkipReason(c.creatorName, "leak_compute") });
       continue;
     }
     resolved.push({ ...c, creatorId: id });
+  }
+
+  const pendingCreators = [...unresolved];
+  if (pendingCreators.length > 0) {
+    await recordPendingCreators(admin, {
+      usernames: pendingCreators,
+      source: "leak_compute",
+      platform: "tiktok",
+      actorId: actorId || null,
+    });
   }
 
   await writeComputedRollups(admin, week, resolved);
@@ -533,7 +542,6 @@ export async function runLeakAnalysis(input: RunLeakAnalysisInput): Promise<Leak
     creators: resolved.map((c) => ({
       creatorId: c.creatorId,
       creatorName: c.creatorName,
-      createdProspect: createdSet.has(c.creatorName.toLowerCase()),
       linkStatus: c.linkStatus,
       leakRatio: c.leakRatio,
       leakRatioShopBasis: c.leakRatioShopBasis,
@@ -553,6 +561,7 @@ export async function runLeakAnalysis(input: RunLeakAnalysisInput): Promise<Leak
     detailRows: result.detail.length,
     alerts,
     exports: exportRun.files,
+    pendingCreators,
     warnings,
     skipped,
   };

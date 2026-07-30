@@ -6,7 +6,7 @@ import { writeAudit } from "@/lib/audit";
 import { getConfig } from "@/lib/config";
 import { requirePermission } from "@/lib/rbac";
 import { fetchAll } from "@/lib/supabase/fetch-all";
-import { genId } from "@/lib/utils/id";
+import { insertCreatorWithGeneratedId } from "@/lib/creators/registry";
 import { parseRupiah } from "@/lib/utils/rupiah";
 
 const PLATFORMS = ["tiktok", "shopee"] as const;
@@ -258,7 +258,10 @@ export async function refreshGmvPostJoin(formData: FormData): Promise<void> {
  *  - ada + kontrak aktif → tolak dengan pesan berisi identitas creator lama.
  */
 export async function registerCreator(formData: FormData): Promise<void> {
-  const actor = await requirePermission("m8.acquisition");
+  // Gerbang master kreator (migration 0028): MEMBUAT baris creators butuh
+  // `creators.create` (Akuisisi + Management + CM Lead), bukan lagi izin
+  // workflow akuisisi umum.
+  const actor = await requirePermission("creators.create");
 
   // ---- WAJIB ----
   const username = String(formData.get("username") ?? "").trim();
@@ -354,19 +357,10 @@ export async function registerCreator(formData: FormData): Promise<void> {
   const today = new Date().toISOString().slice(0, 10);
 
   if (!existing) {
-    // ---- INSERT baru; retry pada tabrakan id CRT- yang langka. ----
-    let insertedId = "";
-    let lastError = "";
-    for (let attempt = 0; attempt < 3 && !insertedId; attempt++) {
-      const id = genId("CRT");
-      const { error } = await admin.from("creators").insert({
-        id, status: "binding", commission_share: commissionShare, ...payload,
-      });
-      if (!error) insertedId = id;
-      else if (error.code === "23505") lastError = error.message; // id collision → retry
-      else throw new Error(`Gagal mendaftarkan creator: ${error.message}`);
-    }
-    if (!insertedId) throw new Error(`Gagal mendaftarkan creator: ${lastError}`);
+    // ---- INSERT baru lewat helper terpusat (registry.ts). ----
+    const insertedId = await insertCreatorWithGeneratedId(admin, {
+      status: "binding", commission_share: commissionShare, ...payload,
+    });
 
     await writeAudit({
       actorId: actor.id, action: "m8.creator_register", entityType: "creators",

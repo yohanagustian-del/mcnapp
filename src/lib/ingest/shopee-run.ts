@@ -3,6 +3,7 @@ import { createHash } from "crypto";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { writeAudit } from "@/lib/audit";
 import { deriveJenisCreator, resolveCreatorNamesByPlatform } from "@/lib/platform-csv";
+import { recordPendingCreators, pendingSkipReason } from "@/lib/creators/pending";
 import { validateW1W5Period } from "@/lib/utils/date";
 import { parseShopeeFile, validateSingleShopeeWindow, type ShopeeRow, type SkippedShopeeRow } from "./shopee-csv";
 import { buildShopeePeriodSummary, type ShopeePeriodSummaryRow } from "./shopee-aggregate";
@@ -21,7 +22,8 @@ export interface RunShopeeIngestResult {
   rowsCompleted: number;
   rowsUsed: number; // completed rows that survived product/shop/date/username checks
   creatorsCount: number;
-  createdProspects: string[];
+  /** Username belum terdaftar → daftar tunggu, barisnya dilewati (migration 0028). */
+  pendingCreators: string[];
   skipped: SkippedShopeeRow[];
   gmvTotal: number;
   /** Always true: this pipeline is aggregates-only — raw rows are never written to the DB. */
@@ -45,8 +47,8 @@ async function fileHash(file: File): Promise<string> {
  *      boundary dates (not the min/max actual dates found).
  *   3. Resolve Username Affiliate -> creators.id SCOPED TO platform='shopee'
  *      only (task rule #3, CLAUDE.md #5 — never match a TikTok creator with
- *      the same username). Unknown usernames become new platform='shopee'
- *      prospects.
+ *      the same username). Username yang belum terdaftar TIDAK dibuat otomatis
+ *      lagi (migration 0028): masuk daftar tunggu, barisnya dilewati.
  *   4. Aggregate in-memory (shopee-aggregate.ts) -> delete-then-insert into
  *      creator_period_summary ONLY (task rule #4 — no subcat/top-products for
  *      Shopee yet), scoped PER (creator × week), same replace semantics as the
@@ -138,18 +140,44 @@ export async function runShopeeIngest(input: RunShopeeIngestInput): Promise<RunS
     seenUsernames.add(key);
     distinctUsernames.push(r.affiliateUsername);
   }
-  const { byName, createdProspects } = await resolveCreatorNamesByPlatform(
-    admin, distinctUsernames, actorId, "shopee", "prospek"
+  // TIDAK membuat kreator baru (migration 0028) — username asing masuk daftar tunggu.
+  const { byName, unresolved } = await resolveCreatorNamesByPlatform(
+    admin, distinctUsernames, "shopee"
   );
 
   const resolvedRows: ShopeeRow[] = [];
+  const skippedRowsByName = new Map<string, number>();
   for (const r of parsed.rows) {
     const creatorId = byName.get(r.affiliateUsername.toLowerCase());
     if (!creatorId) {
-      skipped.push({ row: -1, reason: `creator "${r.affiliateUsername || "(kosong)"}" tidak dapat di-resolve` });
+      const key = r.affiliateUsername.trim().toLowerCase();
+      skippedRowsByName.set(key, (skippedRowsByName.get(key) ?? 0) + 1);
       continue;
     }
     resolvedRows.push({ ...r, affiliateUsername: creatorId });
+  }
+
+  const pendingCreators = [...unresolved];
+  if (pendingCreators.length > 0) {
+    await recordPendingCreators(admin, {
+      usernames: pendingCreators,
+      source: "shopee_weekly",
+      platform: "shopee",
+      batchId,
+      actorId,
+      rowsByUsername: skippedRowsByName,
+    });
+    for (const name of pendingCreators) {
+      const rows = skippedRowsByName.get(name.toLowerCase()) ?? 0;
+      skipped.push({
+        row: -1,
+        reason: `${pendingSkipReason(name, "shopee_weekly")} (${rows} baris dilewati)`,
+      });
+    }
+  }
+  const namelessRows = skippedRowsByName.get("") ?? 0;
+  if (namelessRows > 0) {
+    skipped.push({ row: -1, reason: `${namelessRows} baris tanpa username affiliate tidak dapat di-resolve` });
   }
 
   const creatorIdsSet = new Set(resolvedRows.map((r) => r.affiliateUsername));
@@ -203,17 +231,13 @@ export async function runShopeeIngest(input: RunShopeeIngestInput): Promise<RunS
         rows_completed: parsed.rows.length,
         rows_used: resolvedRows.length,
         creators: creatorIdsSet.size,
-        created_prospects: createdProspects.length,
+        pending_creators: pendingCreators.length,
         gmv_total: gmvTotal,
         dropped_raw: true,
         leak_engine: "external_artifact",
       },
       type: "auto",
     });
-
-    for (const name of createdProspects) {
-      skipped.push({ row: -1, reason: `creator "${name}" belum ada di master (platform shopee) → dibuat otomatis (status prospek)` });
-    }
 
     return {
       batchId,
@@ -223,7 +247,7 @@ export async function runShopeeIngest(input: RunShopeeIngestInput): Promise<RunS
       rowsCompleted: parsed.rows.length,
       rowsUsed: resolvedRows.length,
       creatorsCount: creatorIdsSet.size,
-      createdProspects,
+      pendingCreators,
       skipped,
       gmvTotal,
       droppedRaw: true,

@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { writeAudit } from "@/lib/audit";
 import { requirePermission, CM_ROLES, MANAGEMENT_ROLES } from "@/lib/rbac";
-import { genId } from "@/lib/utils/id";
+import { fetchAllCreatorRows, insertCreatorWithGeneratedId } from "@/lib/creators/registry";
 import { parseSheet } from "@/lib/utils/sheet";
 import {
   buildImportRows,
@@ -37,12 +37,15 @@ async function loadContext(): Promise<ImportContext & { cmNames: string[] }> {
     if (m.name) cmByName.set(String(m.name).toLowerCase(), { id: m.id, name: m.name });
   }
 
-  const { data: creators, error: creatorError } = await admin
-    .from("creators")
-    .select("id, username, owner_cpm_id")
-    .not("username", "is", null)
-    .limit(10000);
-  if (creatorError) throw new Error(`Gagal memuat data kreator: ${creatorError.message}`);
+  // Berpaginasi (registry.ts): `.limit(10000)` yang dipakai sebelumnya diam-diam
+  // dipotong PostgREST di 1.000 baris, sehingga kreator ke-1001 ke atas terlihat
+  // "belum ada" dan di-INSERT ulang oleh import ini — salah satu sumber duplikat.
+  const allCreators = await fetchAllCreatorRows<{
+    id: string;
+    username: string | null;
+    owner_cpm_id: string | null;
+  }>(admin, "id, username, owner_cpm_id");
+  const creators = allCreators.filter((c) => c.username != null);
 
   // owner_cpm_id → nama, supaya preview bisa menampilkan "CM lama → CM baru".
   const nameById = new Map<string, string>();
@@ -174,30 +177,18 @@ export async function commitCreatorImport(rawRows: Record<string, string>[]): Pr
       continue;
     }
 
-    // Insert baru; retry pada tabrakan id CRT- yang langka (pola sama dengan uploadCreators).
-    let insertedId: string | null = null;
-    let lastError = "";
-    for (let attempt = 0; attempt < 3 && !insertedId; attempt++) {
-      const id = genId("CRT");
-      const { error } = await admin.from("creators").insert({
-        id,
+    // Insert baru lewat helper terpusat (registry.ts) — satu implementasi
+    // genId+retry untuk semua jalur yang berhak membuat kreator.
+    let insertedId: string;
+    try {
+      insertedId = await insertCreatorWithGeneratedId(admin, {
         ...row.payload,
         // name NOT NULL di DB — kreator baru tanpa "Nama Creator" memakai username.
         name: row.payload.name ?? row.username,
         status: insertStatus(row.values),
       });
-      if (!error) {
-        insertedId = id;
-      } else if (error.code === "23505") {
-        lastError = error.message; // id collision → coba id baru
-      } else {
-        lastError = error.message;
-        break;
-      }
-    }
-
-    if (!insertedId) {
-      report.skipped.push({ row: row.rowNum, reason: lastError });
+    } catch (e) {
+      report.skipped.push({ row: row.rowNum, reason: e instanceof Error ? e.message : String(e) });
       continue;
     }
 

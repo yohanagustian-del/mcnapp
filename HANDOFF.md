@@ -2,6 +2,38 @@
 
 Status per sesi 2026-07-09 (sesi 5, backlog-sweep + audit deploy). Baca ini + `CLAUDE.md` sebelum lanjut.
 
+## ⚡ SESI 2026-07-30 — DUPLIKAT MASTER KREATOR: AKAR MASALAH + GERBANG AKUISISI
+**Gejala yang dilaporkan**: di `/creators` dan tabel "Pertumbuhan GMV Mingguan" satu username muncul beberapa kali dengan angka GMV identik (mis. `revicyn` 3 baris `Rp1.136.570.765`, `kakmuti7` 2 baris). Dugaan awal user: dua CM meng-upload kreator yang sama lewat fitur upload mingguan.
+
+**Skala nyata di produksi (`bqknstylbpwsnlgnzayw`)**: `creators` 3.269 baris untuk **1.140 username unik** — 608 username duplikat, 2.731 baris terlibat, **2.123 baris kelebihan**; terburuk `atik_nagoya` 18 baris. `audit_logs` `creator.auto_prospect_from_upload` = 3.258.
+
+**AKAR MASALAH (bukan cuma kebijakan) — batas 1.000 baris PostgREST**: `resolveCreatorNames()` mencari kreator existing dengan menarik seluruh tabel (`.select("id, name, username").limit(5000)`) lalu mencocokkan di JS. Supabase memotong SETIAP response di `db-max-rows` (default 1.000) — `.limit(5000)` tidak menaikkan batas itu dan **tidak** menghasilkan error. Jadi setiap kreator di luar 1.000 baris pertama terlihat "belum ada" → dibuat lagi tiap upload. Bukti: duplikat pertama muncul 21 Jul 2026 04:41, tepat setelah tabel melewati 1.000 baris (saat itu 1.168). Bug yang sama ada di jalur bulk-upload akuisisi (`import-actions.ts` `.limit(10000)`) dan `uploadCreators` (`.limit(5000)`) — memindahkan hak "tambah kreator" ke akuisisi TANPA memperbaiki lookup tidak akan menghentikan duplikat.
+
+**Keputusan user (interview 2026-07-30, jangan re-interview)**:
+1. **Merge dulu, hapus-total sebagai cadangan** kalau hasil merge masih kotor (semua file mingguan tersedia untuk upload ulang).
+2. Yang boleh **menambah** kreator: Akuisisi + Management + **CM Lead**.
+3. Username asing di file upload → **daftar tunggu** yang di-approve, bukan auto-create.
+4. Asumsi yang dipakai (belum dikoreksi user): pemenang merge = baris **tertua** + field kosong diisi dari duplikat; GMV mingguan ganda → simpan satu (batch terbaru); kunci unik = `(lower(username), platform)` dengan platform NULL = tiktok; setelah approve, **file mingguan di-upload ulang** (tidak menyimpan data mentah).
+
+**Perbaikan kode**:
+- `src/lib/creators/registry.ts` (BARU) — satu sumber baca/tulis master kreator: `fetchAllCreatorIdentities`/`fetchAllCreatorRows` (paginasi `.order().range()` per 1.000 baris), `buildCreatorLookup` (username & display name, opsional per platform), `insertCreatorWithGeneratedId` (genId+retry terpusat, menggantikan 3 copy-paste). **ATURAN: jangan pernah baca master kreator dengan satu `.select().limit(n)`.**
+- `src/lib/platform-csv.ts` — `resolveCreatorNames` / `resolveCreatorNamesByPlatform` TIDAK LAGI insert; mengembalikan `unresolved` (dulu `createdProspects`). Parameter `actorId`/`newStatus` dihapus.
+- `src/lib/creators/pending.ts` (BARU) + migration **0028** tabel `creator_pending_registrations` — daftar tunggu, idempotent per (username, platform), `seen_count` naik tiap deteksi, status pending/approved/rejected (rejected tidak diangkat lagi).
+- Semua jalur ingest melewati barisnya + mencatat daftar tunggu + melaporkan ke UI: `ingest/run.ts` (mcn_weekly), `shopee-run.ts` (shopee_weekly), `ingest/leak-run.ts` (leak_artifact), `m4/leak-analysis.ts` (leak_compute), `deals/[id]/report-actions.ts` (deal_report — baris report tetap disimpan dengan `creator_id` null).
+- RBAC baru: `creators.create` & `creators.pending_review` = Management + Akuisisi + `cm_lead`. `registerCreator` sekarang pakai `creators.create` (dulu `m8.acquisition`).
+- UI: panel **"Daftar Tunggu Kreator"** di Acquisition Workspace (`pending-creators-panel.tsx` + `pending-actions.ts`, approve/tolak); blok peringatan kuning di `/ingest` (TikTok & Shopee), form artifak leak, dan `leak-result-panel` — menyebut daftar nama + instruksi "approve lalu upload ulang".
+- `creators/import-actions.ts` & `creators/actions.ts` — lookup berpaginasi, insert via helper terpusat.
+
+**Migration & script (BELUM di-apply ke DB mana pun oleh sesi ini)**:
+- **0028** `creator_pending_registrations` + `creators_merge_map` + komentar gerbang. Aman di-apply kapan saja (aditif).
+- **0029** unique index `creators (lower(username), coalesce(platform,'tiktok')) where username is not null` — **SENGAJA gagal dengan pesan jelas kalau masih ada duplikat**. Apply SETELAH merge.
+- `scripts/dedupe-creators.sql` — BAGIAN A dry-run, BAGIAN B apply (satu transaksi: peta pemenang → isi field kosong → bersihkan tabrakan PK `creator_link_status`/`metrics_monthly_agg`/`creator_users`/`creator_period_summary` → repoint SEMUA FK secara dinamis → dedup agregat mingguan per (kreator, minggu) → hapus duplikat + audit `creator.dedupe_merge`), BAGIAN C verifikasi.
+- ⚠ **Ingat**: migration **0027 belum di-apply ke produksi** (lihat sesi 2026-07-29). Urutan apply produksi: 0027 → 0028 → dedupe script → 0029.
+
+**Catatan teknis penting**: `buildMonthlyGrowth`/`buildMonthlyAverages` (`m8/weekly-growth.ts`) sudah men-dedup per (creator, period_start) dengan createdAt terbaru, jadi tabel GMV mingguan tidak akan ganda setelah merge. TAPI konsumen yang MENJUMLAH (`matching`, `reports`, GMV akuisisi) akan over-count kalau baris agregat duplikat dibiarkan — karena itu BAGIAN B.5 script men-dedup `creator_period_summary`/`creator_top_products`/`creator_subcat_segment_gmv` untuk kreator hasil merge.
+
+**Verifikasi**: typecheck 0 error, **573 pass + 2 skip** (naik dari 551: 5 tes `pending.test.ts` + tes resolver ditulis ulang, termasuk kasus "kreator ke-1.200 harus ketemu" yang menangkap regresi `.limit()`), `next build` sukses. Dry-run script dijalankan read-only ke produksi (angka di atas).
+
 ## ⚡ SESI 2026-07-29 — ARTIFAK "AGENCY LEAKED GENERATOR" DIPINDAH KE DALAM PLATFORM (staging)
 **Masalah**: halaman `/link-leakage` cuma menampung hasil export artifak HTML eksternal. CM harus: export MCN+TAP → buka artifak → upload 3 file di sana → download 2 Excel → upload lagi ke `/ingest` Lane 2. File MCN+TAP yang sama sudah diupload di Lane 1 untuk agregat performa.
 

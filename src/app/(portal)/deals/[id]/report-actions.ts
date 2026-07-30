@@ -8,6 +8,7 @@ import { parseSheet } from "@/lib/utils/sheet";
 import { parseRupiah } from "@/lib/utils/rupiah";
 import { parseFlexibleDate } from "@/lib/utils/date";
 import { pick, pickPrefix, resolveCreatorNames } from "@/lib/platform-csv";
+import { recordPendingCreators } from "@/lib/creators/pending";
 import type { UploadReport } from "@/app/(portal)/tim/actions";
 
 /** "$75.25" / "$3,100" / "-" → number USD, null bila kosong/strip. */
@@ -50,11 +51,20 @@ export async function uploadDealSessions(formData: FormData): Promise<UploadRepo
     .from("brand_deals").select("id").eq("id", dealId).maybeSingle();
   if (!deal) throw new Error(`Deal ${dealId} tidak ditemukan`);
 
-  const { byName, createdProspects } = await resolveCreatorNames(
+  // Migration 0028: nama kreator yang belum terdaftar TIDAK dibuat otomatis.
+  // Baris report tetap disimpan (creator_id boleh null, nama tetap tercatat) dan
+  // username-nya masuk daftar tunggu untuk didaftarkan akuisisi.
+  const { byName, unresolved } = await resolveCreatorNames(
     admin,
-    rows.map((r) => pick(r, ["nama_creator"])),
-    actor.id
+    rows.map((r) => pick(r, ["nama_creator"]))
   );
+  if (unresolved.length > 0) {
+    await recordPendingCreators(admin, {
+      usernames: unresolved,
+      source: "deal_report",
+      actorId: actor.id,
+    });
+  }
 
   const inserts: Record<string, unknown>[] = [];
   for (const [i, raw] of rows.entries()) {
@@ -100,11 +110,16 @@ export async function uploadDealSessions(formData: FormData): Promise<UploadRepo
     action: "m8.deal_report_upload",
     entityType: "deal_live_sessions",
     entityId: dealId,
-    after: { rows: report.inserted, file: file.name, created_prospects: createdProspects },
+    after: { rows: report.inserted, file: file.name, pending_creators: unresolved },
     type: "auto",
   });
-  for (const name of createdProspects) {
-    report.skipped.push({ row: -1, reason: `creator "${name}" belum ada di master → dibuat sebagai prospek (review)` });
+  for (const name of unresolved) {
+    report.skipped.push({
+      row: -1,
+      reason:
+        `creator "${name}" belum terdaftar di master → baris tetap tersimpan tanpa tautan kreator, ` +
+        `username masuk Daftar Tunggu Kreator (approve di Acquisition Workspace).`,
+    });
   }
 
   revalidatePath(`/deals/${dealId}`);
@@ -119,7 +134,7 @@ export async function addDealSession(formData: FormData): Promise<void> {
   if (!dealId || !creatorName) throw new Error("deal_id & nama creator wajib");
 
   const admin = createAdminClient();
-  const { byName } = await resolveCreatorNames(admin, [creatorName], actor.id);
+  const { byName } = await resolveCreatorNames(admin, [creatorName]);
 
   const row = {
     deal_id: dealId,

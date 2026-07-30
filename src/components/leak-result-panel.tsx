@@ -70,6 +70,20 @@ export function LeakResultPanel({ result }: { result: LeakAnalysisResult }) {
         </span>
       </div>
 
+      {result.pendingCreators.length > 0 && (
+        <div className="mt-3 rounded-md bg-amber-50 p-3 text-xs text-amber-900">
+          <p className="font-medium">
+            {result.pendingCreators.length} kreator belum terdaftar di master — analisanya TIDAK
+            dihitung:
+          </p>
+          <p className="mt-1">{result.pendingCreators.join(", ")}</p>
+          <p className="mt-1">
+            Sudah masuk Daftar Tunggu Kreator. Minta Akuisisi / CM Lead meng-approve di Acquisition
+            Workspace, lalu jalankan ulang analisa ini.
+          </p>
+        </div>
+      )}
+
       {result.exports.length > 0 && (
         <div className="mt-3 rounded-md bg-slate-50 p-3">
           <p className="text-xs font-medium uppercase tracking-wide text-slate-500">Backup CSV</p>
@@ -117,12 +131,7 @@ export function LeakResultPanel({ result }: { result: LeakAnalysisResult }) {
             <tbody className="divide-y divide-slate-100">
               {result.creators.map((c) => (
                 <tr key={c.creatorId}>
-                  <td className="px-3 py-2 font-medium text-slate-800">
-                    {c.creatorName}
-                    {c.createdProspect && (
-                      <span className="ml-1 rounded bg-sky-100 px-1 text-[10px] text-sky-700">baru</span>
-                    )}
-                  </td>
+                  <td className="px-3 py-2 font-medium text-slate-800">{c.creatorName}</td>
                   <td className="px-3 py-2">
                     <span
                       className={`rounded-full px-2 py-0.5 font-medium ${STATUS_STYLES[c.linkStatus] ?? ""}`}

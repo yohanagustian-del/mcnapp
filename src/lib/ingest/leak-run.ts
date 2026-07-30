@@ -1,6 +1,7 @@
 import { createAdminClient } from "@/lib/supabase/admin";
 import { writeAudit } from "@/lib/audit";
 import { resolveCreatorNames } from "@/lib/platform-csv";
+import { recordPendingCreators, pendingSkipReason } from "@/lib/creators/pending";
 import { validateW1W5Period } from "@/lib/utils/date";
 import type { ArtifactFormat, LeakWeekTotals } from "./leak-artifact";
 import { parseBdOpportunityFile, parseLeakDetailFile } from "./leak-artifact";
@@ -35,7 +36,6 @@ export interface LeakArtifactCreatorResult {
   gmvAffiliateTotal: number | null;
   gmvTap: number | null;
   effectiveness: number | null;
-  createdProspect: boolean;
 }
 
 export interface UploadLeakArtifactResult {
@@ -50,6 +50,8 @@ export interface UploadLeakArtifactResult {
   weekTotals: LeakWeekTotals;
   bdShopsNew: number;
   bdShopsUpdated: number;
+  /** Username belum terdaftar → daftar tunggu, datanya dilewati (migration 0028). */
+  pendingCreators: string[];
   skipped: string[];
 }
 
@@ -92,20 +94,33 @@ export async function uploadLeakArtifact(
   }
   const week = detail.periodStart;
 
-  // ---- 2. Resolve creator usernames → creators.id (auto-create prospek) ----
-  // A creator in a CM leak report is by definition already joined with MEA → "aktif".
+  // ---- 2. Resolve creator usernames → creators.id (TIDAK membuat kreator) ----
+  // Migration 0028: username yang belum terdaftar masuk daftar tunggu, datanya dilewati.
   const names = detail.creators.map((c) => c.creatorName).filter((n) => n.trim() !== "");
-  const { byName, createdProspects } = await resolveCreatorNames(admin, names, actorId, "aktif");
-  const createdSet = new Set(createdProspects.map((n) => n.toLowerCase()));
+  const { byName, unresolved } = await resolveCreatorNames(admin, names);
 
   const resolvable: Array<(typeof detail.creators)[number] & { creatorId: string }> = [];
   for (const c of detail.creators) {
     const id = c.creatorName.trim() ? byName.get(c.creatorName.toLowerCase()) : undefined;
     if (!id) {
-      skipped.push(`Creator "${c.creatorName || "(kosong)"}" tidak dapat di-resolve → dilewati.`);
+      skipped.push(
+        c.creatorName.trim()
+          ? pendingSkipReason(c.creatorName, "leak_artifact")
+          : "Baris tanpa nama kreator tidak dapat di-resolve → dilewati."
+      );
       continue;
     }
     resolvable.push({ ...c, creatorId: id });
+  }
+
+  const pendingCreators = [...unresolved];
+  if (pendingCreators.length > 0) {
+    await recordPendingCreators(admin, {
+      usernames: pendingCreators,
+      source: "leak_artifact",
+      platform: "tiktok",
+      actorId,
+    });
   }
 
   // ---- 3. Persist per-creator rows — routed by detected format ----
@@ -124,7 +139,6 @@ export async function uploadLeakArtifact(
       gmvAffiliateTotal: r.gmvAffiliateTotal,
       gmvTap: r.gmvTap,
       effectiveness: r.effectiveness,
-      createdProspect: createdSet.has(r.creatorName.toLowerCase()),
     }));
     // v1 has no CM-level totals in the source — derive them by summing the
     // per-creator bullets so both formats leave a comparable weekly trail.
@@ -149,7 +163,6 @@ export async function uploadLeakArtifact(
       gmvAffiliateTotal: c.gmvAffiliateTotal,
       gmvTap: null,
       effectiveness: null,
-      createdProspect: createdSet.has(c.creatorName.toLowerCase()),
     }));
     weekTotals = detail.weekTotals ?? { gmvAffiliateTotal: null, gmvTap: null, gmvLeakPotential: null };
   }
@@ -200,6 +213,7 @@ export async function uploadLeakArtifact(
     weekTotals,
     bdShopsNew,
     bdShopsUpdated,
+    pendingCreators,
     skipped,
   };
 }

@@ -16,6 +16,7 @@ import { upsertDerivedFromTap } from "@/lib/m10/products";
 import {
   computeSharedAutoFillFields, fetchMonthlyAvgGmvByCreator, writeCreatorAutoFillUpdate,
 } from "./creator-autofill";
+import { recordPendingCreators, pendingSkipReason } from "@/lib/creators/pending";
 import { runLeakAnalysis, type LeakAnalysisResult } from "@/lib/m4/leak-analysis";
 // Retention lives in its own module (leak-retention.ts) so the leak analysis can
 // import it without a cycle through this file; re-exported here for the existing
@@ -42,7 +43,13 @@ export interface RunIngestResult {
   rowsProcessedMcn: number;
   rowsProcessedTap: number;
   creatorsCount: number;
-  createdProspects: string[];
+  /**
+   * Username di file yang BELUM terdaftar di master → masuk daftar tunggu
+   * (creator_pending_registrations) dan baris datanya dilewati. Sebelum migration
+   * 0028 field ini bernama `createdProspects` dan kreatornya dibuat otomatis —
+   * itulah sumber 2.100 baris kreator duplikat.
+   */
+  pendingCreators: string[];
   skipped: SkippedRow[];
   aggregateRows: { periodSummary: number; subcatSegment: number; topProducts: number };
   /** Always true: this pipeline is aggregates-only — raw rows are never written to the DB. */
@@ -192,20 +199,56 @@ export async function runIngest(input: RunIngestInput): Promise<RunIngestResult>
     );
   }
 
-  // Resolve creator names -> creators.id. A creator appearing in a platform
-  // performance report is by definition already joined with MEA (CLAUDE.md #1),
-  // so newStatus="aktif" (same convention as /metrics upload).
+  // Resolve creator names -> creators.id. TIDAK membuat kreator baru (migration
+  // 0028): username yang belum terdaftar masuk DAFTAR TUNGGU dan baris datanya
+  // dilewati — master kreator hanya lahir dari jalur akuisisi.
   const detectedNames = distinctCreatorNames(mcnParsed.rows.map((r) => ({ creator: r.creatorName })));
-  const { byName, createdProspects } = await resolveCreatorNames(admin, detectedNames, actorId, "aktif");
+  const { byName, unresolved } = await resolveCreatorNames(admin, detectedNames);
 
   const resolvedMcnRows: McnRow[] = [];
+  const skippedRowsByName = new Map<string, number>();
   for (const r of mcnParsed.rows) {
     const creatorId = r.creatorName ? byName.get(r.creatorName.toLowerCase()) ?? null : null;
     if (!creatorId) {
-      skipped.push({ row: -1, reason: `creator "${r.creatorName || "(kosong)"}" tidak dapat di-resolve` });
+      const key = (r.creatorName || "").trim().toLowerCase();
+      skippedRowsByName.set(key, (skippedRowsByName.get(key) ?? 0) + 1);
       continue;
     }
     resolvedMcnRows.push({ ...r, creatorName: creatorId });
+  }
+
+  // Followers per username asing (dari file) — bekal akuisisi saat menilai daftar tunggu.
+  const pendingFollowers = new Map<string, number>();
+  for (const r of mcnParsed.rows) {
+    const key = (r.creatorName || "").trim().toLowerCase();
+    if (!key || byName.has(key) || r.followerCount === null) continue;
+    const prev = pendingFollowers.get(key);
+    if (prev === undefined || r.followerCount > prev) pendingFollowers.set(key, r.followerCount);
+  }
+
+  const pendingCreators = [...unresolved];
+  if (pendingCreators.length > 0) {
+    await recordPendingCreators(admin, {
+      usernames: pendingCreators,
+      source: "mcn_weekly",
+      platform: "tiktok",
+      batchId,
+      actorId,
+      rowsByUsername: skippedRowsByName,
+      followersByUsername: pendingFollowers,
+    });
+    for (const name of pendingCreators) {
+      const rows = skippedRowsByName.get(name.toLowerCase()) ?? 0;
+      skipped.push({
+        row: -1,
+        reason: `${pendingSkipReason(name, "mcn_weekly")} (${rows} baris dilewati)`,
+      });
+    }
+  }
+  // Baris tanpa nama kreator sama sekali (bukan kandidat daftar tunggu).
+  const namelessRows = skippedRowsByName.get("") ?? 0;
+  if (namelessRows > 0) {
+    skipped.push({ row: -1, reason: `${namelessRows} baris tanpa nama kreator tidak dapat di-resolve` });
   }
 
   // ---- 2. upload_batches: staging ----
@@ -325,10 +368,6 @@ export async function runIngest(input: RunIngestInput): Promise<RunIngestResult>
       type: "auto",
     });
 
-    for (const name of createdProspects) {
-      skipped.push({ row: -1, reason: `creator "${name}" belum ada di master → dibuat otomatis (status aktif)` });
-    }
-
     // ---- 8. Analisa link leakage dari BARIS YANG SAMA (0 LLM) ----
     // Keputusan interview: fungsi artifak "Agency Leaked Generator" dipindah ke
     // dalam platform, dan file MCN+TAP mingguan cukup diupload SEKALI di sini.
@@ -365,7 +404,7 @@ export async function runIngest(input: RunIngestInput): Promise<RunIngestResult>
       rowsProcessedMcn: resolvedMcnRows.length,
       rowsProcessedTap: rowsTap,
       creatorsCount: creatorIdsSet.size,
-      createdProspects,
+      pendingCreators,
       skipped,
       aggregateRows: {
         periodSummary: periodSummary.length,

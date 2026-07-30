@@ -117,12 +117,7 @@ export function LeakArtifactForm() {
                 <tbody className="divide-y divide-slate-100">
                   {result.creators.map((c) => (
                     <tr key={c.creatorId}>
-                      <td className="px-3 py-2 text-slate-800">
-                        {c.creatorName}
-                        {c.createdProspect && (
-                          <span className="ml-1 rounded bg-sky-100 px-1 text-[10px] text-sky-700">baru</span>
-                        )}
-                      </td>
+                      <td className="px-3 py-2 text-slate-800">{c.creatorName}</td>
                       <td className="px-3 py-2">
                         <span className={`rounded-full px-2 py-0.5 font-medium ${statusStyle(c.linkStatus)}`}>
                           {statusLabel(c.linkStatus)}
@@ -134,6 +129,19 @@ export function LeakArtifactForm() {
                   ))}
                 </tbody>
               </table>
+            </div>
+          )}
+
+          {result.pendingCreators.length > 0 && (
+            <div className="mt-2 rounded-md bg-amber-50 p-2 text-xs text-amber-900">
+              <p className="font-medium">
+                {result.pendingCreators.length} kreator belum terdaftar di master — datanya TIDAK
+                tersimpan: {result.pendingCreators.join(", ")}
+              </p>
+              <p className="mt-1">
+                Sudah masuk Daftar Tunggu Kreator. Minta Akuisisi / CM Lead meng-approve di
+                Acquisition Workspace, lalu upload ulang file ini.
+              </p>
             </div>
           )}
 

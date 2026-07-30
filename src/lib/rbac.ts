@@ -86,6 +86,14 @@ export const NAV_ITEMS: NavItem[] = [
 export const PERMISSIONS: Record<string, Role[]> = {
   "team.bulk_upload": MANAGEMENT_ROLES,
   "creators.bulk_upload": [...MANAGEMENT_ROLES, ...ACQUISITION_ROLES],
+  // MEMBUAT baris master kreator (migration 0028, keputusan user 2026-07-30).
+  // Sebelumnya kreator bisa lahir dari jalur upload data mingguan siapa pun yang
+  // punya `ingest.run` (termasuk CPM & campaign_external) — itu, bersama bug lookup
+  // 1.000 baris, membuat 2.100 baris kreator duplikat. Sekarang hanya jalur sadar:
+  // form registrasi akuisisi, bulk upload master, dan approve daftar tunggu.
+  "creators.create": [...MANAGEMENT_ROLES, ...ACQUISITION_ROLES, "cm_lead"],
+  // Approve/tolak username di Daftar Tunggu Kreator (creator_pending_registrations).
+  "creators.pending_review": [...MANAGEMENT_ROLES, ...ACQUISITION_ROLES, "cm_lead"],
   // Edit master data kreator per-row (username sering ganti, no HP, RC, level, dll).
   // Dimiliki CM (Creator Manager) + management + akuisisi + creator_support — sejajar
   // dengan RLS creators_update (0002). commission_share TETAP read-only (CLAUDE.md #3).

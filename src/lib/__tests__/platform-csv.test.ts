@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import {
   deriveJenisCreator, periodRangeByCreator, platformFromReportSource, rankTopNiches, sumBatchPerCreator,
-  resolveCreatorNamesByPlatform,
+  resolveCreatorNames, resolveCreatorNamesByPlatform,
 } from "../platform-csv";
 
 vi.mock("@/lib/audit", () => ({ writeAudit: vi.fn(async () => {}) }));
@@ -167,19 +167,32 @@ describe("sumBatchPerCreator", () => {
   });
 });
 
-describe("resolveCreatorNamesByPlatform (Shopee ingest, CLAUDE.md #5)", () => {
-  /** Mock admin client: creators table pre-seeded, .eq("platform", ...) actually filters. */
-  function mockAdmin(seedCreators: { id: string; name: string; username: string; platform: string }[]) {
+describe("resolveCreatorNames* (gerbang master kreator, migration 0028)", () => {
+  /**
+   * Mock admin client: `creators` dibaca BERPAGINASI (`.order().range()`, lihat
+   * registry.ts) — mock ini meniru batas keras PostgREST 1.000 baris per response
+   * supaya regresi "tarik semua dengan .limit(5000)" ketahuan: kalau kode kembali
+   * memakai .limit(), pemanggilan .range() tidak ada dan tes gagal.
+   */
+  function mockAdmin(
+    seedCreators: { id: string; name: string; username: string; platform: string | null }[]
+  ) {
     const inserted: Record<string, unknown>[] = [];
+    const rangesRequested: [number, number][] = [];
     const admin = {
       from: (table: string) => {
         if (table !== "creators") throw new Error(`unexpected table ${table}`);
         return {
           select: () => ({
-            eq: (column: string, value: unknown) => ({
-              limit: () => {
-                const filtered = seedCreators.filter((c) => (c as Record<string, unknown>)[column] === value);
-                return Promise.resolve({ data: filtered, error: null });
+            order: () => ({
+              range: (from: number, to: number) => {
+                rangesRequested.push([from, to]);
+                // Halaman maksimal 1.000 baris — sama seperti db-max-rows Supabase.
+                const pageSize = Math.min(to - from + 1, 1000);
+                return Promise.resolve({
+                  data: seedCreators.slice(from, from + pageSize),
+                  error: null,
+                });
               },
             }),
           }),
@@ -190,46 +203,73 @@ describe("resolveCreatorNamesByPlatform (Shopee ingest, CLAUDE.md #5)", () => {
         };
       },
     } as unknown as SupabaseClient;
-    return { admin, inserted };
+    return { admin, inserted, rangesRequested };
   }
 
-  it("matches an existing creator ONLY within the given platform", async () => {
-    const { admin } = mockAdmin([
-      { id: "CRT-TIKTOK-1", name: "vikahere", username: "vikahere", platform: "tiktok" },
-    ]);
-    // Same username exists on TikTok — Shopee resolution must NOT match it, must create a NEW shopee creator.
-    const { byName, createdProspects } = await resolveCreatorNamesByPlatform(
-      admin, ["vikahere"], "actor-1", "shopee", "prospek"
-    );
-    expect(byName.get("vikahere")).not.toBe("CRT-TIKTOK-1");
-    expect(createdProspects).toEqual(["vikahere"]);
+  it("TIDAK membuat kreator baru — username asing kembali sebagai unresolved", async () => {
+    const { admin, inserted } = mockAdmin([]);
+    const { byName, unresolved } = await resolveCreatorNames(admin, ["kreator_baru"]);
+    expect(byName.size).toBe(0);
+    expect(unresolved).toEqual(["kreator_baru"]);
+    // Inilah inti perbaikan 2026-07-30: jalur upload tidak boleh INSERT kreator.
+    expect(inserted).toHaveLength(0);
   });
 
-  it("matches an existing shopee creator by username, case-insensitively", async () => {
+  it("mencocokkan username & display name, case-insensitive", async () => {
+    const { admin } = mockAdmin([
+      { id: "CRT-A", name: "Vika Here", username: "vikahere", platform: "tiktok" },
+    ]);
+    const { byName, unresolved } = await resolveCreatorNames(admin, ["VikaHere", "vika here"]);
+    expect(byName.get("vikahere")).toBe("CRT-A");
+    expect(byName.get("vika here")).toBe("CRT-A");
+    expect(unresolved).toEqual([]);
+  });
+
+  it("menemukan kreator DI LUAR 1.000 baris pertama (bug duplikat 2026-07-30)", async () => {
+    // 1.500 kreator: yang ke-1.200 hanya terlihat kalau lookup berpaginasi.
+    const seed = Array.from({ length: 1500 }, (_, i) => ({
+      id: `CRT-${String(i).padStart(5, "0")}`,
+      name: `creator ${i}`,
+      username: `creator${i}`,
+      platform: "tiktok" as string | null,
+    }));
+    const { admin, inserted, rangesRequested } = mockAdmin(seed);
+    const { byName, unresolved } = await resolveCreatorNames(admin, ["creator1200"]);
+    expect(byName.get("creator1200")).toBe("CRT-01200");
+    expect(unresolved).toEqual([]);
+    expect(inserted).toHaveLength(0);
+    // Halaman ke-2 memang diminta (bukan satu request .limit besar).
+    expect(rangesRequested.length).toBeGreaterThan(1);
+  });
+
+  it("resolveCreatorNamesByPlatform mencocokkan HANYA di platform yang diminta", async () => {
+    const { admin, inserted } = mockAdmin([
+      { id: "CRT-TIKTOK-1", name: "vikahere", username: "vikahere", platform: "tiktok" },
+    ]);
+    // Username yang sama ada di TikTok — resolusi Shopee tidak boleh mencocokkannya,
+    // dan (sejak 0028) juga tidak membuat kreator Shopee baru.
+    const { byName, unresolved } = await resolveCreatorNamesByPlatform(admin, ["vikahere"], "shopee");
+    expect(byName.size).toBe(0);
+    expect(unresolved).toEqual(["vikahere"]);
+    expect(inserted).toHaveLength(0);
+  });
+
+  it("resolveCreatorNamesByPlatform mencocokkan kreator shopee existing (case-insensitive)", async () => {
     const { admin } = mockAdmin([
       { id: "CRT-SHOPEE-1", name: "Ayu Efendy", username: "ayuefendy06", platform: "shopee" },
     ]);
-    const { byName, createdProspects } = await resolveCreatorNamesByPlatform(
-      admin, ["AyuEfendy06"], "actor-1", "shopee", "prospek"
+    const { byName, unresolved } = await resolveCreatorNamesByPlatform(
+      admin, ["AyuEfendy06"], "shopee"
     );
     expect(byName.get("ayuefendy06")).toBe("CRT-SHOPEE-1");
-    expect(createdProspects).toEqual([]);
+    expect(unresolved).toEqual([]);
   });
 
-  it("creates a new creator with platform=shopee and the given status for unknown usernames", async () => {
-    const { admin, inserted } = mockAdmin([]);
-    const { createdProspects } = await resolveCreatorNamesByPlatform(
-      admin, ["newuser"], "actor-1", "shopee", "prospek"
-    );
-    expect(createdProspects).toEqual(["newuser"]);
-    expect(inserted).toHaveLength(1);
-    expect(inserted[0]).toMatchObject({ name: "newuser", username: "newuser", status: "prospek", platform: "shopee" });
-  });
-
-  it("returns empty maps for an empty name list without querying", async () => {
-    const { admin } = mockAdmin([]);
-    const { byName, createdProspects } = await resolveCreatorNamesByPlatform(admin, [], "actor-1", "shopee");
+  it("daftar nama kosong: tidak query, hasil kosong", async () => {
+    const { admin, rangesRequested } = mockAdmin([]);
+    const { byName, unresolved } = await resolveCreatorNamesByPlatform(admin, [], "shopee");
     expect(byName.size).toBe(0);
-    expect(createdProspects).toEqual([]);
+    expect(unresolved).toEqual([]);
+    expect(rangesRequested).toHaveLength(0);
   });
 });

@@ -1,6 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { writeAudit } from "@/lib/audit";
-import { genId } from "@/lib/utils/id";
+import { buildCreatorLookup, fetchAllCreatorIdentities } from "@/lib/creators/registry";
 
 /**
  * Platform exports vary in header wording ("Product name" vs "Product info",
@@ -98,68 +97,43 @@ export function parseCount(raw: string): number | null {
 export interface CreatorResolution {
   /** lowercased creator name → creators.id */
   byName: Map<string, string>;
-  /** names for which a new prospect creator was created (flag for review) */
-  createdProspects: string[];
+  /**
+   * Nama/username di file yang TIDAK ada di master kreator. Sejak migration 0028
+   * jalur upload TIDAK MEMBUATNYA lagi — pemanggil wajib mencatatnya ke daftar
+   * tunggu (`recordPendingCreators`) dan melaporkannya ke pengunggah.
+   */
+  unresolved: string[];
 }
 
 /**
  * Resolves creator name/username values from a multi-creator file to creators.id.
  * Platform exports carry the USERNAME ("Nama pengguna kreator" — e.g. "vikahere"),
  * legacy templates the display name — both are matched case-insensitively.
- * Unknown values become new creators (status = newStatus) + review flag (CLAUDE.md #7),
- * so no platform row is ever dropped for lack of a master record.
  *
- * @param newStatus status to use for newly-created creators. Callers that ingest
- *   platform performance data (metrics upload) pass "aktif" — a creator appearing
- *   in a platform report is by definition already joined with MEA. Other callers
- *   (link-leakage, deal reports) keep the default "prospek".
+ * TIDAK PERNAH membuat kreator baru (perubahan 2026-07-30, migration 0028): master
+ * kreator hanya boleh lahir dari jalur akuisisi. Nama yang tidak dikenal kembali
+ * lewat `unresolved` supaya pemanggil bisa memasukkannya ke daftar tunggu.
+ *
+ * Lookup memakai `fetchAllCreatorIdentities` (berpaginasi). JANGAN kembali ke
+ * `.select().limit(n)`: PostgREST memotong response di 1.000 baris tanpa error —
+ * itu sebab 2.100 baris kreator duplikat sebelum ini (lihat registry.ts).
  */
 export async function resolveCreatorNames(
   admin: SupabaseClient,
-  names: string[],
-  actorId: string,
-  newStatus: "prospek" | "aktif" = "prospek"
+  names: string[]
 ): Promise<CreatorResolution> {
   const unique = [...new Set(names.map((n) => n.trim()).filter(Boolean))];
   const byName = new Map<string, string>();
-  const createdProspects: string[] = [];
-  if (unique.length === 0) return { byName, createdProspects };
+  const unresolved: string[] = [];
+  if (unique.length === 0) return { byName, unresolved };
 
-  // Case-insensitive match on name OR username (platform exports use username).
-  const { data, error } = await admin
-    .from("creators")
-    .select("id, name, username")
-    .limit(5000);
-  if (error) throw new Error(`resolveCreatorNames lookup failed: ${error.message}`);
-  const lookup = new Map<string, string>();
-  for (const c of data ?? []) {
-    if (c.username) lookup.set(String(c.username).toLowerCase(), c.id);
-    if (c.name) lookup.set(String(c.name).toLowerCase(), c.id);
-  }
+  const lookup = buildCreatorLookup(await fetchAllCreatorIdentities(admin));
   for (const n of unique) {
     const id = lookup.get(n.toLowerCase());
     if (id) byName.set(n.toLowerCase(), id);
+    else unresolved.push(n);
   }
-
-  for (const name of unique) {
-    if (byName.has(name.toLowerCase())) continue;
-    const id = genId("CRT");
-    const { error: insertError } = await admin
-      .from("creators")
-      .insert({ id, name, username: name, status: newStatus });
-    if (insertError) throw new Error(`gagal membuat creator "${name}": ${insertError.message}`);
-    byName.set(name.toLowerCase(), id);
-    createdProspects.push(name);
-    await writeAudit({
-      actorId,
-      action: "creator.auto_prospect_from_upload",
-      entityType: "creators",
-      entityId: id,
-      after: { name, username: name, status: newStatus },
-      type: "auto",
-    });
-  }
-  return { byName, createdProspects };
+  return { byName, unresolved };
 }
 
 /** platform_metrics_raw.report_source → creators.platform (CLAUDE.md #2 auto-fill). */
@@ -176,58 +150,26 @@ export function platformFromReportSource(reportSource: string): "tiktok" | "shop
  * used by the TikTok/deals/leak-artifact callers above) so those existing
  * callers are unaffected.
  *
- * Unknown usernames become new creators with platform=`platform`, status=
- * `newStatus`, username=name (same genId/audit_logs/review-flag convention as
- * resolveCreatorNames above).
+ * Sama seperti `resolveCreatorNames`: TIDAK PERNAH membuat kreator baru (0028) —
+ * username asing kembali lewat `unresolved` untuk masuk daftar tunggu.
  */
 export async function resolveCreatorNamesByPlatform(
   admin: SupabaseClient,
   names: string[],
-  actorId: string,
-  platform: "tiktok" | "shopee",
-  newStatus: "prospek" | "aktif" = "prospek"
+  platform: "tiktok" | "shopee"
 ): Promise<CreatorResolution> {
   const unique = [...new Set(names.map((n) => n.trim()).filter(Boolean))];
   const byName = new Map<string, string>();
-  const createdProspects: string[] = [];
-  if (unique.length === 0) return { byName, createdProspects };
+  const unresolved: string[] = [];
+  if (unique.length === 0) return { byName, unresolved };
 
-  // Case-insensitive match on name OR username, SCOPED to this platform only.
-  const { data, error } = await admin
-    .from("creators")
-    .select("id, name, username")
-    .eq("platform", platform)
-    .limit(5000);
-  if (error) throw new Error(`resolveCreatorNamesByPlatform lookup failed: ${error.message}`);
-  const lookup = new Map<string, string>();
-  for (const c of data ?? []) {
-    if (c.username) lookup.set(String(c.username).toLowerCase(), c.id);
-    if (c.name) lookup.set(String(c.name).toLowerCase(), c.id);
-  }
+  const lookup = buildCreatorLookup(await fetchAllCreatorIdentities(admin), platform);
   for (const n of unique) {
     const id = lookup.get(n.toLowerCase());
     if (id) byName.set(n.toLowerCase(), id);
+    else unresolved.push(n);
   }
-
-  for (const name of unique) {
-    if (byName.has(name.toLowerCase())) continue;
-    const id = genId("CRT");
-    const { error: insertError } = await admin
-      .from("creators")
-      .insert({ id, name, username: name, status: newStatus, platform });
-    if (insertError) throw new Error(`gagal membuat creator "${name}": ${insertError.message}`);
-    byName.set(name.toLowerCase(), id);
-    createdProspects.push(name);
-    await writeAudit({
-      actorId,
-      action: "creator.auto_prospect_from_upload",
-      entityType: "creators",
-      entityId: id,
-      after: { name, username: name, status: newStatus, platform },
-      type: "auto",
-    });
-  }
-  return { byName, createdProspects };
+  return { byName, unresolved };
 }
 
 /**

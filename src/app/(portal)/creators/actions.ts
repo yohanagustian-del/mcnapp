@@ -4,7 +4,9 @@ import { revalidatePath } from "next/cache";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { writeAudit } from "@/lib/audit";
 import { requirePermission } from "@/lib/rbac";
-import { genId } from "@/lib/utils/id";
+import {
+  buildCreatorLookup, fetchAllCreatorIdentities, insertCreatorWithGeneratedId,
+} from "@/lib/creators/registry";
 import { parseSheet } from "@/lib/utils/sheet";
 import { parseRupiah } from "@/lib/utils/rupiah";
 import { parseFlexibleDate } from "@/lib/utils/date";
@@ -49,12 +51,9 @@ export async function uploadCreators(formData: FormData): Promise<UploadReport> 
   const admin = createAdminClient();
 
   // Existing creators for upsert matching (username first, then display name).
-  const { data: existing } = await admin.from("creators").select("id, name, username").limit(5000);
-  const byKey = new Map<string, string>();
-  for (const c of existing ?? []) {
-    if (c.username) byKey.set(String(c.username).toLowerCase(), c.id);
-    if (c.name) byKey.set(String(c.name).toLowerCase(), c.id);
-  }
+  // Berpaginasi (registry.ts): `.limit(5000)` sebelumnya dipotong PostgREST di
+  // 1.000 baris → kreator ke-1001 ke atas dianggap baru dan di-INSERT ulang.
+  const byKey = buildCreatorLookup(await fetchAllCreatorIdentities(admin));
 
   for (const [i, raw] of rows.entries()) {
     const rowNum = i + 2;
@@ -128,32 +127,21 @@ export async function uploadCreators(formData: FormData): Promise<UploadReport> 
       continue;
     }
 
-    // Insert baru; retry pada tabrakan id CRT- yang langka.
-    let inserted = false;
-    let lastError = "";
-    for (let attempt = 0; attempt < 3 && !inserted; attempt++) {
-      const id = genId("CRT");
-      const { error } = await admin.from("creators").insert({
-        id,
+    // Insert baru lewat helper terpusat (registry.ts): satu implementasi genId+retry.
+    try {
+      const id = await insertCreatorWithGeneratedId(admin, {
         status: STATUSES.includes(statusRaw as (typeof STATUSES)[number]) ? statusRaw : "prospek",
         ...payload,
       });
-      if (!error) {
-        inserted = true;
-        byKey.set(matchKey, id);
-        await writeAudit({
-          actorId: actor.id, action: "creator.bulk_insert", entityType: "creators",
-          entityId: id, after: payload, type: "auto",
-        });
-      } else if (error.code === "23505") {
-        lastError = error.message; // id collision → retry with a new id
-      } else {
-        lastError = error.message;
-        break;
-      }
+      byKey.set(matchKey, id);
+      await writeAudit({
+        actorId: actor.id, action: "creator.bulk_insert", entityType: "creators",
+        entityId: id, after: payload, type: "auto",
+      });
+      report.inserted++;
+    } catch (e) {
+      report.skipped.push({ row: rowNum, reason: e instanceof Error ? e.message : String(e) });
     }
-    if (inserted) report.inserted++;
-    else report.skipped.push({ row: rowNum, reason: lastError });
   }
 
   revalidatePath("/creators");

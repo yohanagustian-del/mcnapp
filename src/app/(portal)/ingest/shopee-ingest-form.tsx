@@ -84,10 +84,18 @@ export function ShopeeIngestForm() {
             <li>GMV total periode ini: Rp{result.gmvTotal.toLocaleString("id-ID")}</li>
             <li>Raw transaksi tidak disimpan ke DB — hanya agregat GMV mingguan yang ditulis.</li>
           </ul>
-          {result.createdProspects.length > 0 && (
-            <p className="mt-2 text-xs">
-              Creator baru dibuat otomatis (platform Shopee): {result.createdProspects.join(", ")}
-            </p>
+          {result.pendingCreators.length > 0 && (
+            <div className="mt-2 rounded-md bg-amber-50 p-2 text-xs text-amber-900">
+              <p className="font-medium">
+                {result.pendingCreators.length} kreator Shopee belum terdaftar di master — data
+                mingguannya BELUM masuk:
+              </p>
+              <p className="mt-1">{result.pendingCreators.join(", ")}</p>
+              <p className="mt-1">
+                Sudah masuk Daftar Tunggu Kreator. Minta Akuisisi / CM Lead meng-approve di
+                Acquisition Workspace, lalu upload ulang file ini.
+              </p>
+            </div>
           )}
           {result.skipped.length > 0 && (
             <details className="mt-2">
