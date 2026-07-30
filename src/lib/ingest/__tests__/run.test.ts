@@ -197,4 +197,34 @@ describe("writeAggregates (idempotensi per creator x periode, bukan per upload_b
       expect(ins.rows).toHaveLength(1); // never accumulates duplicates within a single insert call
     }
   });
+
+  it("aturan user 2026-07-30: periode sama di-upload 2x dengan FILE BEDA → yang terbaru menimpa", async () => {
+    // File kedua punya isi berbeda ⇒ hash8 berbeda ⇒ batch_id berbeda. Replace
+    // di-scope ke (creator_id, period_start) — BUKAN ke upload_batch — jadi baris
+    // upload pertama tetap terhapus dan hanya angka terbaru yang tersisa.
+    const ops: Op[] = [];
+    await writeAggregates(
+      mockSupabase(ops), "ingest:2026-07-01:aaaaaaaa", CREATOR_IDS, PERIOD_START, PERIOD_END,
+      summary, subcat, top
+    );
+    const opsSecond: Op[] = [];
+    await writeAggregates(
+      mockSupabase(opsSecond), "ingest:2026-07-01:bbbbbbbb", CREATOR_IDS, PERIOD_START, PERIOD_END,
+      summary, subcat, top
+    );
+
+    // Upload kedua menghapus baris periode yang sama untuk kreator yang sama…
+    const deletes = opsSecond.filter((o) => o.op === "delete");
+    expect(deletes.map((d) => d.table)).toEqual([
+      "creator_period_summary", "creator_top_products", "creator_subcat_segment_gmv",
+    ]);
+    for (const d of deletes) {
+      expect(d.filters).toContainEqual({ column: "creator_id", value: CREATOR_IDS });
+    }
+    // …lalu menulis ulang dengan batch_id barunya (angka terbaru yang berlaku).
+    const summaryInsert = opsSecond.find(
+      (o) => o.op === "insert" && o.table === "creator_period_summary"
+    );
+    expect(summaryInsert?.rows?.[0]).toMatchObject({ upload_batch: "ingest:2026-07-01:bbbbbbbb" });
+  });
 });

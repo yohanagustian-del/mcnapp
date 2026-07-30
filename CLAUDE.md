@@ -61,6 +61,15 @@ Platform internal MCN MEA (agency creator TikTok/Shopee). Menggabungkan tools te
 - Signature: `projectGmv(creatorId, subCategory, priceSegment, window=28d) → {min, max}`
 - Selalu return range + disclaimer. Jangan bikin dua versi.
 
+### 9. Master kreator = SATU baris per (username, platform), dibuat HANYA lewat akuisisi
+- Upload data mingguan (MCN/Shopee/leak/report deal) TIDAK PERNAH membuat baris `creators`. Username asing → DAFTAR TUNGGU (`creator_pending_registrations`), barisnya dilewati + dilaporkan.
+- Yang boleh membuat kreator (`creators.create`) & approve daftar tunggu (`creators.pending_review`): Akuisisi + Management + CM Lead. Titik.
+- Baca master kreator WAJIB berpaginasi via `src/lib/creators/registry.ts` (`fetchAllCreatorIdentities`/`fetchAllCreatorRows`). JANGAN pakai `.select().limit(n)` — PostgREST memotong di 1.000 baris tanpa error (ini akar duplikat 2026-07-30). Insert kreator lewat `insertCreatorWithGeneratedId` (satu implementasi genId+retry).
+- Pengaman DB: unique `(lower(username), coalesce(platform,'tiktok'))` (migration 0029), platform NULL = tiktok.
+
+### 10. Upload periode sama 2× = TIMPA yang terbaru (bukan tambah/jumlah)
+- Agregat mingguan idempotent per (creator × minggu): delete-then-insert di-scope `(creator_id, period_start)`, BUKAN per upload_batch. Upload W1 dua kali → baris lama untuk kreator itu di minggu itu dihapus, angka dari file TERBARU yang berlaku. Lihat `writeAggregates` (run.ts) & `writeShopeeAggregates` (shopee-run.ts). Jangan ubah scope-nya ke upload_batch.
+
 ## Konvensi kode
 - DB: snake_case. Kode: camelCase. Komponen: PascalCase.
 - ID entity: `CRT-`, `DEAL-`, `LNK-` (text PK, generate util terpusat).
