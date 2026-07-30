@@ -5,12 +5,8 @@ import { daysInMonth, weekOfMonth } from "@/lib/utils/date";
 import { IngestForm } from "./ingest-form";
 import { ShopeeIngestForm } from "./shopee-ingest-form";
 import { LeakArtifactForm } from "./leak-artifact-form";
+import { BatchHistoryTable, type BatchRow } from "./batch-history-table";
 
-const STATUS_STYLES: Record<string, string> = {
-  processed: "bg-green-100 text-green-800",
-  staging: "bg-amber-100 text-amber-800",
-  failed: "bg-red-100 text-red-800",
-};
 const STATUS_LABELS: Record<string, string> = {
   processed: "Selesai",
   staging: "Diproses",
@@ -94,11 +90,17 @@ export default async function IngestPage() {
   const canUploadLeak = hasPermission("leak.upload_artifact", member.role);
 
   const supabase = await createClient();
-  const { data: batches } = await supabase
+  // Riwayat Batch: ambil halaman pertama (10 baris) + total count untuk pagination.
+  // Halaman berikutnya di-fetch bertahap di client (batch-history-table) via .range(),
+  // jadi seluruh baris tidak pernah ditarik sekaligus.
+  const { data: batches, count: batchCount } = await supabase
     .from("upload_batches")
-    .select("batch_id, source_type, uploaded_at, row_count_raw, creators_count, period_start, period_end, status, processed_at, error")
+    .select(
+      "batch_id, source_type, uploaded_at, row_count_raw, creators_count, period_start, period_end, status, processed_at, error",
+      { count: "exact" }
+    )
     .order("uploaded_at", { ascending: false })
-    .limit(20);
+    .range(0, 9);
 
   // Kalender cakupan minggu: pola query sama (upload_batches, service via RLS
   // select-all policy), diurutkan by period_start supaya bulan-bulan dengan
@@ -121,6 +123,64 @@ export default async function IngestPage() {
         dihitung serentak dari file yang sama, lalu baris mentah dibuang (tidak pernah disimpan ke
         DB). Tidak perlu lagi menjalankan artifak Agency Leaked Generator di luar platform.
       </p>
+
+      <details className="mt-6 max-w-2xl rounded-lg border border-blue-200 bg-blue-50/60 p-4" open>
+        <summary className="cursor-pointer text-sm font-semibold text-blue-900">
+          📋 Tutorial: Cara Menarik Data dari TikTok Shop Partner Center
+        </summary>
+        <ol className="mt-3 list-inside list-decimal space-y-2 text-sm text-slate-700">
+          <li>
+            Login ke{" "}
+            <a
+              href="https://partner.tiktokshop.com/"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-blue-700 underline"
+            >
+              https://partner.tiktokshop.com/
+            </a>{" "}
+            (jika tidak tahu akun/akses, hubungi tim TikTok MCN)
+          </li>
+          <li>
+            Pada sidebar, klik <strong>Analytics -&gt; Custom Report</strong>
+          </li>
+          <li>
+            Pada bagian <strong>Roles</strong>, pilih <strong>MCN</strong>
+          </li>
+          <li>
+            Pada bagian <strong>Custom Report -&gt; Area/Section Dimension</strong>, ceklis: Creator,
+            Product, Shop, Product Category
+          </li>
+          <li>
+            Filter tanggal sesuai pembagian minggu berikut:
+            <ul className="mt-1 list-inside list-disc space-y-0.5 pl-4 text-slate-600">
+              <li>W1 = tanggal 1-7</li>
+              <li>W2 = tanggal 8-14</li>
+              <li>W3 = tanggal 15-21</li>
+              <li>W4 = tanggal 22-28</li>
+              <li>W5 = tanggal 29-31</li>
+            </ul>
+          </li>
+          <li>
+            Ubah <strong>Level 1 Category</strong> menjadi <strong>Level 2 Category</strong>
+          </li>
+          <li>
+            Isi <strong>Creator Name</strong> sesuai list creator yang dipegang
+          </li>
+          <li>
+            Klik <strong>Export</strong>
+          </li>
+          <li>
+            Ulangi seluruh langkah di atas sekali lagi untuk menarik data <strong>TAP</strong>: ubah{" "}
+            <strong>Roles</strong> menjadi <strong>TAP</strong>, lalu ulangi langkah 4-8
+          </li>
+        </ol>
+        <p className="mt-3 rounded-md border border-amber-300 bg-amber-100 p-3 text-xs font-medium text-amber-900">
+          ⚠ Proses ini menghasilkan <strong>2 file terpisah</strong> — <strong>data MCN</strong> dan{" "}
+          <strong>data TAP</strong>. Keduanya perlu diupload di form di bawah (MCN wajib, TAP
+          disarankan agar analisa kebocoran link ikut dihitung).
+        </p>
+      </details>
 
       <h2 className="mt-6 text-lg font-medium">TikTok</h2>
       {canRun ? (
@@ -227,49 +287,10 @@ export default async function IngestPage() {
       </div>
 
       <h2 className="mt-8 text-lg font-medium">Riwayat Batch</h2>
-      <div className="mt-2 overflow-x-auto rounded-lg border border-slate-200 bg-white">
-        <table className="min-w-full text-sm">
-          <thead className="bg-slate-50 text-left text-xs uppercase text-slate-500">
-            <tr>
-              <th className="px-4 py-3">Batch</th>
-              <th className="px-4 py-3">Periode</th>
-              <th className="px-4 py-3">Baris Raw</th>
-              <th className="px-4 py-3">Creator</th>
-              <th className="px-4 py-3">Status</th>
-              <th className="px-4 py-3">Diproses</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-slate-100">
-            {(batches ?? []).map((b) => (
-              <tr key={b.batch_id}>
-                <td className="px-4 py-2 font-mono text-xs">{b.batch_id}</td>
-                <td className="px-4 py-2">
-                  {b.period_start ?? "—"} — {b.period_end ?? "—"}
-                </td>
-                <td className="px-4 py-2">{Number(b.row_count_raw).toLocaleString("id-ID")}</td>
-                <td className="px-4 py-2">{b.creators_count}</td>
-                <td className="px-4 py-2">
-                  <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${STATUS_STYLES[b.status] ?? ""}`}>
-                    {STATUS_LABELS[b.status] ?? b.status}
-                  </span>
-                  {b.error && <span className="ml-2 text-xs text-red-600">{b.error}</span>}
-                </td>
-                <td className="px-4 py-2 text-xs text-slate-500">
-                  {b.processed_at ? new Date(b.processed_at).toLocaleString("id-ID") : "—"}
-                </td>
-              </tr>
-            ))}
-            {(batches ?? []).length === 0 && (
-              <tr>
-                <td colSpan={6} className="px-4 py-6 text-center text-slate-400">
-                  Belum ada batch. Upload file MCN + TAP mingguan untuk memulai (analisa kebocoran
-                  ikut dihitung bila TAP disertakan).
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-      </div>
+      <BatchHistoryTable
+        initialBatches={(batches ?? []) as BatchRow[]}
+        totalCount={batchCount ?? 0}
+      />
       <p className="mt-2 text-xs text-slate-500">
         Baris mentah tidak disimpan permanen — bukti upload (jumlah baris, hash file, periode)
         tercatat di tabel ini. Upload ulang periode sama menimpa hasil lama (idempotent).
