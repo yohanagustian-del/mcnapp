@@ -32,7 +32,17 @@ Status per sesi 2026-07-09 (sesi 5, backlog-sweep + audit deploy). Baca ini + `C
 
 **Catatan teknis penting**: `buildMonthlyGrowth`/`buildMonthlyAverages` (`m8/weekly-growth.ts`) sudah men-dedup per (creator, period_start) dengan createdAt terbaru, jadi tabel GMV mingguan tidak akan ganda setelah merge. TAPI konsumen yang MENJUMLAH (`matching`, `reports`, GMV akuisisi) akan over-count kalau baris agregat duplikat dibiarkan — karena itu BAGIAN B.5 script men-dedup `creator_period_summary`/`creator_top_products`/`creator_subcat_segment_gmv` untuk kreator hasil merge.
 
-**Verifikasi**: typecheck 0 error, **573 pass + 2 skip** (naik dari 551: 5 tes `pending.test.ts` + tes resolver ditulis ulang, termasuk kasus "kreator ke-1.200 harus ketemu" yang menangkap regresi `.limit()`), `next build` sukses. Dry-run script dijalankan read-only ke produksi (angka di atas).
+**Verifikasi**: typecheck 0 error, **574 pass + 2 skip**, `next build` sukses.
+
+**SUDAH DIJALANKAN DI PRODUKSI (`bqknstylbpwsnlgnzayw`, 2026-07-30)** — task tuntas di DB:
+- Migration **0028** applied. 0027 ternyata SUDAH ter-apply sebelumnya (HANDOFF lama keliru).
+- `scripts/dedupe-creators.sql` BAGIAN B dijalankan: `creators` **3.269 → 1.146**, 2.123 baris ter-merge, 608 grup, 0 duplikat tersisa, `creators_merge_map` 2.123 baris, audit `creator.dedupe_merge` 608. Konflik CM **kakmuti7 → Ryan Nita** (override eksplisit dalam transaksi). revicyn/kakmuti7 kini 1 baris masing-masing; 0 turunan yatim.
+- Tambahan di luar merge: 8 baris `creator_period_summary` ganda per (kreator,minggu) dari kreator NON-duplikat (upload periode sama 2× sebelum perbaikan, nilai identik) di-dedup table-wide keep-latest (aturan #10).
+- Migration **0029** applied — unique index `creators_username_platform_uidx` aktif. Duplikat baru kini ditolak DB.
+- ⚠ **Dua perbaikan script SETELAH percobaan pertama gagal** (sudah masuk file repo, tapi INGAT kalau menjalankan di DB lain spt staging): (1) B.2 pakai `DISTINCT ON` bukan `array_agg[1]` — `array_agg` gagal untuk kolom array `top_niches`; (2) B.3 memangkas per (pemenang, kunci-alami) via ctid untuk tabrakan loser-vs-loser (dua duplikat berbagi minggu yang sama di `creator_link_status`), bukan hanya loser-vs-pemenang.
+- ⚠ **Catatan MCP**: BAGIAN B menyentuh `creator_subcat_segment_gmv` (564k) + `creator_top_products` (220k) → `execute_sql` timeout di 60s DI SISI CLIENT, tapi transaksi TETAP commit di server. Selalu verifikasi state (count creators / merge_map) sebelum mengulang — jangan main ulang.
+
+**Belum dilakukan**: deploy kode branch `claude/duplicate-creator-data-0k5gi5` ke produksi (env Vercel). Sampai ter-deploy, jalur upload lama (yang masih membuat kreator) belum tergantikan — tapi unique index 0029 kini menjadi pengaman: upedload yang mencoba insert duplikat akan error, bukan diam-diam menggandakan.
 
 ## ⚡ SESI 2026-07-29 — ARTIFAK "AGENCY LEAKED GENERATOR" DIPINDAH KE DALAM PLATFORM (staging)
 **Masalah**: halaman `/link-leakage` cuma menampung hasil export artifak HTML eksternal. CM harus: export MCN+TAP → buka artifak → upload 3 file di sana → download 2 Excel → upload lagi ke `/ingest` Lane 2. File MCN+TAP yang sama sudah diupload di Lane 1 untuk agregat performa.

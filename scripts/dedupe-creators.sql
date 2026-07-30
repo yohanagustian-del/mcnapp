@@ -125,6 +125,10 @@ on conflict (loser_id) do nothing;
 -- Untuk SETIAP kolom creators (kecuali kunci & metadata), pemenang yang NULL diisi
 -- nilai non-NULL dari duplikat TERBARU. Dinamis supaya kolom baru di masa depan
 -- otomatis ikut dan tidak ada daftar 40 kolom yang bisa basi.
+--
+-- DISTINCT ON (bukan array_agg[1]) supaya AMAN untuk kolom bertipe array seperti
+-- top_niches (text[]) — array_agg atas kolom array menghasilkan array 2-D yang
+-- subscript-nya tak lagi cocok dengan tipe kolom.
 do $$
 declare col record;
 begin
@@ -139,14 +143,13 @@ begin
       update creators w
          set %1$I = s.val
         from (
-          select m.winner_id,
-                 (array_agg(l.%1$I order by l.created_at desc nulls last, l.id desc)
-                    filter (where l.%1$I is not null))[1] as val
+          select distinct on (m.winner_id) m.winner_id, l.%1$I as val
             from _dedupe_map m
             join creators l on l.id = m.loser_id
-           group by m.winner_id
+           where l.%1$I is not null
+           order by m.winner_id, l.created_at desc nulls last, l.id desc
         ) s
-       where w.id = s.winner_id and s.val is not null and w.%1$I is null
+       where w.id = s.winner_id and w.%1$I is null
     $f$, col.column_name);
   end loop;
 end $$;
@@ -155,44 +158,84 @@ end $$;
 update creators w
    set platform = s.val
   from (
-    select m.winner_id,
-           (array_agg(l.platform order by l.created_at desc nulls last, l.id desc)
-              filter (where l.platform is not null))[1] as val
+    select distinct on (m.winner_id) m.winner_id, l.platform as val
       from _dedupe_map m
       join creators l on l.id = m.loser_id
-     group by m.winner_id
+     where l.platform is not null
+     order by m.winner_id, l.created_at desc nulls last, l.id desc
   ) s
- where w.id = s.winner_id and w.platform is null and s.val is not null;
+ where w.id = s.winner_id and w.platform is null;
 
 -- B.3 Bersihkan tabrakan kunci sebelum memindahkan data turunan -----------------
--- Tabel dengan kunci alami yang memuat creator_id: baris duplikat yang minggunya
--- SUDAH dimiliki pemenang dihapus (nilainya sama, dari file yang sama).
-delete from creator_link_status l
- using _dedupe_map m
- where l.creator_id = m.loser_id
-   and exists (select 1 from creator_link_status w
-                where w.creator_id = m.winner_id and w.week = l.week);
+-- Tabel berkunci-alami yang memuat creator_id: setelah SEMUA loser di-repoint ke
+-- pemenang, satu (pemenang, kunci-alami) bisa muncul >1× — baik dari loser-vs-
+-- pemenang MAUPUN loser-vs-loser (dua baris duplikat berbagi minggu yang sama).
+-- Karena itu dikelompokkan per (target pemenang, kunci-alami) dan disisakan SATU
+-- baris: baris milik pemenang didahulukan, lalu yang terbaru. Pakai ctid (aman di
+-- dalam transaksi) supaya tak butuh kolom id surrogate.
 
-delete from metrics_monthly_agg l
- using _dedupe_map m
- where l.creator_id = m.loser_id
-   and exists (select 1 from metrics_monthly_agg w
-                where w.creator_id = m.winner_id and w.month = l.month
-                  and w.metric = l.metric and w.source = l.source);
+-- creator_link_status: pk (creator_id, week)
+delete from creator_link_status t using (
+  select ctid from (
+    select cls.ctid,
+           row_number() over (
+             partition by coalesce(m.winner_id, cls.creator_id), cls.week
+             order by (cls.creator_id = coalesce(m.winner_id, cls.creator_id)) desc, cls.ctid
+           ) rn
+      from creator_link_status cls
+      left join _dedupe_map m on m.loser_id = cls.creator_id
+     where cls.creator_id in (select loser_id from _dedupe_map)
+        or cls.creator_id in (select winner_id from _dedupe_map)
+  ) x where rn > 1
+) d where t.ctid = d.ctid;
 
-delete from creator_period_summary l
- using _dedupe_map m
- where l.creator_id = m.loser_id
-   and exists (select 1 from creator_period_summary w
-                where w.creator_id = m.winner_id and w.period_start = l.period_start
-                  and w.upload_batch = l.upload_batch);
+-- metrics_monthly_agg: pk (creator_id, month, metric, source)
+delete from metrics_monthly_agg t using (
+  select ctid from (
+    select mma.ctid,
+           row_number() over (
+             partition by coalesce(m.winner_id, mma.creator_id), mma.month, mma.metric, mma.source
+             order by (mma.creator_id = coalesce(m.winner_id, mma.creator_id)) desc, mma.ctid
+           ) rn
+      from metrics_monthly_agg mma
+      left join _dedupe_map m on m.loser_id = mma.creator_id
+     where mma.creator_id in (select loser_id from _dedupe_map)
+        or mma.creator_id in (select winner_id from _dedupe_map)
+  ) x where rn > 1
+) d where t.ctid = d.ctid;
 
--- Akun portal kreator (M9) unik per creator_id: kalau pemenang sudah punya akun,
--- akun milik baris duplikat dihapus (baris duplikat memang tidak akan ada lagi).
-delete from creator_users l
- using _dedupe_map m
- where l.creator_id = m.loser_id
-   and exists (select 1 from creator_users w where w.creator_id = m.winner_id);
+-- creator_period_summary: unique (creator_id, period_start, upload_batch) — B.5 masih
+-- men-dedup lagi per (creator_id, period_start), ini hanya cegah tabrakan unique saat repoint.
+delete from creator_period_summary t using (
+  select ctid from (
+    select cps.ctid,
+           row_number() over (
+             partition by coalesce(m.winner_id, cps.creator_id), cps.period_start, cps.upload_batch
+             order by (cps.creator_id = coalesce(m.winner_id, cps.creator_id)) desc,
+                      cps.created_at desc nulls last, cps.ctid
+           ) rn
+      from creator_period_summary cps
+      left join _dedupe_map m on m.loser_id = cps.creator_id
+     where cps.creator_id in (select loser_id from _dedupe_map)
+        or cps.creator_id in (select winner_id from _dedupe_map)
+  ) x where rn > 1
+) d where t.ctid = d.ctid;
+
+-- Akun portal kreator (M9): unique (creator_id) + unique (email/auth_uid/invite_token).
+-- Sisakan satu per pemenang (baris pemenang sendiri didahulukan).
+delete from creator_users t using (
+  select ctid from (
+    select cu.ctid,
+           row_number() over (
+             partition by coalesce(m.winner_id, cu.creator_id)
+             order by (cu.creator_id = coalesce(m.winner_id, cu.creator_id)) desc, cu.ctid
+           ) rn
+      from creator_users cu
+      left join _dedupe_map m on m.loser_id = cu.creator_id
+     where cu.creator_id in (select loser_id from _dedupe_map)
+        or cu.creator_id in (select winner_id from _dedupe_map)
+  ) x where rn > 1
+) d where t.ctid = d.ctid;
 
 -- B.4 Pindahkan SEMUA data turunan ke pemenang ---------------------------------
 -- Dinamis atas seluruh FK yang menunjuk creators — tidak ada tabel yang terlewat
