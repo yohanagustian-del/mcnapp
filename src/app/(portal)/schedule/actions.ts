@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { requirePermission, type TeamMember } from "@/lib/rbac";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { writeAudit } from "@/lib/audit";
+import { genId } from "@/lib/utils/id";
 import { buildCopiedSlots } from "@/lib/schedule/copy-week";
 import type {
   AdsPayer,
@@ -29,6 +30,10 @@ export type CreateSlotResult =
 
 export type CopyWeekResult =
   | { ok: true; copiedCount: number }
+  | { ok: false; error: string };
+
+export type CreateCreatorResult =
+  | { ok: true; creatorId: string }
   | { ok: false; error: string };
 
 // ---------- FormData helpers ----------
@@ -529,6 +534,63 @@ export async function toggleRosterAction(formData: FormData): Promise<ScheduleAc
 
     revalidateSchedule();
     return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "Terjadi kesalahan tidak terduga." };
+  }
+}
+
+/**
+ * Create a new creator directly onto the live-schedule roster. Collects only a CM
+ * (owner_cpm_id) and a username — the creator is inserted with live_roster=true so it
+ * appears in the weekly calendar immediately and can be scheduled via the existing slot
+ * flow. `name` is set to the username (same convention as auto-prospect ingest, where
+ * creators.name has no separate source). Gated by schedule.roster (management/CM lead/CPM).
+ */
+export async function createCreatorAction(formData: FormData): Promise<CreateCreatorResult> {
+  try {
+    const member = await requirePermission("schedule.roster");
+    const username = str(formData, "username");
+    if (!username) throw new Error("Username kreator wajib diisi.");
+    const ownerCpmId = str(formData, "owner_cpm_id");
+    if (!ownerCpmId) throw new Error("CM wajib dipilih.");
+
+    const admin = createAdminClient();
+
+    // The CM must be a real team member with role 'cpm' (the roster owner role).
+    const { data: cm, error: cmErr } = await admin
+      .from("team_members")
+      .select("id, role")
+      .eq("id", ownerCpmId)
+      .maybeSingle();
+    if (cmErr) throw new Error(`Gagal memeriksa CM: ${cmErr.message}`);
+    if (!cm || cm.role !== "cpm") throw new Error("CM yang dipilih tidak valid.");
+
+    const id = genId("CRT");
+    const { data: inserted, error } = await admin
+      .from("creators")
+      .insert({
+        id,
+        name: username,
+        username,
+        owner_cpm_id: ownerCpmId,
+        live_roster: true,
+        status: "prospek",
+      })
+      .select("id, name, username, owner_cpm_id, live_roster, status")
+      .single();
+    if (error) throw new Error(`Gagal menyimpan kreator: ${error.message}`);
+
+    await writeAudit({
+      actorId: member.id,
+      action: "schedule.create_creator",
+      entityType: "creators",
+      entityId: id,
+      after: inserted,
+      type: "auto",
+    });
+
+    revalidateSchedule();
+    return { ok: true, creatorId: id };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : "Terjadi kesalahan tidak terduga." };
   }

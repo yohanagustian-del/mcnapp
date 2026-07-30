@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { creatorDayEmpty, slotFlags } from "@/lib/schedule/indicators";
 import { formatDayLabel } from "@/lib/schedule/week";
 import type { LiveScheduleSlot } from "@/lib/schedule/types";
@@ -18,7 +18,22 @@ interface Selected {
 /** Board-level creator, superset of lib RosterCreator with display fields (username, CM name). */
 export interface BoardCreator extends RosterCreatorOption {
   owner_cpm_id: string | null;
+  jenis_creator: string | null;
   cmName: string | null;
+}
+
+const PAGE_SIZE = 20;
+
+/** Earliest non-OFF start_time for a creator's today cell, or null if none scheduled today. */
+function earliestTimeToday(cells: LiveScheduleSlot[][], todayIndex: number): string | null {
+  if (todayIndex < 0) return null;
+  const cell = cells[todayIndex] ?? [];
+  let earliest: string | null = null;
+  for (const slot of cell) {
+    if (slot.status === "off" || !slot.start_time) continue;
+    if (earliest === null || slot.start_time < earliest) earliest = slot.start_time;
+  }
+  return earliest;
 }
 
 /** Same shape as lib WeekMatrix, but rows carry BoardCreator for display purposes. */
@@ -85,11 +100,45 @@ export function ScheduleBoard({
   canEdit: boolean;
 }) {
   const [selected, setSelected] = useState<Selected | null>(null);
+  const [page, setPage] = useState(1);
   const { matches, isActive: filterActive } = useCreatorFilter();
-  const visibleRows = useMemo(
-    () => matrix.rows.filter((row) => matches(row.creator.name, row.creator.owner_cpm_id)),
+
+  const filteredRows = useMemo(
+    () => matrix.rows.filter((row) => matches(row.creator.name, row.creator.owner_cpm_id, row.creator.jenis_creator)),
     [matrix.rows, matches]
   );
+
+  // Sort: creators with a live scheduled TODAY come first (earliest start_time ascending);
+  // everyone else keeps the incoming order (name asc from the server query). Stable.
+  const todayIndex = useMemo(() => matrix.days.indexOf(todayIso), [matrix.days, todayIso]);
+  const sortedRows = useMemo(() => {
+    if (todayIndex < 0) return filteredRows;
+    const keyed = filteredRows.map((row, i) => ({
+      row,
+      i,
+      earliest: earliestTimeToday(row.cells, todayIndex),
+    }));
+    keyed.sort((a, b) => {
+      const aToday = a.earliest !== null;
+      const bToday = b.earliest !== null;
+      if (aToday !== bToday) return aToday ? -1 : 1;
+      if (aToday && bToday && a.earliest !== b.earliest) return a.earliest! < b.earliest! ? -1 : 1;
+      return a.i - b.i;
+    });
+    return keyed.map((k) => k.row);
+  }, [filteredRows, todayIndex]);
+
+  const totalPages = Math.max(1, Math.ceil(sortedRows.length / PAGE_SIZE));
+  const safePage = Math.min(page, totalPages);
+  // Reset to the first page whenever the filtered/sorted set changes (e.g. search input).
+  useEffect(() => {
+    setPage(1);
+  }, [sortedRows.length, matches]);
+  const visibleRows = useMemo(
+    () => sortedRows.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE),
+    [sortedRows, safePage]
+  );
+
   const tomorrowIso = useMemo(() => {
     const [y, m, d] = todayIso.split("-").map(Number);
     const dt = new Date(Date.UTC(y, m - 1, d) + 86_400_000);
@@ -181,7 +230,7 @@ export function ScheduleBoard({
               <tr>
                 <td colSpan={matrix.days.length + 1} className="px-4 py-6 text-center text-slate-400">
                   {filterActive
-                    ? "Tidak ada kreator yang cocok dengan pencarian / filter CM."
+                    ? "Tidak ada kreator yang cocok dengan pencarian / filter."
                     : "Belum ada kreator di roster live — aktifkan di bagian “Kelola Roster” di bawah."}
                 </td>
               </tr>
@@ -189,6 +238,36 @@ export function ScheduleBoard({
           </tbody>
         </table>
       </div>
+
+      {sortedRows.length > 0 && (
+        <div className="flex items-center justify-between text-sm text-slate-600">
+          <span>
+            Menampilkan {(safePage - 1) * PAGE_SIZE + 1}–{Math.min(safePage * PAGE_SIZE, sortedRows.length)} dari{" "}
+            {sortedRows.length} kreator
+          </span>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setPage((p) => Math.max(1, p - 1))}
+              disabled={safePage <= 1}
+              className={`${btnSmall} border border-slate-300 text-slate-700 hover:bg-slate-50 disabled:opacity-40`}
+            >
+              ‹ Sebelumnya
+            </button>
+            <span className="text-xs text-slate-500">
+              Halaman {safePage} dari {totalPages}
+            </span>
+            <button
+              type="button"
+              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+              disabled={safePage >= totalPages}
+              className={`${btnSmall} border border-slate-300 text-slate-700 hover:bg-slate-50 disabled:opacity-40`}
+            >
+              Berikutnya ›
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -8,6 +8,7 @@ import { WeekNav } from "./week-nav";
 import { VerifyPanel, type VerifyRow } from "./verify-panel";
 import { RosterPanel, type RosterRow } from "./roster-panel";
 import { CreatorFilterProvider, CreatorFilterBar, type CmOption } from "@/components/creator-filter";
+import { AddCreatorButton } from "./add-creator-form";
 
 export const dynamic = "force-dynamic";
 
@@ -117,6 +118,18 @@ export default async function SchedulePage({
     .map(([id, name]) => ({ id, name }))
     .sort((a, b) => a.name.localeCompare(b.name, "id"));
 
+  // Jenis-kreator options for the schedule filter — derived from the creators in view so
+  // the dropdown only offers values that actually exist in the data (not hardcoded).
+  const jenisSet = new Set<string>();
+  for (const c of [
+    ...((rosterCreators ?? []) as CreatorRow[]),
+    ...((allCreatorsForRoster ?? []) as CreatorRow[]),
+  ]) {
+    const j = c.jenis_creator?.trim();
+    if (j) jenisSet.add(j);
+  }
+  const jenisOptions = [...jenisSet].sort((a, b) => a.localeCompare(b, "id"));
+
   const rosterCreatorIds = ((rosterCreators ?? []) as CreatorRow[]).map((c) => c.id);
 
   // Slots for this week's 7-day range, scoped to the roster creators in view.
@@ -137,6 +150,7 @@ export default async function SchedulePage({
     name: c.name,
     owner_cpm_id: c.owner_cpm_id,
     username: c.username,
+    jenis_creator: c.jenis_creator,
     cmName: cmNameByCreator.get(c.id) ?? null,
   }));
   // buildWeekMatrix is generic over RosterCreator; matrixCreators is a superset (adds
@@ -179,7 +193,7 @@ export default async function SchedulePage({
   const rangeLabel = `${formatDayLabel(weekStart)} – ${formatDayLabel(weekEnd)}`;
 
   return (
-    <CreatorFilterProvider cms={cmOptions}>
+    <CreatorFilterProvider cms={cmOptions} jenisOptions={jenisOptions}>
       <div className="space-y-8">
         <div>
           <h1 className="text-2xl font-semibold">Penjadwalan Live Streaming (M13)</h1>
@@ -197,7 +211,10 @@ export default async function SchedulePage({
             rangeLabel={rangeLabel}
             canEdit={canEdit}
           />
-          <CreatorFilterBar />
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <CreatorFilterBar />
+            {canRoster && <AddCreatorButton cms={cmOptions} />}
+          </div>
           <ScheduleBoard
             matrix={matrix}
             creators={matrixCreators}
