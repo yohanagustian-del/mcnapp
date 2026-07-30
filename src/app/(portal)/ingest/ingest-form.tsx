@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useState, useTransition } from "react";
 import type { RunIngestResult } from "@/lib/ingest/run";
 import { uploadIngestFile } from "@/lib/ingest/upload-client";
@@ -127,6 +128,33 @@ export function IngestForm() {
 
       {result && (
         <div className="mt-4 rounded-md bg-green-50 p-3 text-sm text-green-900">
+          <div className="mb-3 rounded-md border border-blue-200 bg-blue-50 p-3 text-blue-900">
+            <p className="font-medium">✅ Upload berhasil! Data bisa langsung dicek di:</p>
+            <ul className="mt-1.5 list-inside list-disc space-y-0.5 text-xs">
+              <li>
+                <Link href="/reports" className="font-medium underline">
+                  Report Kreator
+                </Link>{" "}
+                — ringkasan performa & GMV per kreator periode ini
+              </li>
+              <li>
+                <Link href="/link-leakage" className="font-medium underline">
+                  Link Leakage
+                </Link>{" "}
+                dan{" "}
+                <Link href="/workspace/cm" className="font-medium underline">
+                  CM Workspace
+                </Link>{" "}
+                — analisa kebocoran link agency (bila file TAP disertakan)
+              </li>
+              <li>
+                <Link href="/products" className="font-medium underline">
+                  Produk TAP
+                </Link>{" "}
+                — katalog produk hasil upload TAP
+              </li>
+            </ul>
+          </div>
           <p className="font-medium">
             Batch {result.batchId} selesai — periode {result.periodStart} s/d {result.periodEnd}.
           </p>
