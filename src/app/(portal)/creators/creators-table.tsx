@@ -1,10 +1,12 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useCreatorFilter } from "@/components/creator-filter";
+import { MAX_BULK_DELETE } from "@/lib/creators/delete";
 import { updateRateCard } from "./actions";
 import { CreatorEditButton } from "./creator-edit-button";
+import { CreatorDeleteDialog, type DeleteTarget } from "./creator-delete-dialog";
 
 /** Master-data row rendered by the creators table (only the columns actually shown). */
 export interface CreatorTableRow {
@@ -82,16 +84,26 @@ export function CreatorsTable({
   nowMs,
   canUpload,
   canEdit,
+  canDelete,
 }: {
   rows: CreatorTableRow[];
   nowMs: number;
   canUpload: boolean;
   canEdit: boolean;
+  canDelete: boolean;
 }) {
   const { matches, isActive: filterActive } = useCreatorFilter();
+
+  // Baris yang baru dihapus disembunyikan langsung, tanpa menunggu RSC payload
+  // hasil revalidatePath sampai — jadi tabel tidak sempat menampilkan kreator
+  // yang sudah tidak ada. Setelah props baru datang, filter ini jadi no-op.
+  const [removedIds, setRemovedIds] = useState<Set<string>>(new Set());
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [dialogTargets, setDialogTargets] = useState<DeleteTarget[] | null>(null);
+
   const filteredRows = useMemo(
-    () => rows.filter((c) => matches(c.username, c.owner_cpm_id)),
-    [rows, matches]
+    () => rows.filter((c) => !removedIds.has(c.id) && matches(c.username, c.owner_cpm_id)),
+    [rows, removedIds, matches]
   );
 
   const [pageSize, setPageSize] = useState<number>(DEFAULT_PAGE_SIZE);
@@ -112,12 +124,100 @@ export function CreatorsTable({
     [filteredRows, start, pageSize]
   );
 
+  const labelOf = (c: CreatorTableRow) => c.username || c.name || c.id;
+
+  /** 24 kolom data + kolom centang + kolom Aksi — dipakai colSpan baris "kosong". */
+  const colCount = 24 + (canDelete ? 1 : 0) + (canEdit || canDelete ? 1 : 0);
+
+  const toggleOne = useCallback((id: string) => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
+
+  // Centang header = pilih/lepas SEMUA baris di halaman ini saja. Centang di
+  // halaman lain tetap tersimpan supaya user bisa mengumpulkan lintas halaman.
+  const pageIds = visibleRows.map((c) => c.id);
+  const pageAllSelected = pageIds.length > 0 && pageIds.every((id) => selected.has(id));
+  const pageSomeSelected = pageIds.some((id) => selected.has(id));
+
+  const togglePage = useCallback(() => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (pageIds.every((id) => next.has(id))) pageIds.forEach((id) => next.delete(id));
+      else pageIds.forEach((id) => next.add(id));
+      return next;
+    });
+    // pageIds diturunkan dari visibleRows; identitasnya berubah tiap render halaman.
+  }, [pageIds.join(",")]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  /** Centang yang menunjuk kreator hilang (terhapus / tersaring habis) dibuang. */
+  const selectedTargets: DeleteTarget[] = useMemo(() => {
+    const byId = new Map(rows.map((c) => [c.id, c]));
+    return [...selected]
+      .filter((id) => byId.has(id) && !removedIds.has(id))
+      .map((id) => ({ id, label: labelOf(byId.get(id)!) }));
+  }, [selected, rows, removedIds]);
+
+  const onDeleted = useCallback((ids: string[]) => {
+    setRemovedIds((prev) => new Set([...prev, ...ids]));
+    setSelected((prev) => {
+      const next = new Set(prev);
+      ids.forEach((id) => next.delete(id));
+      return next;
+    });
+  }, []);
+
   return (
     <div className="rounded-lg border border-slate-200 bg-white">
+      {canDelete && selectedTargets.length > 0 && (
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 bg-red-50 px-3 py-2 text-sm">
+          <span className="text-red-900">
+            <strong>{selectedTargets.length}</strong> kreator dipilih
+            {selectedTargets.length > MAX_BULK_DELETE && (
+              <span className="ml-1 text-xs">(maksimal {MAX_BULK_DELETE} per sekali hapus)</span>
+            )}
+          </span>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setSelected(new Set())}
+              className="rounded-md px-3 py-1 text-sm text-slate-600 hover:bg-white"
+            >
+              Bersihkan pilihan
+            </button>
+            <button
+              type="button"
+              onClick={() => setDialogTargets(selectedTargets)}
+              className="rounded-md bg-red-600 px-3 py-1 text-sm font-medium text-white hover:bg-red-700"
+            >
+              Hapus terpilih
+            </button>
+          </div>
+        </div>
+      )}
+
       <div className="overflow-x-auto">
         <table className="min-w-full text-sm">
           <thead className="bg-slate-50 text-left text-xs uppercase text-slate-500">
             <tr>
+              {canDelete && (
+                <th className="px-3 py-3">
+                  <input
+                    type="checkbox"
+                    checked={pageAllSelected}
+                    ref={(el) => {
+                      if (el) el.indeterminate = !pageAllSelected && pageSomeSelected;
+                    }}
+                    onChange={togglePage}
+                    aria-label="Pilih semua kreator di halaman ini"
+                    className="h-4 w-4 cursor-pointer rounded border-slate-300"
+                  />
+                </th>
+              )}
               <th className="px-3 py-3">Username</th>
               <th className="px-3 py-3">Nama Creator</th>
               <th className="px-3 py-3">No HP</th>
@@ -142,7 +242,7 @@ export function CreatorsTable({
               <th className="px-3 py-3">Alamat Lengkap</th>
               <th className="px-3 py-3">UID</th>
               <th className="px-3 py-3">Status</th>
-              {canEdit && <th className="px-3 py-3">Aksi</th>}
+              {(canEdit || canDelete) && <th className="px-3 py-3">Aksi</th>}
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
@@ -150,7 +250,18 @@ export function CreatorsTable({
               const remaining = contractRemaining(c.join_date, c.contract_end_date, nowMs);
               const niches: string[] = c.top_niches ?? (c.niche ? [c.niche] : []);
               return (
-                <tr key={c.id}>
+                <tr key={c.id} className={selected.has(c.id) ? "bg-red-50/60" : undefined}>
+                  {canDelete && (
+                    <td className={td}>
+                      <input
+                        type="checkbox"
+                        checked={selected.has(c.id)}
+                        onChange={() => toggleOne(c.id)}
+                        aria-label={`Pilih ${labelOf(c)}`}
+                        className="h-4 w-4 cursor-pointer rounded border-slate-300"
+                      />
+                    </td>
+                  )}
                   <td className={`${td} font-medium`}>
                     {c.profile_link ? (
                       <a href={c.profile_link} target="_blank" className="text-blue-700 hover:underline">
@@ -221,23 +332,36 @@ export function CreatorsTable({
                   </td>
                   <td className={`${td} font-mono text-[10px] text-slate-400`}>{c.uid ?? "—"}</td>
                   <td className={td}>{c.status}</td>
-                  {canEdit && (
+                  {(canEdit || canDelete) && (
                     <td className={td}>
-                      <CreatorEditButton
-                        creator={{
-                          id: c.id,
-                          name: c.name,
-                          username: c.username,
-                          phone: c.phone,
-                          rc_live: c.rc_live,
-                          rc_video: c.rc_video,
-                          rate_card: c.rate_card,
-                          level: c.level,
-                          domisili: c.domisili,
-                          uid: c.uid,
-                          status: c.status,
-                        }}
-                      />
+                      <div className="flex items-center gap-1">
+                        {canEdit && (
+                          <CreatorEditButton
+                            creator={{
+                              id: c.id,
+                              name: c.name,
+                              username: c.username,
+                              phone: c.phone,
+                              rc_live: c.rc_live,
+                              rc_video: c.rc_video,
+                              rate_card: c.rate_card,
+                              level: c.level,
+                              domisili: c.domisili,
+                              uid: c.uid,
+                              status: c.status,
+                            }}
+                          />
+                        )}
+                        {canDelete && (
+                          <button
+                            type="button"
+                            onClick={() => setDialogTargets([{ id: c.id, label: labelOf(c) }])}
+                            className="rounded bg-red-50 px-2 py-1 text-xs font-medium text-red-700 hover:bg-red-100"
+                          >
+                            Hapus
+                          </button>
+                        )}
+                      </div>
                     </td>
                   )}
                 </tr>
@@ -245,7 +369,7 @@ export function CreatorsTable({
             })}
             {visibleRows.length === 0 && (
               <tr>
-                <td colSpan={canEdit ? 25 : 24} className="px-4 py-6 text-center text-slate-400">
+                <td colSpan={colCount} className="px-4 py-6 text-center text-slate-400">
                   {filterActive
                     ? "Tidak ada kreator yang cocok dengan pencarian username / filter CM."
                     : "Belum ada kreator."}
@@ -301,6 +425,14 @@ export function CreatorsTable({
           </div>
         </div>
       </div>
+
+      {dialogTargets && (
+        <CreatorDeleteDialog
+          targets={dialogTargets}
+          onClose={() => setDialogTargets(null)}
+          onDeleted={onDeleted}
+        />
+      )}
     </div>
   );
 }

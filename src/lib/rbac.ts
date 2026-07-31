@@ -90,6 +90,11 @@ export const PERMISSIONS: Record<string, Role[]> = {
   // Dimiliki CM (Creator Manager) + management + akuisisi + creator_support — sejajar
   // dengan RLS creators_update (0002). commission_share TETAP read-only (CLAUDE.md #3).
   "creators.edit": [...MANAGEMENT_ROLES, ...CM_ROLES, ...ACQUISITION_ROLES, "creator_support"],
+  // Hapus master data kreator (permanen). SENGAJA management saja — bukan CM /
+  // akuisisi: menghapus kreator berpotensi merugikan (CLAUDE.md #2), dan kreator
+  // yang sudah punya kontrak/report/komisi ditolak di server (lib/creators/delete.ts)
+  // dengan saran memakai status "nonaktif". Dicermin RLS creators_delete (0028).
+  "creators.delete": MANAGEMENT_ROLES,
   "deals.register": [...MANAGEMENT_ROLES, "bizdev_lead", "bizdev"],
   "deals.import_legacy": [...MANAGEMENT_ROLES, "bizdev_lead", "bd_admin"],
   // M4 §2.8: weekly CSV upload + engine run (Director/Head/SPV/CM Lead/CPM/Campaign Ops/External)

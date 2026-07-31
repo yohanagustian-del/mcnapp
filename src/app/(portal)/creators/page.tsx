@@ -23,6 +23,7 @@ export default async function CreatorsPage() {
   const member = await requireMember();
   const canUpload = hasPermission("creators.bulk_upload", member.role);
   const canEdit = hasPermission("creators.edit", member.role);
+  const canDelete = hasPermission("creators.delete", member.role);
   const canAssignCm = hasPermission("m8.assign_creator", member.role);
 
   const supabase = await createClient();
@@ -99,6 +100,16 @@ export default async function CreatorsPage() {
               audit log.
             </>
           )}
+          {canDelete && (
+            <>
+              {" "}
+              Hapus kreator (satu baris lewat tombol <strong>Hapus</strong>, atau banyak sekaligus
+              dengan mencentang lalu <strong>Hapus terpilih</strong>) bersifat permanen. Kreator yang
+              masih punya kontrak, report terkirim, komisi akuisisi/referral, request campaign, jadwal
+              live, atau akun portal akan <strong>ditolak</strong> — set status{" "}
+              <strong>nonaktif</strong> untuk kasus itu.
+            </>
+          )}
         </p>
 
         <div className="mt-6">
@@ -142,6 +153,7 @@ export default async function CreatorsPage() {
             nowMs={Date.now()}
             canUpload={canUpload}
             canEdit={canEdit}
+            canDelete={canDelete}
           />
         </div>
       </div>
