@@ -1,4 +1,5 @@
-import { requireMember, MANAGEMENT_ROLES } from "@/lib/rbac";
+import Link from "next/link";
+import { requireMember, MANAGEMENT_ROLES, hasPermission } from "@/lib/rbac";
 import { createClient } from "@/lib/supabase/server";
 
 export default async function DashboardPage() {
@@ -13,6 +14,16 @@ export default async function DashboardPage() {
     ]);
 
   const isManagement = MANAGEMENT_ROLES.includes(member.role);
+  const canManageAccounts = hasPermission("m11.manage_accounts", member.role);
+
+  // Usulan OD yang menunggu keputusan Director — ditampilkan di dasbor supaya tidak
+  // menumpuk tanpa terlihat.
+  const { count: pendingProposals } = canManageAccounts
+    ? await supabase
+        .from("member_change_requests")
+        .select("id", { count: "exact", head: true })
+        .eq("status", "pending")
+    : { count: 0 };
 
   return (
     <div>
@@ -27,6 +38,30 @@ export default async function DashboardPage() {
         <StatCard label="Deal Brand" value={dealCount ?? 0} />
         <StatCard label="Anggota Tim" value={memberCount ?? 0} />
       </div>
+
+      {canManageAccounts && (
+        <div className="mt-6 rounded-lg border border-slate-200 bg-white p-4">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <p className="font-medium text-slate-800">Manajemen User</p>
+              <p className="mt-1 text-sm text-slate-600">
+                Tambah anggota, ganti jabatan, nonaktifkan, atau hapus permanen.
+                {(pendingProposals ?? 0) > 0 && (
+                  <span className="ml-1 font-medium text-amber-700">
+                    {pendingProposals} usulan OD menunggu keputusan Anda.
+                  </span>
+                )}
+              </p>
+            </div>
+            <Link
+              href="/tim"
+              className="rounded-md bg-slate-900 px-4 py-1.5 text-sm font-medium text-white hover:bg-slate-700"
+            >
+              Buka Halaman Tim
+            </Link>
+          </div>
+        </div>
+      )}
 
       <div className="mt-8 rounded-lg border border-slate-200 bg-white p-4 text-sm text-slate-600">
         <p className="font-medium text-slate-800">Status Fase 0</p>

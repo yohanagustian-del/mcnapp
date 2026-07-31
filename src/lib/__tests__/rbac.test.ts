@@ -11,11 +11,16 @@ describe("Phase 5.0 — RBAC foundation", () => {
     expect(ROLES).not.toContain("creator_user");
   });
 
-  // M11 §2A.3 — od_viewer must be rejected on EVERY mutation endpoint (server-side).
-  it("od_viewer holds zero write permissions across the whole matrix", () => {
+  // M11 §2A.3 — od_viewer must be rejected on EVERY operational mutation endpoint (server-side).
+  // Sole exception: 'm11.propose_account_change' writes a proposal row that has no effect until a
+  // Director executes it under 'm11.manage_accounts' (which od_viewer does not hold). See
+  // od-viewer.test.ts for the full rationale + guard against the exception list growing.
+  it("od_viewer holds zero write permissions across the whole matrix, except the no-effect proposal queue", () => {
     for (const perm of Object.keys(PERMISSIONS)) {
+      if (perm === "m11.propose_account_change") continue;
       expect(hasPermission(perm as keyof typeof PERMISSIONS, "od_viewer")).toBe(false);
     }
+    expect(hasPermission("m11.manage_accounts", "od_viewer")).toBe(false);
   });
 
   it("director retains full governance/config authority (multi-Director: any Director suffices)", () => {

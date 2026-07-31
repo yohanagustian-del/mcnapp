@@ -2,18 +2,10 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 
-export const ROLES = [
-  "director", "head", "spv",
-  "cm_lead", "cpm",
-  "bizdev_lead", "bizdev", "campaign_ops", "bd_admin",
-  "acquisition_lead", "acquisition_spec",
-  "campaign_external", "creator_support", "finance",
-  // M10 §2.1: ads_support = sub-role of Campaign Ops (separate permissions, not top-level power).
-  "ads_support",
-  // M11 §2A: od_viewer = read-only oversight across all divisions; rejected on every mutation.
-  "od_viewer",
-] as const;
-export type Role = (typeof ROLES)[number];
+// ROLES/Role hidup di @/lib/tim/roles (modul murni) supaya komponen klien bisa memakainya
+// tanpa ikut menarik next/headers dari file ini. Di-re-export agar import lama tetap jalan.
+export { ROLES, type Role } from "@/lib/tim/roles";
+import type { Role } from "@/lib/tim/roles";
 
 export const MANAGEMENT_ROLES: Role[] = ["director", "head", "spv"];
 export const BIZDEV_ROLES: Role[] = ["bizdev_lead", "bizdev", "campaign_ops", "bd_admin"];
@@ -37,6 +29,8 @@ export interface TeamMember {
   team_group: string;
   platform_segment: string | null;
   active: boolean;
+  /** true = akun dibuat Director dengan password sementara; portal terkunci sampai diganti. */
+  must_change_password: boolean;
 }
 
 /** Nav items per PRD Module 01 §3.1 — sidebar filters by role (UI labels Bahasa Indonesia). */
@@ -175,8 +169,13 @@ export const PERMISSIONS: Record<string, Role[]> = {
   // Approve brief budget over ads_budget_cap: Director only (reuse M8 §2A.4/§6.4).
   "m10.budget_approve": ["director"] as Role[],
   // ===== M11 Governance (§2B/§2C) =====
-  // Multi-Director account management (invite/suspend director & roles): Director.
+  // Multi-Director account management (tambah user, ganti jabatan, nonaktif, hapus permanen): Director.
   "m11.manage_accounts": ["director"] as Role[],
+  // OD mengusulkan perubahan akun; usulan TIDAK berefek apa pun sampai Director menyetujuinya
+  // lewat m11.manage_accounts. Satu-satunya key di matriks ini yang memuat od_viewer — sengaja,
+  // karena tulisannya hanya baris antrean (member_change_requests), bukan data operasional.
+  // Dikunci eksplisit di rbac.test.ts + od-viewer.test.ts.
+  "m11.propose_account_change": ["od_viewer"] as Role[],
   // ===== M13 Penjadwalan Live Streaming (§ live-schedule) =====
   // View the weekly live-schedule calendar: management + CM + BizDev + Creator Support.
   "schedule.view": [...MANAGEMENT_ROLES, ...CM_ROLES, ...BIZDEV_ROLES, "creator_support"],
@@ -193,8 +192,10 @@ export const PERMISSIONS: Record<string, Role[]> = {
   "m12.run_maintenance": ["director"] as Role[],
   // Manual permanent creator-data deletion (compliance): Director only + audit.
   "m12.purge_manual": ["director"] as Role[],
-  // NOTE: od_viewer appears in NO write permission by design — every mutation is rejected
-  // server-side (requirePermission) in addition to RLS. See __tests__/rbac.test.ts.
+  // NOTE: od_viewer appears in NO permission that mutates operational data — every such
+  // mutation is rejected server-side (requirePermission) in addition to RLS. The lone
+  // exception is m11.propose_account_change (a no-effect proposal row, executed only on
+  // Director approval). See __tests__/rbac.test.ts + __tests__/od-viewer.test.ts.
 };
 
 export function canAccessNav(item: NavItem, role: Role): boolean {
@@ -216,7 +217,7 @@ export async function requireMember(): Promise<TeamMember> {
 
   const { data: member } = await supabase
     .from("team_members")
-    .select("id, name, email, role, team_group, platform_segment, active")
+    .select("id, name, email, role, team_group, platform_segment, active, must_change_password")
     .eq("id", user.id)
     .single();
 

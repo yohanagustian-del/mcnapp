@@ -6,10 +6,18 @@ import { PERMISSIONS, hasPermission, canAccessNav, NAV_ITEMS, type Role } from "
  * requirePermission(<key>), which checks this matrix server-side (not just UI). These negative
  * tests assert od_viewer is rejected on each write endpoint. requirePermission throws whenever
  * hasPermission returns false, so proving the matrix rejects od_viewer proves the server rejects it.
+ *
+ * SINGLE DOCUMENTED EXCEPTION — 'm11.propose_account_change'. It writes one row to
+ * member_change_requests (a proposal queue), which changes NO operational data: the proposal
+ * only takes effect when a Director executes it under 'm11.manage_accounts', which od_viewer
+ * still does not hold (asserted below). Any OTHER key granted to od_viewer fails these tests.
  */
+const OD_PROPOSAL_ONLY = new Set<string>(["m11.propose_account_change"]);
 
-// Every mutation permission key in the system → od_viewer must have NONE of them.
-const MUTATION_ENDPOINTS = Object.keys(PERMISSIONS) as (keyof typeof PERMISSIONS)[];
+// Every operational mutation key in the system → od_viewer must have NONE of them.
+const MUTATION_ENDPOINTS = (Object.keys(PERMISSIONS) as (keyof typeof PERMISSIONS)[]).filter(
+  (k) => !OD_PROPOSAL_ONLY.has(k)
+);
 
 describe("M11 — od_viewer rejected on EVERY mutation endpoint (server-side)", () => {
   it("covers at least 15 distinct mutation endpoints", () => {
@@ -49,5 +57,30 @@ describe("M11 — multi-Director equality (any Director suffices, audited per-ac
     for (const e of ["m10.budget_approve", "m11.manage_accounts", "m12.set_policy", "m8.ads_approve"] as const) {
       expect(hasPermission(e, "od_viewer" as Role)).toBe(false);
     }
+  });
+});
+
+describe("Manajemen user — OD mengusulkan, Director mengeksekusi", () => {
+  it("od_viewer may propose an account change (no-effect queue row)", () => {
+    expect(hasPermission("m11.propose_account_change", "od_viewer")).toBe(true);
+  });
+
+  it("od_viewer still cannot execute any account change", () => {
+    expect(hasPermission("m11.manage_accounts", "od_viewer")).toBe(false);
+  });
+
+  it("proposing is exclusive to od_viewer — no other role uses the queue", () => {
+    expect(PERMISSIONS["m11.propose_account_change"]).toEqual(["od_viewer"]);
+  });
+
+  it("executing account changes stays Director-only, including over management", () => {
+    expect(PERMISSIONS["m11.manage_accounts"]).toEqual(["director"]);
+    for (const role of ["head", "spv", "cm_lead", "finance"] as Role[]) {
+      expect(hasPermission("m11.manage_accounts", role)).toBe(false);
+    }
+  });
+
+  it("the exception list stays at exactly one key (guards against quiet widening)", () => {
+    expect([...OD_PROPOSAL_ONLY]).toEqual(["m11.propose_account_change"]);
   });
 });

@@ -2,26 +2,16 @@ import Link from "next/link";
 import { requireMember, NAV_ITEMS, canAccessNav } from "@/lib/rbac";
 import { logout } from "@/app/login/actions";
 import { ChangePasswordButton } from "@/components/change-password-button";
-
-const ROLE_LABELS: Record<string, string> = {
-  director: "Director",
-  head: "Head MCN",
-  spv: "SPV MCN",
-  cm_lead: "CM Lead",
-  cpm: "CPM",
-  bizdev_lead: "BizDev Lead",
-  bizdev: "BizDev",
-  campaign_ops: "Campaign Operations",
-  bd_admin: "BD Administrator",
-  acquisition_lead: "Acquisition Lead",
-  acquisition_spec: "Acquisition Specialist",
-  campaign_external: "Campaign External",
-  creator_support: "Creator Support",
-  finance: "Finance",
-};
+import { ForcePasswordChange } from "@/components/force-password-change";
+import { ROLE_LABELS } from "@/lib/tim/roles";
 
 export default async function PortalLayout({ children }: { children: React.ReactNode }) {
   const member = await requireMember();
+
+  // Akun baru buatan Director masih memakai password sementara → kunci seluruh portal
+  // sampai user menyetel passwordnya sendiri.
+  if (member.must_change_password) return <ForcePasswordChange name={member.name} />;
+
   const navItems = NAV_ITEMS.filter((item) => canAccessNav(item, member.role));
 
   return (

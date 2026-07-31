@@ -65,6 +65,8 @@ export async function changePassword(
     .maybeSingle();
 
   if (teamMember) {
+    // Password sementara dari Director sudah diganti sendiri oleh user → gerbang dibuka.
+    await admin.from("team_members").update({ must_change_password: false }).eq("id", user.id);
     await writeAudit({
       actorId: user.id,
       action: "password_change",
