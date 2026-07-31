@@ -132,6 +132,20 @@ export const IMPORT_COLUMNS: ImportColumn[] = [
     note: "Opsional. Tanggal — '2026-01-31' atau '31 January 2026'.",
   },
   {
+    label: "End Date",
+    aliases: [
+      "enddate",
+      "tanggalend",
+      "endkontrak",
+      "contractenddate",
+      // Header sheet master lama "End Date Kontrak Tertulis" / "End Date Dashboard".
+      "enddatekontraktertulis",
+      "enddatedashboard",
+    ],
+    required: false,
+    note: "Opsional. Tanggal akhir kontrak — '2026-01-31' atau '31 January 2026'. Sisa Kontrak di tabel hanya dihitung kalau Join Date DAN End Date terisi.",
+  },
+  {
     label: "Status",
     aliases: ["status"],
     required: false,
@@ -232,6 +246,7 @@ function buildPayload(
   put("level", parseLevel(values["Level"] ?? ""));
   put("rate_card", parseRupiah(values["Rate Card"] ?? ""));
   put("join_date", parseFlexibleDate(values["Join Date"] ?? ""));
+  put("contract_end_date", parseFlexibleDate(values["End Date"] ?? ""));
 
   const platform = (values["Platform"] ?? "").toLowerCase();
   if (PLATFORMS.includes(platform as (typeof PLATFORMS)[number])) payload.platform = platform;

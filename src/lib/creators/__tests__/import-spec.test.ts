@@ -123,6 +123,40 @@ describe("buildImportRows", () => {
     expect(p.platform).toBe("tiktok");
   });
 
+  /** Join Date + End Date = dasar hitung Sisa Kontrak di tabel kreator. */
+  it("memetakan Join Date & End Date ke tanggal kontrak", () => {
+    const rows = buildImportRows(
+      [
+        {
+          username: "vikahere",
+          cm: "Netta",
+          "join_date": "2026-01-31",
+          "end_date": "31 January 2027",
+        },
+      ],
+      ctx()
+    );
+    expect(rows[0].payload.join_date).toBe("2026-01-31");
+    expect(rows[0].payload.contract_end_date).toBe("2027-01-31");
+  });
+
+  it("End Date kosong tidak masuk payload (tidak menghapus tanggal lama)", () => {
+    const rows = buildImportRows(
+      [{ username: "vikahere", cm: "Netta", "end_date": "" }],
+      ctx()
+    );
+    expect(rows[0].payload).not.toHaveProperty("contract_end_date");
+  });
+
+  /** Header sheet master lama tetap terbaca ke kolom End Date yang sama. */
+  it("menerima header End Date versi sheet master lama", () => {
+    const rows = buildImportRows(
+      [{ username: "vikahere", cm: "Netta", "end_date_kontrak_tertulis": "2027-03-01" }],
+      ctx()
+    );
+    expect(rows[0].payload.contract_end_date).toBe("2027-03-01");
+  });
+
   /**
    * Niche dihapus dari template — diisi otomatis dari upload data platform
    * mingguan, jadi kolom "niche" di file lama pun tidak boleh menimpanya.
