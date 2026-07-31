@@ -142,6 +142,22 @@ export function CreatorImportPanel() {
               </ul>
             </details>
           )}
+          {report.commissionAlerts.length > 0 && (
+            <details className="mt-2" open>
+              <summary className="cursor-pointer text-amber-700">
+                {report.commissionAlerts.length} sharing komisi TIDAK diubah (read-only, tercatat
+                sebagai alert)
+              </summary>
+              <ul className="mt-1 list-inside list-disc text-xs text-slate-600">
+                {report.commissionAlerts.map((a, i) => (
+                  <li key={i}>
+                    Baris {a.row} ({a.username}): sistem {(a.from * 100).toFixed(1)}% vs sheet{" "}
+                    {(a.to * 100).toFixed(1)}% — nilai sistem dipertahankan.
+                  </li>
+                ))}
+              </ul>
+            </details>
+          )}
         </div>
       )}
 
@@ -206,7 +222,14 @@ export function CreatorImportPanel() {
                           {r.values[c] || <span className="text-slate-300">—</span>}
                         </td>
                       ))}
-                      <td className="px-3 py-2 text-xs text-red-700">{r.errors.join("; ")}</td>
+                      <td className="px-3 py-2 text-xs">
+                        {r.errors.length > 0 && (
+                          <span className="text-red-700">{r.errors.join("; ")}</span>
+                        )}
+                        {r.warnings.length > 0 && (
+                          <span className="block text-amber-700">{r.warnings.join("; ")}</span>
+                        )}
+                      </td>
                     </tr>
                   );
                 })}

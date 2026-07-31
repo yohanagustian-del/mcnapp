@@ -42,21 +42,32 @@ async function loadContext(): Promise<ImportContext & { cmNames: string[] }> {
   // .limit(), so a bare select would hide every creator past row 1000 — the
   // import would then classify an existing username as "baru" and fail on the
   // unique index instead of updating its CM.
-  const creators = await fetchAll<{ id: string; username: string | null; owner_cpm_id: string | null }>(
-    admin, "creators", "id, username, owner_cpm_id", (q) => q.not("username", "is", null)
+  // commission_share ikut dimuat: kolom "Sharing Komisi" di sheet hanya boleh
+  // MENGISI yang masih kosong, jadi keputusannya butuh nilai yang sekarang.
+  const creators = await fetchAll<{
+    id: string;
+    username: string | null;
+    owner_cpm_id: string | null;
+    commission_share: number | string | null;
+  }>(
+    admin, "creators", "id, username, owner_cpm_id, commission_share",
+    (q) => q.not("username", "is", null)
   );
 
   // owner_cpm_id → nama, supaya preview bisa menampilkan "CM lama → CM baru".
   const nameById = new Map<string, string>();
   for (const [, cm] of cmByName) nameById.set(cm.id, cm.name);
 
-  const existingByUsername = new Map<string, { id: string; cmName: string | null }>();
+  const existingByUsername: ImportContext["existingByUsername"] = new Map();
   for (const c of creators) {
     const key = String(c.username).trim().toLowerCase();
     if (!key) continue;
+    // numeric Postgres bisa kembali sebagai string — normalisasi ke number.
+    const share = c.commission_share === null ? null : Number(c.commission_share);
     existingByUsername.set(key, {
       id: c.id,
       cmName: c.owner_cpm_id ? nameById.get(c.owner_cpm_id) ?? "—" : null,
+      commissionShare: share !== null && Number.isFinite(share) ? share : null,
     });
   }
 
@@ -129,6 +140,11 @@ export interface CommitReport {
   inserted: number;
   updated: number;
   skipped: { row: number; reason: string }[];
+  /**
+   * Sharing komisi di sheet yang berbeda dari nilai di sistem: TIDAK diterapkan
+   * (read-only, sync platform) tapi dicatat ke audit_logs sebagai platform_alert.
+   */
+  commissionAlerts: { row: number; username: string; from: number; to: number }[];
 }
 
 /**
@@ -149,7 +165,7 @@ export async function commitCreatorImport(rawRows: Record<string, string>[]): Pr
   const parsed = buildImportRows(rawRows, ctx);
   const admin = createAdminClient();
 
-  const report: CommitReport = { inserted: 0, updated: 0, skipped: [] };
+  const report: CommitReport = { inserted: 0, updated: 0, skipped: [], commissionAlerts: [] };
 
   for (const row of parsed) {
     if (row.status === "error") {
@@ -172,6 +188,28 @@ export async function commitCreatorImport(rawRows: Record<string, string>[]): Pr
         after: row.payload,
         type: "auto",
       });
+
+      // Sheet mencoba mengubah sharing komisi yang sudah terisi. Nilainya sengaja
+      // TIDAK ikut di row.payload (read-only, sync platform — CLAUDE.md #3);
+      // yang ditulis hanya jejak alert supaya selisihnya tidak hilang begitu saja.
+      if (row.commissionAlert) {
+        await writeAudit({
+          actorId: actor.id,
+          action: "creator.commission_share_sheet_mismatch",
+          entityType: "creators",
+          entityId: row.existingId,
+          before: { commission_share: row.commissionAlert.from },
+          after: { commission_share_di_sheet: row.commissionAlert.to, diterapkan: false },
+          type: "platform_alert",
+        });
+        report.commissionAlerts.push({
+          row: row.rowNum,
+          username: row.username,
+          from: row.commissionAlert.from,
+          to: row.commissionAlert.to,
+        });
+      }
+
       report.updated++;
       continue;
     }

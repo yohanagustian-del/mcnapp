@@ -90,6 +90,12 @@ export const IMPORT_COLUMNS: ImportColumn[] = [
     note: "Opsional. Teks bebas (contoh: 120K).",
   },
   {
+    label: "Kualitas",
+    aliases: ["kualitas", "kualitaskonten", "contentquality"],
+    required: false,
+    note: "Opsional. Penilaian kualitas konten, teks bebas (contoh: Bagus / Cukup / Kurang).",
+  },
+  {
     label: "Domisili",
     aliases: ["domisili", "kota"],
     required: false,
@@ -106,6 +112,12 @@ export const IMPORT_COLUMNS: ImportColumn[] = [
     aliases: ["level", "levelcreator"],
     required: false,
     note: "Opsional. Angka 1–8. Di luar rentang itu diabaikan.",
+  },
+  {
+    label: "Sharing Komisi",
+    aliases: ["sharingkomisi", "sharing", "komisi", "commissionshare", "sharingkomisimea"],
+    required: false,
+    note: "Opsional. Persen — '22%' / '22' / '0,22' semuanya jadi 22%. HANYA mengisi kreator yang sharing-nya masih kosong; nilai yang sudah ada TIDAK ditimpa dari sheet (read-only, sync platform) dan selisihnya dicatat sebagai alert.",
   },
   {
     label: "RC Live",
@@ -178,6 +190,88 @@ function cell(row: Record<string, string>, column: ImportColumn): string {
   return "";
 }
 
+/**
+ * "22%" / "22" / "0,22" / "22,5%" → fraksi 0.225.
+ *
+ * Kolom DB `commission_share` menyimpan FRAKSI (0.22 = 22%), sementara sheet
+ * menulisnya bebas. Tanda "%" atau angka > 1 dianggap persen; angka <= 1
+ * dianggap sudah fraksi. Di luar rentang (0, 1] → null (tidak valid, bukan
+ * dipaksa masuk) supaya "5-7%" atau "not found" tidak jadi angka ngawur.
+ */
+export function parseSharePercent(raw: string): number | null {
+  const s = String(raw ?? "").trim();
+  if (!s) return null;
+  const hasPercent = s.includes("%");
+  // Koma = desimal ("22,5"). Persen tidak pernah pakai pemisah ribuan.
+  const n = Number(s.replace(/%/g, "").replace(",", ".").replace(/\s/g, ""));
+  if (!Number.isFinite(n) || n <= 0) return null;
+  const fraction = hasPercent || n > 1 ? n / 100 : n;
+  if (fraction <= 0 || fraction > 1) return null;
+  // Bulatkan supaya 22,5% tidak jadi 0.22500000000000003.
+  return Math.round(fraction * 10_000) / 10_000;
+}
+
+/** Tampilkan fraksi sebagai persen untuk pesan ke user (0.225 → "22,5%"). */
+function sharePct(fraction: number): string {
+  return `${String(Number((fraction * 100).toFixed(2))).replace(".", ",")}%`;
+}
+
+export interface CommissionResolution {
+  /** Nilai yang boleh ditulis ke commission_share; null = jangan tulis apa pun. */
+  value: number | null;
+  /** Catatan untuk preview (bukan error — baris tetap tersimpan). */
+  warning: string | null;
+  /** Terisi saat sheet mencoba MENGUBAH nilai yang sudah ada → platform_alert. */
+  alert: { from: number; to: number } | null;
+}
+
+/**
+ * Kebijakan Sharing Komisi dari sheet: ISI KALAU KOSONG SAJA.
+ *
+ * `creators.commission_share` read-only & sync dari platform (CLAUDE.md #3),
+ * jadi sheet tidak boleh dipakai untuk mengubah nilai yang sudah ada — itu
+ * satu-satunya cara mencegah sharing diturunkan diam-diam lewat import.
+ * Yang diizinkan hanya mengisi kreator yang nilainya masih kosong (backfill).
+ *
+ * Sheet yang mencoba mengubah nilai terisi → TIDAK diterapkan, tapi selisihnya
+ * dikembalikan sebagai `alert` supaya pemanggil menulis audit_logs bertipe
+ * `platform_alert` (CLAUDE.md #2: perubahan sharing = alert, bukan edit).
+ *
+ * Fungsi murni — bisa diuji tanpa DB.
+ */
+export function resolveCommissionShare(
+  raw: string,
+  existingShare: number | null | undefined
+): CommissionResolution {
+  const empty: CommissionResolution = { value: null, warning: null, alert: null };
+  const s = String(raw ?? "").trim();
+  if (!s) return empty;
+
+  const parsed = parseSharePercent(s);
+  if (parsed === null) {
+    return {
+      value: null,
+      warning: `Sharing Komisi "${s}" tidak dikenali — diabaikan (isi seperti 22% atau 0,22)`,
+      alert: null,
+    };
+  }
+
+  // Kreator baru atau sharing masih kosong → backfill, inilah satu-satunya
+  // kasus yang boleh menulis.
+  if (existingShare === null || existingShare === undefined) {
+    return { value: parsed, warning: null, alert: null };
+  }
+
+  // Sudah sama → tidak perlu menulis, tidak perlu alert.
+  if (Math.abs(existingShare - parsed) < 1e-6) return empty;
+
+  return {
+    value: null,
+    warning: `Sharing komisi ${sharePct(existingShare)} di sistem TIDAK ditimpa jadi ${sharePct(parsed)} — read-only, sync platform (dicatat sebagai alert)`,
+    alert: { from: existingShare, to: parsed },
+  };
+}
+
 /** "Lv 3" / "3" → 1..8; selain itu null. */
 function parseLevel(raw: string): number | null {
   const m = raw.match(/(\d+)/);
@@ -194,6 +288,10 @@ export interface ParsedImportRow {
   status: ImportRowStatus;
   /** Alasan baris ditolak — hanya terisi saat status "error". */
   errors: string[];
+  /** Catatan non-fatal: baris TETAP tersimpan, tapi ada nilai yang diabaikan. */
+  warnings: string[];
+  /** Sheet mencoba mengubah sharing komisi yang sudah ada → tulis platform_alert. */
+  commissionAlert: { from: number; to: number } | null;
   username: string;
   cmName: string;
   /** team_members.id hasil resolve `cmName`; null saat error. */
@@ -211,8 +309,15 @@ export interface ParsedImportRow {
 export interface ImportContext {
   /** nama CM (huruf kecil) → { id, name }. */
   cmByName: Map<string, { id: string; name: string }>;
-  /** username (huruf kecil) → kreator yang sudah ada. */
-  existingByUsername: Map<string, { id: string; cmName: string | null }>;
+  /**
+   * username (huruf kecil) → kreator yang sudah ada.
+   * `commissionShare` (fraksi, null = belum terisi) dipakai kebijakan
+   * "isi kalau kosong saja" di resolveCommissionShare.
+   */
+  existingByUsername: Map<
+    string,
+    { id: string; cmName: string | null; commissionShare: number | null }
+  >;
 }
 
 /**
@@ -239,6 +344,7 @@ function buildPayload(
   put("profile_link", values["Link Akun"]);
   put("uid", values["UID"]);
   put("followers", values["Followers"]);
+  put("content_quality", values["Kualitas"]);
   put("domisili", values["Domisili"]);
   put("alamat", values["Alamat Lengkap"]);
   put("rc_live", values["RC Live"]);
@@ -308,6 +414,8 @@ export function buildImportRows(
         rowNum,
         status: "error",
         errors,
+        warnings: [],
+        commissionAlert: null,
         username,
         cmName,
         cmId: null,
@@ -323,17 +431,26 @@ export function buildImportRows(
     // username yang sama di baris berikutnya.
     if (username) seenInFile.set(key, rowNum);
 
+    const payload = buildPayload(values, username, cm.id);
+
+    // Sharing komisi diputuskan di sini (bukan di buildPayload) karena butuh
+    // nilai yang sudah ada di DB: kebijakannya "isi kalau kosong saja".
+    const share = resolveCommissionShare(values["Sharing Komisi"] ?? "", existing?.commissionShare);
+    if (share.value !== null) payload.commission_share = share.value;
+
     out.push({
       rowNum,
       status: existing ? "update" : "insert",
       errors: [],
+      warnings: share.warning ? [share.warning] : [],
+      commissionAlert: share.alert,
       username,
       cmName: cm.name,
       cmId: cm.id,
       existingId: existing?.id ?? null,
       previousCmName: existing?.cmName ?? null,
       values,
-      payload: buildPayload(values, username, cm.id),
+      payload,
     });
   }
 
