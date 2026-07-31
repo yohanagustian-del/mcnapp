@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { writeAudit } from "@/lib/audit";
+import { fetchAll } from "@/lib/supabase/fetch-all";
 import { genId } from "@/lib/utils/id";
 
 /**
@@ -100,14 +101,133 @@ export interface CreatorResolution {
   byName: Map<string, string>;
   /** names for which a new prospect creator was created (flag for review) */
   createdProspects: string[];
+  /**
+   * Names that could NOT be resolved or created (unexpected DB error). Reported
+   * to the caller instead of thrown: one bad creator must never abort a whole
+   * weekly upload — the rows of the other creators still aggregate normally.
+   */
+  failed: { name: string; reason: string }[];
+}
+
+/**
+ * Case-insensitive {name|username → creators.id} map over the WHOLE creators
+ * table (optionally scoped to one platform).
+ *
+ * MUST paginate: PostgREST caps a single select at 1000 rows and silently
+ * ignores a larger `.limit()`. The previous `.limit(5000)` therefore returned
+ * only the first 1000 creators, so every creator past that row was invisible
+ * here — the resolver treated an existing creator as new, tried to INSERT it,
+ * and the upload died on `creators_username_platform_uidx`.
+ */
+async function loadCreatorLookup(
+  admin: SupabaseClient,
+  platform: "tiktok" | "shopee" | null
+): Promise<Map<string, string>> {
+  const rows = await fetchAll<{ id: string; name: string | null; username: string | null }>(
+    admin,
+    "creators",
+    "id, name, username",
+    (q) => (platform ? q.eq("platform", platform) : q)
+  );
+  const lookup = new Map<string, string>();
+  for (const c of rows) {
+    if (c.username) lookup.set(String(c.username).toLowerCase(), c.id);
+    if (c.name) lookup.set(String(c.name).toLowerCase(), c.id);
+  }
+  return lookup;
+}
+
+/**
+ * Shared resolver behind resolveCreatorNames (cross-platform) and
+ * resolveCreatorNamesByPlatform (scoped) — one implementation, CLAUDE.md #4.
+ *
+ * A creator that is not in the master is CREATED WITH NO CM
+ * (`owner_cpm_id: null`): the person running the weekly upload is not
+ * necessarily the creator's manager, so guessing an owner would silently put
+ * the creator in the wrong CM's scope (workspace, OKR, report). The unassigned
+ * creators surface as an alert card ("Kreator belum punya CM") for a CM
+ * Lead/management to fill in — see loadCreatorsWithoutCm.
+ *
+ * Nothing here throws per-creator: a creator that cannot be resolved is
+ * returned in `failed` so the caller can report it and still aggregate every
+ * other creator's rows.
+ */
+async function resolveCreators(
+  admin: SupabaseClient,
+  names: string[],
+  actorId: string,
+  newStatus: "prospek" | "aktif",
+  platform: "tiktok" | "shopee" | null
+): Promise<CreatorResolution> {
+  const unique = [...new Set(names.map((n) => n.trim()).filter(Boolean))];
+  const byName = new Map<string, string>();
+  const createdProspects: string[] = [];
+  const failed: { name: string; reason: string }[] = [];
+  if (unique.length === 0) return { byName, createdProspects, failed };
+
+  let lookup = await loadCreatorLookup(admin, platform);
+  for (const n of unique) {
+    const id = lookup.get(n.toLowerCase());
+    if (id) byName.set(n.toLowerCase(), id);
+  }
+
+  for (const name of unique) {
+    if (byName.has(name.toLowerCase())) continue;
+
+    let resolvedId: string | null = null;
+    let lastError = "";
+    // 23505 here is either a CRT- primary-key collision (retry with a new id) or
+    // the username already existing (a concurrent upload created it after our
+    // lookup) — in that case reuse the existing row instead of failing.
+    let refreshed = false;
+    for (let attempt = 0; attempt < 3 && !resolvedId; attempt++) {
+      const id = genId("CRT");
+      const { error } = await admin.from("creators").insert({
+        id,
+        name,
+        username: name,
+        status: newStatus,
+        owner_cpm_id: null, // CM sengaja dikosongkan — diisi manual lewat alert.
+        ...(platform ? { platform } : {}),
+      });
+
+      if (!error) {
+        resolvedId = id;
+        createdProspects.push(name);
+        await writeAudit({
+          actorId,
+          action: "creator.auto_prospect_from_upload",
+          entityType: "creators",
+          entityId: id,
+          after: { name, username: name, status: newStatus, owner_cpm_id: null, ...(platform ? { platform } : {}) },
+          type: "auto",
+        });
+        break;
+      }
+
+      lastError = error.message;
+      if (error.code !== "23505") break;
+
+      if (!refreshed) {
+        lookup = await loadCreatorLookup(admin, platform);
+        refreshed = true;
+      }
+      const existingId = lookup.get(name.toLowerCase());
+      if (existingId) resolvedId = existingId; // username taken → reuse it
+    }
+
+    if (resolvedId) byName.set(name.toLowerCase(), resolvedId);
+    else failed.push({ name, reason: lastError || "gagal membuat creator" });
+  }
+  return { byName, createdProspects, failed };
 }
 
 /**
  * Resolves creator name/username values from a multi-creator file to creators.id.
  * Platform exports carry the USERNAME ("Nama pengguna kreator" — e.g. "vikahere"),
  * legacy templates the display name — both are matched case-insensitively.
- * Unknown values become new creators (status = newStatus) + review flag (CLAUDE.md #7),
- * so no platform row is ever dropped for lack of a master record.
+ * Unknown values become new creators (status = newStatus, NO CM) + review flag
+ * (CLAUDE.md #7), so no platform row is ever dropped for lack of a master record.
  *
  * @param newStatus status to use for newly-created creators. Callers that ingest
  *   platform performance data (metrics upload) pass "aktif" — a creator appearing
@@ -120,46 +240,7 @@ export async function resolveCreatorNames(
   actorId: string,
   newStatus: "prospek" | "aktif" = "prospek"
 ): Promise<CreatorResolution> {
-  const unique = [...new Set(names.map((n) => n.trim()).filter(Boolean))];
-  const byName = new Map<string, string>();
-  const createdProspects: string[] = [];
-  if (unique.length === 0) return { byName, createdProspects };
-
-  // Case-insensitive match on name OR username (platform exports use username).
-  const { data, error } = await admin
-    .from("creators")
-    .select("id, name, username")
-    .limit(5000);
-  if (error) throw new Error(`resolveCreatorNames lookup failed: ${error.message}`);
-  const lookup = new Map<string, string>();
-  for (const c of data ?? []) {
-    if (c.username) lookup.set(String(c.username).toLowerCase(), c.id);
-    if (c.name) lookup.set(String(c.name).toLowerCase(), c.id);
-  }
-  for (const n of unique) {
-    const id = lookup.get(n.toLowerCase());
-    if (id) byName.set(n.toLowerCase(), id);
-  }
-
-  for (const name of unique) {
-    if (byName.has(name.toLowerCase())) continue;
-    const id = genId("CRT");
-    const { error: insertError } = await admin
-      .from("creators")
-      .insert({ id, name, username: name, status: newStatus });
-    if (insertError) throw new Error(`gagal membuat creator "${name}": ${insertError.message}`);
-    byName.set(name.toLowerCase(), id);
-    createdProspects.push(name);
-    await writeAudit({
-      actorId,
-      action: "creator.auto_prospect_from_upload",
-      entityType: "creators",
-      entityId: id,
-      after: { name, username: name, status: newStatus },
-      type: "auto",
-    });
-  }
-  return { byName, createdProspects };
+  return resolveCreators(admin, names, actorId, newStatus, null);
 }
 
 /** platform_metrics_raw.report_source → creators.platform (CLAUDE.md #2 auto-fill). */
@@ -187,47 +268,7 @@ export async function resolveCreatorNamesByPlatform(
   platform: "tiktok" | "shopee",
   newStatus: "prospek" | "aktif" = "prospek"
 ): Promise<CreatorResolution> {
-  const unique = [...new Set(names.map((n) => n.trim()).filter(Boolean))];
-  const byName = new Map<string, string>();
-  const createdProspects: string[] = [];
-  if (unique.length === 0) return { byName, createdProspects };
-
-  // Case-insensitive match on name OR username, SCOPED to this platform only.
-  const { data, error } = await admin
-    .from("creators")
-    .select("id, name, username")
-    .eq("platform", platform)
-    .limit(5000);
-  if (error) throw new Error(`resolveCreatorNamesByPlatform lookup failed: ${error.message}`);
-  const lookup = new Map<string, string>();
-  for (const c of data ?? []) {
-    if (c.username) lookup.set(String(c.username).toLowerCase(), c.id);
-    if (c.name) lookup.set(String(c.name).toLowerCase(), c.id);
-  }
-  for (const n of unique) {
-    const id = lookup.get(n.toLowerCase());
-    if (id) byName.set(n.toLowerCase(), id);
-  }
-
-  for (const name of unique) {
-    if (byName.has(name.toLowerCase())) continue;
-    const id = genId("CRT");
-    const { error: insertError } = await admin
-      .from("creators")
-      .insert({ id, name, username: name, status: newStatus, platform });
-    if (insertError) throw new Error(`gagal membuat creator "${name}": ${insertError.message}`);
-    byName.set(name.toLowerCase(), id);
-    createdProspects.push(name);
-    await writeAudit({
-      actorId,
-      action: "creator.auto_prospect_from_upload",
-      entityType: "creators",
-      entityId: id,
-      after: { name, username: name, status: newStatus, platform },
-      type: "auto",
-    });
-  }
-  return { byName, createdProspects };
+  return resolveCreators(admin, names, actorId, newStatus, platform);
 }
 
 /**

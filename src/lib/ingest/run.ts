@@ -196,7 +196,14 @@ export async function runIngest(input: RunIngestInput): Promise<RunIngestResult>
   // performance report is by definition already joined with MEA (CLAUDE.md #1),
   // so newStatus="aktif" (same convention as /metrics upload).
   const detectedNames = distinctCreatorNames(mcnParsed.rows.map((r) => ({ creator: r.creatorName })));
-  const { byName, createdProspects } = await resolveCreatorNames(admin, detectedNames, actorId, "aktif");
+  const { byName, createdProspects, failed: failedCreators } = await resolveCreatorNames(
+    admin, detectedNames, actorId, "aktif"
+  );
+  // A creator that could not be created/resolved no longer aborts the upload —
+  // it is reported here and only ITS rows are skipped below.
+  for (const f of failedCreators) {
+    skipped.push({ row: -1, reason: `creator "${f.name}" gagal dibuat: ${f.reason}` });
+  }
 
   const resolvedMcnRows: McnRow[] = [];
   for (const r of mcnParsed.rows) {
@@ -326,7 +333,12 @@ export async function runIngest(input: RunIngestInput): Promise<RunIngestResult>
     });
 
     for (const name of createdProspects) {
-      skipped.push({ row: -1, reason: `creator "${name}" belum ada di master → dibuat otomatis (status aktif)` });
+      skipped.push({
+        row: -1,
+        reason:
+          `creator "${name}" belum ada di master → dibuat otomatis (status aktif, CM masih kosong — ` +
+          `isi lewat kartu "Kreator belum punya CM")`,
+      });
     }
 
     // ---- 8. Analisa link leakage dari BARIS YANG SAMA (0 LLM) ----

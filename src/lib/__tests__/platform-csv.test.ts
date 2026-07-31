@@ -168,22 +168,31 @@ describe("sumBatchPerCreator", () => {
 });
 
 describe("resolveCreatorNamesByPlatform (Shopee ingest, CLAUDE.md #5)", () => {
-  /** Mock admin client: creators table pre-seeded, .eq("platform", ...) actually filters. */
-  function mockAdmin(seedCreators: { id: string; name: string; username: string; platform: string }[]) {
+  /**
+   * Mock admin client: creators table pre-seeded, .eq("platform", ...) actually
+   * filters, and .range(from, to) paginates like PostgREST — a single page never
+   * returns more than PAGE_SIZE (1000) rows, which is what the real API enforces
+   * regardless of the requested .limit().
+   */
+  function mockAdmin(
+    seedCreators: { id: string; name: string; username: string; platform: string }[],
+    opts: { insertError?: { code: string; message: string } } = {}
+  ) {
     const inserted: Record<string, unknown>[] = [];
+    const PAGE = 1000;
+    const build = (rows: typeof seedCreators) => ({
+      eq: (column: string, value: unknown) =>
+        build(rows.filter((c) => (c as unknown as Record<string, unknown>)[column] === value)),
+      range: (from: number, to: number) =>
+        Promise.resolve({ data: rows.slice(from, Math.min(to + 1, from + PAGE)), error: null }),
+    });
     const admin = {
       from: (table: string) => {
         if (table !== "creators") throw new Error(`unexpected table ${table}`);
         return {
-          select: () => ({
-            eq: (column: string, value: unknown) => ({
-              limit: () => {
-                const filtered = seedCreators.filter((c) => (c as Record<string, unknown>)[column] === value);
-                return Promise.resolve({ data: filtered, error: null });
-              },
-            }),
-          }),
+          select: () => build(seedCreators),
           insert: (row: Record<string, unknown>) => {
+            if (opts.insertError) return Promise.resolve({ error: opts.insertError });
             inserted.push(row);
             return Promise.resolve({ error: null });
           },
@@ -231,5 +240,79 @@ describe("resolveCreatorNamesByPlatform (Shopee ingest, CLAUDE.md #5)", () => {
     const { byName, createdProspects } = await resolveCreatorNamesByPlatform(admin, [], "actor-1", "shopee");
     expect(byName.size).toBe(0);
     expect(createdProspects).toEqual([]);
+  });
+
+  // Regression: PostgREST caps one select at 1000 rows and silently ignores a
+  // larger .limit(). With a bare .limit(5000) every creator past row 1000 was
+  // invisible here, so an EXISTING creator was treated as new, re-INSERTed, and
+  // the whole weekly upload died on creators_username_platform_uidx.
+  it("finds a creator past the 1000-row page instead of trying to create it", async () => {
+    const seed = Array.from({ length: 1148 }, (_, i) => ({
+      id: `CRT-${i}`, name: `creator ${i}`, username: `user${i}`, platform: "shopee",
+    }));
+    seed[1088] = { id: "CRT-2S3EF", name: "Upin Ipin", username: "toko_makmur58", platform: "shopee" };
+    const { admin, inserted } = mockAdmin(seed);
+
+    const { byName, createdProspects, failed } = await resolveCreatorNamesByPlatform(
+      admin, ["toko_makmur58"], "actor-1", "shopee", "aktif"
+    );
+
+    expect(byName.get("toko_makmur58")).toBe("CRT-2S3EF");
+    expect(createdProspects).toEqual([]);
+    expect(failed).toEqual([]);
+    expect(inserted).toHaveLength(0);
+  });
+
+  it("creates unknown creators with NO CM so a manager assigns them later", async () => {
+    const { admin, inserted } = mockAdmin([]);
+    await resolveCreatorNamesByPlatform(admin, ["newuser"], "actor-1", "shopee", "aktif");
+    expect(inserted[0]).toMatchObject({ owner_cpm_id: null, status: "aktif" });
+  });
+
+  // A creator that cannot be created must not abort the whole weekly upload:
+  // it is reported in `failed` so the caller skips only that creator's rows.
+  it("reports an un-creatable creator in `failed` instead of throwing", async () => {
+    const { admin } = mockAdmin([], {
+      insertError: { code: "23502", message: 'null value in column "name"' },
+    });
+    const { byName, createdProspects, failed } = await resolveCreatorNamesByPlatform(
+      admin, ["broken"], "actor-1", "shopee", "aktif"
+    );
+    expect(byName.size).toBe(0);
+    expect(createdProspects).toEqual([]);
+    expect(failed).toEqual([{ name: "broken", reason: 'null value in column "name"' }]);
+  });
+
+  // Concurrent upload created the username between our lookup and our INSERT:
+  // reuse the row that now exists instead of failing on the unique index.
+  it("reuses the existing creator when the INSERT hits the unique index (23505)", async () => {
+    const seed: { id: string; name: string; username: string; platform: string }[] = [];
+    const PAGE = 1000;
+    const build = (rows: typeof seed) => ({
+      eq: (column: string, value: unknown) =>
+        build(rows.filter((c) => (c as unknown as Record<string, unknown>)[column] === value)),
+      range: (from: number, to: number) =>
+        Promise.resolve({ data: rows.slice(from, Math.min(to + 1, from + PAGE)), error: null }),
+    });
+    const admin = {
+      from: () => ({
+        // Snapshot at call time, so the refresh after 23505 sees the raced row.
+        select: () => build([...seed]),
+        insert: () => {
+          // A parallel upload wins the race and writes the row we were about to insert.
+          seed.push({ id: "CRT-RACE", name: "racer", username: "racer", platform: "shopee" });
+          return Promise.resolve({
+            error: { code: "23505", message: "duplicate key value violates unique constraint" },
+          });
+        },
+      }),
+    } as unknown as SupabaseClient;
+
+    const { byName, createdProspects, failed } = await resolveCreatorNamesByPlatform(
+      admin, ["racer"], "actor-1", "shopee", "aktif"
+    );
+    expect(byName.get("racer")).toBe("CRT-RACE");
+    expect(createdProspects).toEqual([]);
+    expect(failed).toEqual([]);
   });
 });

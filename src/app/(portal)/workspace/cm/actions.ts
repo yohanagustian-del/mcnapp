@@ -47,6 +47,65 @@ export async function assignCreator(formData: FormData): Promise<void> {
   revalidatePath("/workspace/cm");
 }
 
+export interface AssignCmResult {
+  assigned: number;
+  /** Creators skipped because someone else assigned them first (never overwritten). */
+  skipped: number;
+}
+
+/**
+ * Bulk-assign a CM to creators that currently have NO CM — the action behind the
+ * "Kreator belum punya CM" alert card.
+ *
+ * Weekly platform uploads create unknown usernames as creators without an owner
+ * (resolveCreators in platform-csv.ts), and an unowned creator falls outside CM
+ * workspace scope and OKR aggregation. Filling that gap only ADDS ownership, so
+ * it applies immediately and is logged (CLAUDE.md #2: auto + audit_logs).
+ *
+ * The update is guarded by `owner_cpm_id is null`, so this can never re-assign a
+ * creator away from an existing CM even if the client sends a stale id —
+ * re-assignment stays with assignCreator / the Import Kreator flow.
+ */
+export async function assignCmToCreators(
+  creatorIds: string[],
+  cmId: string
+): Promise<AssignCmResult> {
+  const actor = await requirePermission("m8.assign_creator");
+  const ids = [...new Set((creatorIds ?? []).map((s) => String(s).trim()).filter(Boolean))];
+  const newOwnerId = String(cmId ?? "").trim();
+  if (ids.length === 0) throw new Error("Pilih minimal satu kreator");
+  if (!newOwnerId) throw new Error("CM tujuan wajib dipilih");
+
+  const admin = createAdminClient();
+  const { data: owner } = await admin
+    .from("team_members").select("id, role, active").eq("id", newOwnerId).maybeSingle();
+  if (!owner || !owner.active || !["cpm", "cm_lead"].includes(owner.role)) {
+    throw new Error("Tujuan assignment harus CPM/CM Lead aktif");
+  }
+
+  const { data: updated, error } = await admin
+    .from("creators")
+    .update({ owner_cpm_id: newOwnerId })
+    .in("id", ids)
+    .is("owner_cpm_id", null) // hanya isi yang kosong — tidak pernah menimpa CM lain
+    .select("id");
+  if (error) throw new Error(`Gagal assign CM: ${error.message}`);
+
+  const assignedIds = (updated ?? []).map((r) => r.id);
+  for (const id of assignedIds) {
+    await writeAudit({
+      actorId: actor.id, action: "m8.assign_creator", entityType: "creators", entityId: id,
+      before: { owner_cpm_id: null }, after: { owner_cpm_id: newOwnerId },
+      type: "auto",
+    });
+  }
+
+  revalidatePath("/creators");
+  revalidatePath("/ingest");
+  revalidatePath("/workspace/cm");
+  return { assigned: assignedIds.length, skipped: ids.length - assignedIds.length };
+}
+
 /**
  * Scan growth mingguan (§2A.2, LOCKED §6.1): GMV turun > m8.perf_drop
  * periode-ke-periode → platform_alert perf_drop ke CPM owner (event, bukan

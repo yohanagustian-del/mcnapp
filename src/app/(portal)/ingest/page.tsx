@@ -1,6 +1,8 @@
 import Link from "next/link";
 import { requireMember, hasPermission } from "@/lib/rbac";
 import { createClient } from "@/lib/supabase/server";
+import { loadCreatorsWithoutCm } from "@/lib/creators/without-cm";
+import { CreatorsWithoutCmAlert } from "@/components/creators-without-cm-alert";
 import { daysInMonth, weekOfMonth } from "@/lib/utils/date";
 import { IngestForm } from "./ingest-form";
 import { ShopeeIngestForm } from "./shopee-ingest-form";
@@ -88,6 +90,11 @@ export default async function IngestPage() {
   const member = await requireMember();
   const canRun = hasPermission("ingest.run", member.role);
   const canUploadLeak = hasPermission("leak.upload_artifact", member.role);
+  const canAssignCm = hasPermission("m8.assign_creator", member.role);
+
+  // Kreator yang dibuat otomatis oleh upload mingguan sengaja tidak punya CM —
+  // ditampilkan di sini supaya langsung terlihat setelah upload.
+  const withoutCm = await loadCreatorsWithoutCm();
 
   const supabase = await createClient();
   // Riwayat Batch: ambil halaman pertama (10 baris) + total count untuk pagination.
@@ -181,6 +188,15 @@ export default async function IngestPage() {
           disarankan agar analisa kebocoran link ikut dihitung).
         </p>
       </details>
+
+      <div className="mt-6 max-w-3xl">
+        <CreatorsWithoutCmAlert
+          total={withoutCm.total}
+          rows={withoutCm.rows}
+          cmOptions={withoutCm.cmOptions}
+          canAssign={canAssignCm}
+        />
+      </div>
 
       <h2 className="mt-6 text-lg font-medium">TikTok</h2>
       {canRun ? (

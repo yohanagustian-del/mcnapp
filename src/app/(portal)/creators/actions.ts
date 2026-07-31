@@ -9,6 +9,7 @@ import { parseSheet } from "@/lib/utils/sheet";
 import { parseRupiah } from "@/lib/utils/rupiah";
 import { parseFlexibleDate } from "@/lib/utils/date";
 import { parseCount, pick, pickPrefix } from "@/lib/platform-csv";
+import { fetchAll } from "@/lib/supabase/fetch-all";
 import type { UploadReport } from "@/app/(portal)/tim/actions";
 
 const SEGMENTS = ["tc", "incubation", "celeb"] as const;
@@ -49,9 +50,14 @@ export async function uploadCreators(formData: FormData): Promise<UploadReport> 
   const admin = createAdminClient();
 
   // Existing creators for upsert matching (username first, then display name).
-  const { data: existing } = await admin.from("creators").select("id, name, username").limit(5000);
+  // Paginated: PostgREST caps one select at 1000 rows and ignores a larger
+  // .limit(), so a bare select would hide every creator past row 1000 and turn
+  // an UPDATE into a duplicate-key INSERT.
+  const existing = await fetchAll<{ id: string; name: string | null; username: string | null }>(
+    admin, "creators", "id, name, username", (q) => q
+  );
   const byKey = new Map<string, string>();
-  for (const c of existing ?? []) {
+  for (const c of existing) {
     if (c.username) byKey.set(String(c.username).toLowerCase(), c.id);
     if (c.name) byKey.set(String(c.name).toLowerCase(), c.id);
   }

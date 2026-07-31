@@ -5,6 +5,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { writeAudit } from "@/lib/audit";
 import { requirePermission, CM_ROLES, MANAGEMENT_ROLES } from "@/lib/rbac";
 import { genId } from "@/lib/utils/id";
+import { fetchAll } from "@/lib/supabase/fetch-all";
 import { parseSheet } from "@/lib/utils/sheet";
 import {
   buildImportRows,
@@ -37,19 +38,20 @@ async function loadContext(): Promise<ImportContext & { cmNames: string[] }> {
     if (m.name) cmByName.set(String(m.name).toLowerCase(), { id: m.id, name: m.name });
   }
 
-  const { data: creators, error: creatorError } = await admin
-    .from("creators")
-    .select("id, username, owner_cpm_id")
-    .not("username", "is", null)
-    .limit(10000);
-  if (creatorError) throw new Error(`Gagal memuat data kreator: ${creatorError.message}`);
+  // Paginated: PostgREST caps one select at 1000 rows and ignores a larger
+  // .limit(), so a bare select would hide every creator past row 1000 — the
+  // import would then classify an existing username as "baru" and fail on the
+  // unique index instead of updating its CM.
+  const creators = await fetchAll<{ id: string; username: string | null; owner_cpm_id: string | null }>(
+    admin, "creators", "id, username, owner_cpm_id", (q) => q.not("username", "is", null)
+  );
 
   // owner_cpm_id → nama, supaya preview bisa menampilkan "CM lama → CM baru".
   const nameById = new Map<string, string>();
   for (const [, cm] of cmByName) nameById.set(cm.id, cm.name);
 
   const existingByUsername = new Map<string, { id: string; cmName: string | null }>();
-  for (const c of creators ?? []) {
+  for (const c of creators) {
     const key = String(c.username).trim().toLowerCase();
     if (!key) continue;
     existingByUsername.set(key, {
