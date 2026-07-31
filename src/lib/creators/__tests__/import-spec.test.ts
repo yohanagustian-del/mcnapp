@@ -306,12 +306,86 @@ describe("Sharing Komisi lewat buildImportRows", () => {
   });
 });
 
+describe("Kelas Kreator lewat buildImportRows", () => {
+  it("nilai dari sheet dipetakan ke creator_class", () => {
+    const rows = buildImportRows(
+      [
+        { username: "baru1", cm: "Netta", "kelas_kreator": "Top Creator" },
+        { username: "baru2", cm: "Netta", "kelas_kreator": "influencer" },
+      ],
+      ctx()
+    );
+    expect(rows[0].payload.creator_class).toBe("top_creator");
+    expect(rows[1].payload.creator_class).toBe("influencer");
+    expect(rows[0].warnings).toEqual([]);
+  });
+
+  /** Requirement: upload dengan kolom kosong → Reguler. */
+  it("kreator BARU dengan kelas kosong → reguler", () => {
+    const rows = buildImportRows(
+      [
+        { username: "baru1", cm: "Netta", "kelas_kreator": "" },
+        { username: "baru2", cm: "Netta" },
+      ],
+      ctx()
+    );
+    expect(rows[0].payload.creator_class).toBe("reguler");
+    expect(rows[1].payload.creator_class).toBe("reguler");
+  });
+
+  /**
+   * Kreator yang sudah ada TIDAK diturunkan ke Reguler hanya karena selnya kosong —
+   * aturan umum template: kolom opsional kosong tidak menimpa data lama.
+   */
+  it("kreator LAMA dengan kelas kosong: creator_class tidak disentuh", () => {
+    const rows = buildImportRows([{ username: "vikahere", cm: "Netta" }], ctx());
+    expect(rows[0].status).toBe("update");
+    expect(rows[0].payload).not.toHaveProperty("creator_class");
+  });
+
+  it("kreator LAMA dengan kelas terisi tetap di-update", () => {
+    const rows = buildImportRows(
+      [{ username: "vikahere", cm: "Netta", "kelas_kreator": "Top Creator" }],
+      ctx()
+    );
+    expect(rows[0].payload.creator_class).toBe("top_creator");
+  });
+
+  it("nilai tidak dikenali = warning, baris tetap tersimpan", () => {
+    const baru = buildImportRows(
+      [{ username: "baru1", cm: "Netta", "kelas_kreator": "VIP" }],
+      ctx()
+    );
+    expect(baru[0].status).toBe("insert");
+    expect(baru[0].payload.creator_class).toBe("reguler");
+    expect(baru[0].warnings[0]).toContain("tidak dikenali");
+    expect(baru[0].warnings[0]).toContain("Reguler");
+
+    const lama = buildImportRows(
+      [{ username: "vikahere", cm: "Netta", "kelas_kreator": "VIP" }],
+      ctx()
+    );
+    expect(lama[0].payload).not.toHaveProperty("creator_class");
+    expect(lama[0].warnings[0]).toContain("kelas lama dipertahankan");
+  });
+});
+
 describe("kolom template", () => {
-  it("berisi Sharing Komisi & Kualitas, tanpa Niche", () => {
+  it("berisi Sharing Komisi, Kualitas & Kelas Kreator, tanpa Niche", () => {
     const labels = IMPORT_COLUMNS.map((c) => c.label);
     expect(labels).toContain("Sharing Komisi");
     expect(labels).toContain("Kualitas");
+    expect(labels).toContain("Kelas Kreator");
     expect(labels).not.toContain("Niche");
+  });
+
+  it("Kelas Kreator tepat setelah Kategory, dan notenya menyebut ketiga pilihan", () => {
+    const labels = IMPORT_COLUMNS.map((c) => c.label);
+    expect(labels[labels.indexOf("Kategory") + 1]).toBe("Kelas Kreator");
+    const note = IMPORT_COLUMNS.find((c) => c.label === "Kelas Kreator")!.note;
+    for (const opsi of ["Reguler", "Top Creator", "Influencer"]) {
+      expect(note).toContain(opsi);
+    }
   });
 
   it("Kualitas tepat setelah Followers, Sharing Komisi tepat sebelum RC Live", () => {

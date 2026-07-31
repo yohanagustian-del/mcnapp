@@ -34,7 +34,7 @@ export default async function CreatorsPage() {
   const creators = await fetchAll<CreatorRow>(
     supabase,
     "creators",
-    "id, name, username, profile_link, phone, uid, followers, content_quality, join_date, domisili, alamat, jenis_creator, niche, top_niches, level, segment, gmv, gmv_live, gmv_video, platform, rc_live, rc_video, rate_card, commission_share, contract_end_date, status, tim_akuisisi, target_gmv_monthly, owner_cpm_id, team_members(name)",
+    "id, name, username, profile_link, phone, uid, followers, content_quality, join_date, domisili, alamat, jenis_creator, creator_class, niche, top_niches, level, segment, gmv, gmv_live, gmv_video, platform, rc_live, rc_video, rate_card, commission_share, contract_end_date, status, tim_akuisisi, target_gmv_monthly, owner_cpm_id, team_members(name)",
     (q) => q.order("created_at", { ascending: false })
   );
 
@@ -51,6 +51,7 @@ export default async function CreatorsPage() {
     domisili: c.domisili,
     alamat: c.alamat,
     jenis_creator: c.jenis_creator,
+    creator_class: c.creator_class,
     niche: c.niche,
     top_niches: c.top_niches as string[] | null,
     level: c.level,

@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useCreatorFilter } from "@/components/creator-filter";
 import { MAX_BULK_DELETE } from "@/lib/creators/delete";
+import { creatorClassLabel } from "@/lib/creators/creator-class";
 import { updateRateCard } from "./actions";
 import { CreatorEditButton } from "./creator-edit-button";
 import { CreatorDeleteDialog, type DeleteTarget } from "./creator-delete-dialog";
@@ -22,6 +23,8 @@ export interface CreatorTableRow {
   domisili: string | null;
   alamat: string | null;
   jenis_creator: string | null;
+  /** reguler | top_creator | influencer — NOT NULL di DB, kosong tetap ditampilkan Reguler. */
+  creator_class: string | null;
   niche: string | null;
   top_niches: string[] | null;
   level: number | null;
@@ -70,6 +73,18 @@ function contractRemaining(
 }
 
 const td = "px-3 py-2 whitespace-nowrap";
+
+/** Badge per kelas kreator — Reguler netral, dua kelas lain diberi warna supaya menonjol. */
+const CREATOR_CLASS_BADGE: Record<string, string> = {
+  reguler: "rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-700",
+  top_creator: "rounded-full bg-indigo-100 px-2 py-0.5 text-xs font-medium text-indigo-800",
+  influencer: "rounded-full bg-fuchsia-100 px-2 py-0.5 text-xs font-medium text-fuchsia-800",
+};
+
+/** null / "" / nilai asing → gaya Reguler, sejalan dengan creatorClassLabel(). */
+function creatorClassBadge(value: string | null): string {
+  return CREATOR_CLASS_BADGE[value ?? ""] ?? CREATOR_CLASS_BADGE.reguler;
+}
 
 const PAGE_SIZES = [10, 20, 50, 100] as const;
 const DEFAULT_PAGE_SIZE = 10;
@@ -126,8 +141,8 @@ export function CreatorsTable({
 
   const labelOf = (c: CreatorTableRow) => c.username || c.name || c.id;
 
-  /** 24 kolom data + kolom centang + kolom Aksi — dipakai colSpan baris "kosong". */
-  const colCount = 24 + (canDelete ? 1 : 0) + (canEdit || canDelete ? 1 : 0);
+  /** 25 kolom data + kolom centang + kolom Aksi — dipakai colSpan baris "kosong". */
+  const colCount = 25 + (canDelete ? 1 : 0) + (canEdit || canDelete ? 1 : 0);
 
   const toggleOne = useCallback((id: string) => {
     setSelected((prev) => {
@@ -223,6 +238,7 @@ export function CreatorsTable({
               <th className="px-3 py-3">No HP</th>
               <th className="px-3 py-3">Platform</th>
               <th className="px-3 py-3">Jenis</th>
+              <th className="px-3 py-3">Kelas Kreator</th>
               <th className="px-3 py-3">Niche (Top 3)</th>
               <th className="px-3 py-3">Followers</th>
               <th className="px-3 py-3">Kualitas</th>
@@ -280,6 +296,11 @@ export function CreatorsTable({
                   <td className={td}>{c.phone ?? "—"}</td>
                   <td className={`${td} capitalize`}>{c.platform ?? "—"}</td>
                   <td className={td}>{c.jenis_creator ?? "—"}</td>
+                  <td className={td}>
+                    <span className={creatorClassBadge(c.creator_class)}>
+                      {creatorClassLabel(c.creator_class)}
+                    </span>
+                  </td>
                   <td className="px-3 py-2">
                     {niches.length ? (
                       <span className="flex flex-wrap gap-1">

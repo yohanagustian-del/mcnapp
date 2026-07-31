@@ -9,6 +9,7 @@ import { parseSheet } from "@/lib/utils/sheet";
 import { parseRupiah } from "@/lib/utils/rupiah";
 import { parseFlexibleDate } from "@/lib/utils/date";
 import { parseCount, pick, pickPrefix } from "@/lib/platform-csv";
+import { parseCreatorClass } from "@/lib/creators/creator-class";
 import { fetchAll } from "@/lib/supabase/fetch-all";
 import type { UploadReport } from "@/app/(portal)/tim/actions";
 
@@ -96,6 +97,9 @@ export async function uploadCreators(formData: FormData): Promise<UploadReport> 
       domisili: pickPrefix(raw, ["domisili"]) || null,
       alamat: pick(raw, ["alamat_lengkap", "alamat"]) || null,
       jenis_creator: pick(raw, ["jenis_creator"]) || null,
+      // Kosong / tak dikenali → dibuang di bawah, lalu DEFAULT 'reguler' di DB yang
+      // berlaku untuk insert; baris update tidak kehilangan kelas lamanya.
+      creator_class: parseCreatorClass(pick(raw, ["kelas_kreator", "kelas", "creator_class"])),
       niche: topNiches?.[0] ?? null,
       top_niches: topNiches,
       rc_live: pick(raw, ["rc_live", "ratecard_live"]) || null,

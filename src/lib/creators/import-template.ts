@@ -1,5 +1,6 @@
 import * as XLSX from "xlsx";
 import { IMPORT_COLUMNS } from "./import-spec";
+import { CREATOR_CLASS_OPTIONS } from "./creator-class";
 
 export const TEMPLATE_FILENAME = "template_kreator.xlsx";
 
@@ -37,6 +38,10 @@ export function buildCreatorTemplate(cmNames: string[] = []): ArrayBuffer {
     ["Kolom opsional yang dikosongkan TIDAK menghapus data lama."],
     ["Isi data mulai baris ke-2 di sheet 'Kreator'. Jangan mengubah baris header."],
     ["Tidak ada kolom Niche: niche diisi otomatis dari upload data platform mingguan."],
+    [
+      `Kelas Kreator hanya menerima: ${CREATOR_CLASS_OPTIONS.map((o) => o.label).join(" / ")}. ` +
+        "Dikosongkan = Reguler.",
+    ],
     ["Sharing Komisi hanya MENGISI yang masih kosong. Nilai yang sudah ada tidak ditimpa dari file"],
     ["(read-only, sync platform) dan selisihnya dicatat sebagai alert, bukan diterapkan."],
     [],

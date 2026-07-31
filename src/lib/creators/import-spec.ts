@@ -1,5 +1,11 @@
 import { parseRupiah } from "@/lib/utils/rupiah";
 import { parseFlexibleDate } from "@/lib/utils/date";
+import {
+  CREATOR_CLASS_LABEL,
+  CREATOR_CLASS_OPTIONS,
+  DEFAULT_CREATOR_CLASS,
+  parseCreatorClass,
+} from "./creator-class";
 
 /**
  * Bulk import kreator lewat Excel (tab Kreator → "Import Kreator").
@@ -58,6 +64,12 @@ export const IMPORT_COLUMNS: ImportColumn[] = [
     aliases: ["kategory", "kategori", "jeniscreator", "jenis"],
     required: false,
     note: "Opsional. Contoh: Video Creator / Live Creator.",
+  },
+  {
+    label: "Kelas Kreator",
+    aliases: ["kelaskreator", "kelas", "creatorclass", "kelascreator"],
+    required: false,
+    note: `Opsional. Salah satu: ${CREATOR_CLASS_OPTIONS.map((o) => o.label).join(" / ")}. Kosong atau tidak dikenali → ${CREATOR_CLASS_LABEL[DEFAULT_CREATOR_CLASS]} untuk kreator baru; kreator yang sudah ada tetap memakai kelas lamanya.`,
   },
   {
     label: "Platform",
@@ -438,11 +450,31 @@ export function buildImportRows(
     const share = resolveCommissionShare(values["Sharing Komisi"] ?? "", existing?.commissionShare);
     if (share.value !== null) payload.commission_share = share.value;
 
+    const warnings: string[] = share.warning ? [share.warning] : [];
+
+    // Kelas kreator: kosong → Reguler untuk kreator BARU. Kreator yang sudah ada
+    // TIDAK diturunkan kelasnya hanya karena selnya kosong — itu aturan umum
+    // template ("kolom opsional yang dikosongkan tidak menimpa data lama"), dan
+    // kolomnya sendiri NOT NULL DEFAULT 'reguler' di DB (migration 0029).
+    const classRaw = (values["Kelas Kreator"] ?? "").trim();
+    const creatorClass = parseCreatorClass(classRaw);
+    if (classRaw && !creatorClass) {
+      const opsi = CREATOR_CLASS_OPTIONS.map((o) => o.label).join(" / ");
+      warnings.push(
+        `Kelas Kreator "${classRaw}" tidak dikenali (pilih ${opsi}) — ` +
+          (existing
+            ? "kelas lama dipertahankan"
+            : `dipakai ${CREATOR_CLASS_LABEL[DEFAULT_CREATOR_CLASS]}`)
+      );
+    }
+    if (creatorClass) payload.creator_class = creatorClass;
+    else if (!existing) payload.creator_class = DEFAULT_CREATOR_CLASS;
+
     out.push({
       rowNum,
       status: existing ? "update" : "insert",
       errors: [],
-      warnings: share.warning ? [share.warning] : [],
+      warnings,
       commissionAlert: share.alert,
       username,
       cmName: cm.name,
