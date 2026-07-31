@@ -36,6 +36,7 @@ export function buildCreatorTemplate(cmNames: string[] = []): ArrayBuffer {
     ["Username belum ada -> kreator baru dibuat."],
     ["Kolom opsional yang dikosongkan TIDAK menghapus data lama."],
     ["Isi data mulai baris ke-2 di sheet 'Kreator'. Jangan mengubah baris header."],
+    ["Tidak ada kolom Niche: niche diisi otomatis dari upload data platform mingguan."],
     [],
     ["Kolom", "Wajib", "Keterangan"],
     ...IMPORT_COLUMNS.map((c) => [c.label, c.required ? "WAJIB" : "opsional", c.note]),

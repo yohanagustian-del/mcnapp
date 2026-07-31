@@ -1,5 +1,11 @@
 import { describe, it, expect } from "vitest";
-import { buildImportRows, summarize, canonicalHeader, type ImportContext } from "../import-spec";
+import {
+  buildImportRows,
+  summarize,
+  canonicalHeader,
+  IMPORT_COLUMNS,
+  type ImportContext,
+} from "../import-spec";
 
 function ctx(overrides?: Partial<ImportContext>): ImportContext {
   return {
@@ -99,7 +105,8 @@ describe("buildImportRows", () => {
           "no_hp": "08123",
           level: "Lv 3",
           "rate_card": "Rp1.500.000",
-          niche: "beauty; skincare, fashion, extra",
+          domisili: "Bandung",
+          "alamat_lengkap": "Jl. Merdeka No. 10, Sukajadi, Bandung 40161",
           platform: "tiktok",
         },
       ],
@@ -111,8 +118,23 @@ describe("buildImportRows", () => {
     expect(p.phone).toBe("08123");
     expect(p.level).toBe(3);
     expect(p.rate_card).toBe(1_500_000);
-    expect(p.top_niches).toEqual(["beauty", "skincare", "fashion"]);
+    expect(p.domisili).toBe("Bandung");
+    expect(p.alamat).toBe("Jl. Merdeka No. 10, Sukajadi, Bandung 40161");
     expect(p.platform).toBe("tiktok");
+  });
+
+  /**
+   * Niche dihapus dari template — diisi otomatis dari upload data platform
+   * mingguan, jadi kolom "niche" di file lama pun tidak boleh menimpanya.
+   */
+  it("tidak ada kolom Niche di template dan niche di file diabaikan", () => {
+    expect(IMPORT_COLUMNS.map((c) => c.label)).not.toContain("Niche");
+    const rows = buildImportRows(
+      [{ username: "vikahere", cm: "Netta", niche: "beauty; skincare" }],
+      ctx()
+    );
+    expect(rows[0].payload).not.toHaveProperty("niche");
+    expect(rows[0].payload).not.toHaveProperty("top_niches");
   });
 
   it("summarize menghitung insert / update / error", () => {

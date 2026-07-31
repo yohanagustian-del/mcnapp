@@ -14,6 +14,10 @@ import { parseFlexibleDate } from "@/lib/utils/date";
  * CM di file adalah NAMA (mis. "Netta") → di-resolve ke team_members.id
  * (creators.owner_cpm_id). Nama CM yang tidak dikenal = baris error, bukan
  * diam-diam dikosongkan.
+ *
+ * Niche SENGAJA tidak ada di template: nilainya diturunkan otomatis dari upload
+ * data platform mingguan, jadi kolom manual di sini hanya menimpanya dengan
+ * tebakan yang lebih buruk.
  */
 
 const PLATFORMS = ["tiktok", "shopee"] as const;
@@ -86,16 +90,16 @@ export const IMPORT_COLUMNS: ImportColumn[] = [
     note: "Opsional. Teks bebas (contoh: 120K).",
   },
   {
-    label: "Niche",
-    aliases: ["niche", "niches", "topniches"],
-    required: false,
-    note: "Opsional. Pisahkan dengan koma / titik koma; 3 pertama disimpan sebagai top niche.",
-  },
-  {
     label: "Domisili",
     aliases: ["domisili", "kota"],
     required: false,
     note: "Opsional. Kota domisili kreator.",
+  },
+  {
+    label: "Alamat Lengkap",
+    aliases: ["alamatlengkap", "alamat"],
+    required: false,
+    note: "Opsional. Alamat lengkap kreator (jalan, kelurahan, kota, kode pos).",
   },
   {
     label: "Level",
@@ -160,12 +164,6 @@ function cell(row: Record<string, string>, column: ImportColumn): string {
   return "";
 }
 
-/** "beauty; skincare, fashion" → maksimal 3 kategori. */
-function parseNiches(raw: string): string[] | null {
-  const parts = raw.split(/[;,|]/).map((s) => s.trim()).filter(Boolean);
-  return parts.length ? parts.slice(0, 3) : null;
-}
-
 /** "Lv 3" / "3" → 1..8; selain itu null. */
 function parseLevel(raw: string): number | null {
   const m = raw.match(/(\d+)/);
@@ -228,17 +226,12 @@ function buildPayload(
   put("uid", values["UID"]);
   put("followers", values["Followers"]);
   put("domisili", values["Domisili"]);
+  put("alamat", values["Alamat Lengkap"]);
   put("rc_live", values["RC Live"]);
   put("rc_video", values["RC Video"]);
   put("level", parseLevel(values["Level"] ?? ""));
   put("rate_card", parseRupiah(values["Rate Card"] ?? ""));
   put("join_date", parseFlexibleDate(values["Join Date"] ?? ""));
-
-  const niches = parseNiches(values["Niche"] ?? "");
-  if (niches) {
-    payload.niche = niches[0];
-    payload.top_niches = niches;
-  }
 
   const platform = (values["Platform"] ?? "").toLowerCase();
   if (PLATFORMS.includes(platform as (typeof PLATFORMS)[number])) payload.platform = platform;

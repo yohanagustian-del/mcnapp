@@ -18,6 +18,7 @@ export interface CreatorTableRow {
   content_quality: string | null;
   join_date: string | null;
   domisili: string | null;
+  alamat: string | null;
   jenis_creator: string | null;
   niche: string | null;
   top_niches: string[] | null;
@@ -48,11 +49,18 @@ function formatShare(v: number | null | undefined): string {
 }
 
 /**
- * Sisa kontrak dari contract_end_date (computed, tidak disimpan). `nowMs` comes from the
- * server render so SSR and hydration agree on the day count.
+ * Sisa kontrak per hari ini (computed, tidak disimpan). `nowMs` comes from the server
+ * render so SSR and hydration agree on the day count.
+ *
+ * Butuh join_date DAN contract_end_date terisi: kontrak tanpa salah satu tanggal =
+ * data belum lengkap, jadi ditampilkan "—" daripada hitungan yang menyesatkan.
  */
-function contractRemaining(end: string | null, nowMs: number): { label: string; danger: boolean } {
-  if (!end) return { label: "—", danger: false };
+function contractRemaining(
+  join: string | null,
+  end: string | null,
+  nowMs: number
+): { label: string; danger: boolean } {
+  if (!join || !end) return { label: "—", danger: false };
   const days = Math.ceil((new Date(end).getTime() - nowMs) / 86_400_000);
   if (days < 0) return { label: `habis ${-days} hr lalu`, danger: true };
   if (days <= 60) return { label: `${days} hari`, danger: days <= 30 };
@@ -128,8 +136,10 @@ export function CreatorsTable({
               <th className="px-3 py-3">CM</th>
               <th className="px-3 py-3">Level</th>
               <th className="px-3 py-3">Join</th>
+              <th className="px-3 py-3">End Date</th>
               <th className="px-3 py-3">Sisa Kontrak</th>
               <th className="px-3 py-3">Domisili</th>
+              <th className="px-3 py-3">Alamat Lengkap</th>
               <th className="px-3 py-3">UID</th>
               <th className="px-3 py-3">Status</th>
               {canEdit && <th className="px-3 py-3">Aksi</th>}
@@ -137,7 +147,7 @@ export function CreatorsTable({
           </thead>
           <tbody className="divide-y divide-slate-100">
             {visibleRows.map((c) => {
-              const remaining = contractRemaining(c.contract_end_date, nowMs);
+              const remaining = contractRemaining(c.join_date, c.contract_end_date, nowMs);
               const niches: string[] = c.top_niches ?? (c.niche ? [c.niche] : []);
               return (
                 <tr key={c.id}>
@@ -201,10 +211,14 @@ export function CreatorsTable({
                   <td className={td}>{c.cmName ?? "—"}</td>
                   <td className={td}>{c.level ? `L${c.level}` : "—"}</td>
                   <td className={td}>{c.join_date ?? "—"}</td>
+                  <td className={td}>{c.contract_end_date ?? "—"}</td>
                   <td className={`${td} ${remaining.danger ? "font-medium text-red-600" : ""}`}>
                     {remaining.label}
                   </td>
                   <td className={td}>{c.domisili ?? "—"}</td>
+                  <td className="max-w-[240px] truncate px-3 py-2" title={c.alamat ?? ""}>
+                    {c.alamat ?? "—"}
+                  </td>
                   <td className={`${td} font-mono text-[10px] text-slate-400`}>{c.uid ?? "—"}</td>
                   <td className={td}>{c.status}</td>
                   {canEdit && (
@@ -231,7 +245,7 @@ export function CreatorsTable({
             })}
             {visibleRows.length === 0 && (
               <tr>
-                <td colSpan={canEdit ? 23 : 22} className="px-4 py-6 text-center text-slate-400">
+                <td colSpan={canEdit ? 25 : 24} className="px-4 py-6 text-center text-slate-400">
                   {filterActive
                     ? "Tidak ada kreator yang cocok dengan pencarian username / filter CM."
                     : "Belum ada kreator."}
