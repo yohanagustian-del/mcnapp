@@ -81,7 +81,7 @@ export default async function CreatorsPage() {
     .sort((a, b) => a.name.localeCompare(b.name, "id"));
 
   return (
-    <CreatorFilterProvider cms={cmOptions}>
+    <CreatorFilterProvider cms={cmOptions} searchLabel="username kreator">
       <div>
         <h1 className="text-2xl font-semibold">Kreator</h1>
         <p className="mt-1 text-sm text-slate-500">

@@ -20,10 +20,20 @@ interface CreatorFilterValue {
   toggleJenis: (value: string) => void;
   clearJenis: () => void;
   reset: () => void;
-  /** True when the name search, CM multi-select, or jenis multi-select narrows the list. */
+  /** Label of the field the search box matches (dipakai placeholder + aria-label). */
+  searchLabel: string;
+  /** True when the search, CM multi-select, or jenis multi-select narrows the list. */
   isActive: boolean;
-  /** Creator passes when it matches the name search AND a selected CM AND a selected jenis. */
-  matches: (name: string, ownerCpmId: string | null, jenisCreator?: string | null) => boolean;
+  /**
+   * Creator passes when it matches the search AND a selected CM AND a selected jenis.
+   * `searchValue` = field yang dicari pemanggil (nama kreator di kalender jadwal,
+   * username di tabel master kreator).
+   */
+  matches: (
+    searchValue: string | null | undefined,
+    ownerCpmId: string | null,
+    jenisCreator?: string | null
+  ) => boolean;
 }
 
 const CreatorFilterContext = createContext<CreatorFilterValue | null>(null);
@@ -35,22 +45,26 @@ export function useCreatorFilter(): CreatorFilterValue {
 }
 
 /**
- * Client-side name search + CM multi-select shared by the schedule calendar, the
- * schedule roster panel and the creators master table. Each list is already fully
- * loaded by its server component, so the filtering is pure JS — no extra Supabase
- * round-trip per keystroke.
+ * Client-side creator search + CM multi-select shared by the schedule calendar and the
+ * creators master table. Each list is already fully loaded by its server component, so
+ * the filtering is pure JS — no extra Supabase round-trip per keystroke.
  *
  * `jenisOptions` is opt-in: callers that pass a non-empty list (the schedule page) get
  * an extra "Jenis Kreator" dropdown; callers that omit it (the creators master table)
  * behave exactly as before — the dropdown is hidden and jenis never narrows the list.
+ *
+ * `searchLabel` only labels the input; WHICH field is matched is decided by the caller
+ * of `matches()` (creators tab pencarian by username, kalender jadwal by nama).
  */
 export function CreatorFilterProvider({
   cms,
   jenisOptions = [],
+  searchLabel = "nama kreator",
   children,
 }: {
   cms: CmOption[];
   jenisOptions?: string[];
+  searchLabel?: string;
   children: React.ReactNode;
 }) {
   const [query, setQuery] = useState("");
@@ -87,24 +101,26 @@ export function CreatorFilterProvider({
       toggleJenis,
       clearJenis,
       reset,
+      searchLabel,
       isActive: term.length > 0 || selectedCms.size > 0 || selectedJenisSet.size > 0,
-      matches: (name, ownerCpmId, jenisCreator) => {
-        if (term && !name.toLowerCase().includes(term)) return false;
+      matches: (searchValue, ownerCpmId, jenisCreator) => {
+        if (term && !(searchValue ?? "").toLowerCase().includes(term)) return false;
         if (selectedCms.size > 0 && (!ownerCpmId || !selectedCms.has(ownerCpmId))) return false;
         if (selectedJenisSet.size > 0 && (!jenisCreator || !selectedJenisSet.has(jenisCreator))) return false;
         return true;
       },
     };
-  }, [query, selectedCmIds, selectedJenis, cms, jenisOptions, toggleCm, clearCms, toggleJenis, clearJenis, reset]);
+  }, [query, selectedCmIds, selectedJenis, cms, jenisOptions, searchLabel, toggleCm, clearCms, toggleJenis, clearJenis, reset]);
 
   return <CreatorFilterContext.Provider value={value}>{children}</CreatorFilterContext.Provider>;
 }
 
-/** Search bar (nama kreator, real-time) + filter multi-select CM (+ Jenis Kreator) + reset. */
+/** Search bar (real-time) + filter multi-select CM (+ Jenis Kreator) + reset. */
 export function CreatorFilterBar() {
   const {
     query,
     setQuery,
+    searchLabel,
     cms,
     selectedCmIds,
     toggleCm,
@@ -123,8 +139,8 @@ export function CreatorFilterBar() {
         type="search"
         value={query}
         onChange={(e) => setQuery(e.target.value)}
-        placeholder="Cari nama kreator…"
-        aria-label="Cari nama kreator"
+        placeholder={`Cari ${searchLabel}…`}
+        aria-label={`Cari ${searchLabel}`}
         className="w-64 rounded-md border border-slate-300 px-3 py-2 text-sm"
       />
 

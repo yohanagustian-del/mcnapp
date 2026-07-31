@@ -65,7 +65,7 @@ const PAGE_SIZES = [10, 20, 50, 100] as const;
 const DEFAULT_PAGE_SIZE = 10;
 
 /**
- * Master creator table. Rows are filtered client-side by the shared name search +
+ * Master creator table. Rows are filtered client-side by the shared username search +
  * CM multi-select (see @/components/creator-filter) — the full list is already loaded
  * by the server component, so typing does not re-query Supabase.
  */
@@ -82,7 +82,7 @@ export function CreatorsTable({
 }) {
   const { matches, isActive: filterActive } = useCreatorFilter();
   const filteredRows = useMemo(
-    () => rows.filter((c) => matches(c.name, c.owner_cpm_id)),
+    () => rows.filter((c) => matches(c.username, c.owner_cpm_id)),
     [rows, matches]
   );
 
@@ -233,7 +233,7 @@ export function CreatorsTable({
               <tr>
                 <td colSpan={canEdit ? 23 : 22} className="px-4 py-6 text-center text-slate-400">
                   {filterActive
-                    ? "Tidak ada kreator yang cocok dengan pencarian / filter CM."
+                    ? "Tidak ada kreator yang cocok dengan pencarian username / filter CM."
                     : "Belum ada kreator."}
                 </td>
               </tr>

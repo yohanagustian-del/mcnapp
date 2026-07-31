@@ -8,12 +8,11 @@ import { latestTwoPeriods, type PeriodSummaryPoint } from "@/lib/m8/routing";
 import {
   availableMonths,
   buildMonthlyGrowth,
+  type MonthlyGrowth,
   type WeeklyGrowthInputRow,
 } from "@/lib/m8/weekly-growth";
-import { cmConfirmCampaign, cmClaimBroadcastRequest } from "../campaign-actions";
 import {
   approveAdsRequest,
-  assignCreator,
   createContract,
   createCreatorRequest,
   refreshGrowthAlerts,
@@ -24,40 +23,13 @@ import {
 import { CompactScheduleList, type CompactSlotRow } from "../../schedule/compact-list";
 import type { LiveScheduleSlot } from "@/lib/schedule/types";
 import { ComplaintReplyForm, ComplaintStatusForm } from "./complaint-forms";
+import { rupiah } from "@/lib/utils/format";
+import { WeeklyGrowthTable, type WeeklyGrowthRow } from "./weekly-growth-table";
+import { CreatorGrowthPanel, type CreatorGrowthRow } from "./creator-growth-panel";
+import { LeakTable, type LeakTableRow } from "./leak-table";
+import { CampaignRequestsTable, type CampaignRequestRow } from "./campaign-requests-table";
 
 export const dynamic = "force-dynamic";
-
-const rupiah = (n: number | null | undefined) =>
-  n === null || n === undefined ? "—" : `Rp${Math.round(Number(n)).toLocaleString("id-ID")}`;
-const pct = (n: number | null) => (n === null ? "—" : `${(n * 100).toFixed(0)}%`);
-const pct1 = (n: number | null | undefined) =>
-  n === null || n === undefined ? "—" : `${(Number(n) * 100).toFixed(1)}%`;
-
-/** Compact Rupiah for dense weekly-growth cells, e.g. Rp121,2jt / Rp850rb. */
-function rupiahRingkas(n: number | null | undefined): string {
-  if (n === null || n === undefined) return "—";
-  const v = Number(n);
-  const abs = Math.abs(v);
-  if (abs >= 1_000_000_000) return `Rp${(v / 1_000_000_000).toFixed(1).replace(".", ",")}M`;
-  if (abs >= 1_000_000) return `Rp${(v / 1_000_000).toFixed(1).replace(".", ",")}jt`;
-  if (abs >= 1_000) return `Rp${(v / 1_000).toFixed(0)}rb`;
-  return `Rp${Math.round(v).toLocaleString("id-ID")}`;
-}
-
-const WEEK_LABELS = ["W1", "W2", "W3", "W4", "W5"] as const;
-
-/** Trend arrow vs previous filled week: ▲ green up, ▼ red down, − grey flat/first week. */
-function TrendCell({ value, delta }: { value: number | null; delta: number | null }) {
-  if (value === null) return <span className="text-slate-300">—</span>;
-  let arrow = <span className="text-slate-400">−</span>;
-  if (delta !== null && delta > 0) arrow = <span className="text-green-600">▲</span>;
-  else if (delta !== null && delta < 0) arrow = <span className="text-red-600">▼</span>;
-  return (
-    <span>
-      {rupiahRingkas(value)} {arrow}
-    </span>
-  );
-}
 
 interface LeakStatusRow {
   creator_id: string;
@@ -118,20 +90,6 @@ const SEVERITY_STYLES: Record<string, string> = {
   tinggi: "bg-red-100 text-red-700",
 };
 
-/** 4-status link leakage badge colours (CLAUDE.md link_status enum). */
-const LEAK_STATUS_STYLES: Record<string, string> = {
-  via_agency: "bg-green-100 text-green-800",
-  bocor_sebagian: "bg-amber-100 text-amber-800",
-  bocor_total: "bg-red-100 text-red-700",
-  belum_ada_link: "bg-slate-100 text-slate-600",
-};
-const LEAK_STATUS_LABELS: Record<string, string> = {
-  via_agency: "Via Agency",
-  bocor_sebagian: "Bocor Sebagian",
-  bocor_total: "Bocor Total",
-  belum_ada_link: "Belum Ada Link",
-};
-
 /** Agency link effectiveness = gmv_tap / gmv_affiliate_total (fraction), null if either missing. */
 function effectiveness(row: LeakStatusRow): number | null {
   const tap = row.gmv_tap;
@@ -163,27 +121,41 @@ export default async function CmWorkspacePage({
   // Scope: CPM lihat creator sendiri; CM Lead/management lintas (§2F).
   let creatorsQuery = supabase
     .from("creators")
-    .select("id, name, level, segment, status, gmv, owner_cpm_id, ads_budget_cap")
+    .select("id, name, username, level, segment, status, gmv, owner_cpm_id, ads_budget_cap, team_members(name)")
     .order("gmv", { ascending: false })
     .limit(100);
   if (isCpm) creatorsQuery = creatorsQuery.eq("owner_cpm_id", member.id);
-  const { data: creators } = await creatorsQuery;
-  const creatorIds = (creators ?? []).map((c) => c.id);
+  const { data: creatorRows } = await creatorsQuery;
+  // team_members(name) = CM pemilik (owner_cpm_id) — dipakai filter CM di tabel client.
+  const creators = (creatorRows ?? []).map((c) => ({
+    ...c,
+    cmName: (c.team_members as { name?: string } | null)?.name ?? null,
+  }));
+  const creatorIds = creators.map((c) => c.id);
 
   // ===== M13 Jadwal Live — compact read-only preview (scope: sama seperti creators di atas) =====
   const todayIso = new Date().toISOString().slice(0, 10);
   const tomorrowIso = new Date(Date.now() + 86_400_000).toISOString().slice(0, 10);
+  type RosterCreator = {
+    id: string;
+    name: string;
+    username: string | null;
+    owner_cpm_id: string | null;
+    live_roster: boolean;
+    team_members: { name?: string } | null;
+  };
   let rosterQuery = supabase
     .from("creators")
-    .select("id, name, live_roster")
+    .select("id, name, username, owner_cpm_id, live_roster, team_members(name)")
     .eq("live_roster", true)
     .limit(300);
   if (isCpm) rosterQuery = rosterQuery.eq("owner_cpm_id", member.id);
-  const { data: rosterCreators } = canViewSchedule
+  const { data: rosterCreatorRows } = canViewSchedule
     ? await rosterQuery
-    : { data: [] as { id: string; name: string; live_roster: boolean }[] };
-  const rosterIds = (rosterCreators ?? []).map((c) => c.id);
-  const rosterNameById = new Map((rosterCreators ?? []).map((c) => [c.id, c.name]));
+    : { data: [] as RosterCreator[] };
+  const rosterCreators = (rosterCreatorRows ?? []) as unknown as RosterCreator[];
+  const rosterIds = rosterCreators.map((c) => c.id);
+  const rosterById = new Map(rosterCreators.map((c) => [c.id, c]));
   const { data: todayTomorrowSlots } = rosterIds.length
     ? await supabase
         .from("live_schedule_slots")
@@ -192,16 +164,22 @@ export default async function CmWorkspacePage({
         .in("schedule_date", [todayIso, tomorrowIso])
         .order("schedule_date", { ascending: true })
     : { data: [] as LiveScheduleSlot[] };
-  const scheduleRows: CompactSlotRow[] = ((todayTomorrowSlots ?? []) as LiveScheduleSlot[]).map((s) => ({
-    slot: s,
-    creatorName: rosterNameById.get(s.creator_id) ?? s.creator_id,
-  }));
+  const scheduleRows: CompactSlotRow[] = ((todayTomorrowSlots ?? []) as LiveScheduleSlot[]).map((s) => {
+    const rc = rosterById.get(s.creator_id);
+    return {
+      slot: s,
+      creatorName: rc?.name ?? s.creator_id,
+      creatorUsername: rc?.username ?? null,
+      ownerCpmId: rc?.owner_cpm_id ?? null,
+      cmName: rc?.team_members?.name ?? null,
+    };
+  });
   const creatorsWithTomorrowSlot = new Set(
     ((todayTomorrowSlots ?? []) as LiveScheduleSlot[])
       .filter((s) => s.schedule_date === tomorrowIso)
       .map((s) => s.creator_id)
   );
-  const missingTomorrow = (rosterCreators ?? [])
+  const missingTomorrow = rosterCreators
     .filter((c) => !creatorsWithTomorrowSlot.has(c.id))
     .map((c) => c.name);
 
@@ -278,31 +256,27 @@ export default async function CmWorkspacePage({
       createdAt: r.created_at,
     }));
   }
-  const monthlyGrowth = selectedMonth ? buildMonthlyGrowth(monthlyRows, selectedMonth) : new Map();
-  // Total per minggu + total bulan lintas semua creator di scope (baris TOTAL).
-  const weeklyTotals: (number | null)[] = new Array(5).fill(null);
-  let grandMonthTotal = 0;
-  for (const g of monthlyGrowth.values()) {
-    grandMonthTotal += g.monthTotal;
-    for (let i = 0; i < 5; i++) {
-      if (g.weeks[i] !== null) {
-        weeklyTotals[i] = (weeklyTotals[i] ?? 0) + (g.weeks[i] as number);
-      }
-    }
-  }
-  const weeklyTotalDeltas: (number | null)[] = new Array(5).fill(null);
-  {
-    let lastFilledIdx: number | null = null;
-    for (let i = 0; i < 5; i++) {
-      const v = weeklyTotals[i];
-      if (v === null) continue;
-      if (lastFilledIdx !== null) {
-        const prev = weeklyTotals[lastFilledIdx] as number;
-        weeklyTotalDeltas[i] = prev !== 0 ? (v - prev) / prev : null;
-      }
-      lastFilledIdx = i;
-    }
-  }
+  const monthlyGrowth = selectedMonth
+    ? buildMonthlyGrowth(monthlyRows, selectedMonth)
+    : new Map<string, MonthlyGrowth>();
+  // Hanya creator yang punya minimal satu minggu terisi bulan ini — creator tanpa upload
+  // adalah noise, bukan "Rp0". Baris TOTAL dihitung di klien dari baris terfilter.
+  const weeklyGrowthRows: WeeklyGrowthRow[] = creators
+    .filter((c) => monthlyGrowth.has(c.id))
+    .map((c) => {
+      const g = monthlyGrowth.get(c.id)!;
+      return {
+        creatorId: c.id,
+        name: c.name,
+        username: c.username ?? null,
+        ownerCpmId: c.owner_cpm_id ?? null,
+        cmName: c.cmName,
+        weeks: g.weeks,
+        deltas: g.deltas,
+        monthTotal: g.monthTotal,
+        monthGrowthPct: g.monthGrowthPct,
+      };
+    });
 
   let campaignReqQuery = supabase
     .from("campaign_requests")
@@ -359,6 +333,44 @@ export default async function CmWorkspacePage({
   const scopedAlerts = (alerts ?? []).filter((a) => !isCpm || creatorIds.includes(a.entity_id ?? ""));
   const name = (rel: unknown) => (rel as { name?: string } | null)?.name ?? "—";
 
+  // Opsi dropdown "pilih kreator" pada req broadcast (dipakai komponen klien).
+  const creatorPickOptions = creators.map((c) => ({ id: c.id, name: c.name }));
+
+  const campaignRequestRows: CampaignRequestRow[] = (campaignReqs ?? []).map((r) => ({
+    id: r.id,
+    dealId: r.deal_id,
+    brandName: (r.brand_deals as { brand_name?: string } | null)?.brand_name ?? null,
+    creatorId: r.creator_id,
+    creatorName: (r.creators as { name?: string } | null)?.name ?? null,
+    routeType: r.route_type,
+    level2Category: r.level2_category,
+    requestText: r.request_text,
+    cmConfirmStatus: r.cm_confirm_status,
+    needsBrandAcc: Boolean(r.needs_brand_acc),
+    brandAccStatus: r.brand_acc_status,
+    finalStatus: r.final_status,
+    handedOverAt: r.handed_over_at,
+  }));
+
+  // Baris tabel "Creator & Growth Mingguan" — delta dihitung di sini (server), komponen
+  // klien hanya search/filter/paginasi (CLAUDE.md #4: tidak ada perhitungan ulang di UI).
+  const creatorGrowthRows: CreatorGrowthRow[] = creators.map((c) => {
+    const g = growth.get(c.id);
+    return {
+      creatorId: c.id,
+      name: c.name,
+      username: c.username ?? null,
+      ownerCpmId: c.owner_cpm_id ?? null,
+      cmName: c.cmName,
+      level: c.level,
+      segment: c.segment,
+      current: g ? g.current : null,
+      periodStart: g ? g.periodStart : null,
+      periodEnd: g ? g.periodEnd : null,
+      delta: g && g.previous ? (g.current - g.previous) / g.previous : null,
+    };
+  });
+
   // M7 creator requirements surfaced so CM knows who to recruit/bind.
   const projectReqs = await getProjectRequirements(supabase);
 
@@ -389,10 +401,25 @@ export default async function CmWorkspacePage({
   for (const r of (leakStatusRows ?? []) as LeakStatusRow[]) {
     if (!latestLeakByCreator.has(r.creator_id)) latestLeakByCreator.set(r.creator_id, r);
   }
-  const creatorNameById = new Map((creators ?? []).map((c) => [c.id, c.name]));
-  const leakRows = [...latestLeakByCreator.values()].sort(
-    (a, b) => Number(b.gmv_bocor ?? 0) - Number(a.gmv_bocor ?? 0)
-  );
+  const creatorById = new Map(creators.map((c) => [c.id, c]));
+  const leakRows: LeakTableRow[] = [...latestLeakByCreator.values()]
+    .sort((a, b) => Number(b.gmv_bocor ?? 0) - Number(a.gmv_bocor ?? 0))
+    .map((r) => {
+      const c = creatorById.get(r.creator_id);
+      return {
+        creatorId: r.creator_id,
+        creatorName: c?.name ?? "—",
+        username: c?.username ?? null,
+        ownerCpmId: c?.owner_cpm_id ?? null,
+        cmName: c?.cmName ?? null,
+        week: r.week,
+        linkStatus: r.link_status,
+        gmvBocor: r.gmv_bocor,
+        leakRatio: r.leak_ratio,
+        effectiveness: effectiveness(r),
+        source: r.source,
+      };
+    });
   const latestLeakWeek: LeakWeekSummaryRow | null = (leakWeekSummary?.[0] as LeakWeekSummaryRow) ?? null;
 
   // ===== M9 Komplain Kreator — surfaced ke CM Workspace (sebelumnya tak tampil di mana pun) =====
@@ -451,6 +478,7 @@ export default async function CmWorkspacePage({
             rows={scheduleRows}
             todayIso={todayIso}
             emptyLabel="Belum ada jadwal live untuk hari ini/besok di scope Anda."
+            filterable
           />
           {missingTomorrow.length > 0 && (
             <p className="-mt-4 rounded-md bg-red-50 p-2 text-xs text-red-700">
@@ -491,62 +519,7 @@ export default async function CmWorkspacePage({
             Belum ada data GMV mingguan untuk creator di scope ini — upload via /ingest.
           </p>
         ) : (
-          <div className="mt-3 overflow-x-auto rounded-lg border border-slate-200 bg-white">
-            <table className="min-w-full text-sm">
-              <thead className="bg-slate-50 text-left text-xs uppercase text-slate-500">
-                <tr>
-                  <th className="px-4 py-3">Kreator</th>
-                  {WEEK_LABELS.map((w) => (
-                    <th key={w} className="px-4 py-3">{w}</th>
-                  ))}
-                  <th className="px-4 py-3">Total Bulan</th>
-                  <th className="px-4 py-3">Growth</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100">
-                {(creators ?? [])
-                  // Only creators with at least one filled week this month — creators
-                  // without any upload for the selected month are noise, not "Rp0".
-                  .filter((c) => monthlyGrowth.has(c.id))
-                  .map((c) => {
-                    const g = monthlyGrowth.get(c.id)!;
-                    return (
-                      <tr key={c.id}>
-                        <td className="px-4 py-2 font-medium">
-                          {c.name} <span className="text-xs text-slate-400">{c.id}</span>
-                        </td>
-                        {WEEK_LABELS.map((_, i) => (
-                          <td key={i} className="px-4 py-2">
-                            <TrendCell value={g.weeks[i]} delta={g.deltas[i]} />
-                          </td>
-                        ))}
-                        <td className="px-4 py-2 font-medium">{rupiah(g.monthTotal)}</td>
-                        <td className={`px-4 py-2 ${g.monthGrowthPct !== null && g.monthGrowthPct < 0 ? "text-red-600" : "text-green-700"}`}>
-                          {pct(g.monthGrowthPct)}
-                        </td>
-                      </tr>
-                    );
-                  })}
-                {(creators ?? []).filter((c) => monthlyGrowth.has(c.id)).length === 0 && (
-                  <tr><td colSpan={8} className="px-4 py-6 text-center text-slate-400">Belum ada data GMV mingguan untuk bulan ini di scope Anda.</td></tr>
-                )}
-              </tbody>
-              {(creators ?? []).some((c) => monthlyGrowth.has(c.id)) && (
-                <tfoot className="border-t border-slate-200 bg-slate-50 font-semibold">
-                  <tr>
-                    <td className="px-4 py-2">TOTAL</td>
-                    {WEEK_LABELS.map((_, i) => (
-                      <td key={i} className="px-4 py-2">
-                        <TrendCell value={weeklyTotals[i]} delta={weeklyTotalDeltas[i]} />
-                      </td>
-                    ))}
-                    <td className="px-4 py-2">{rupiah(grandMonthTotal)}</td>
-                    <td className="px-4 py-2">—</td>
-                  </tr>
-                </tfoot>
-              )}
-            </table>
-          </div>
+          <WeeklyGrowthTable rows={weeklyGrowthRows} />
         )}
       </section>
 
@@ -558,55 +531,12 @@ export default async function CmWorkspacePage({
             <button type="submit" className={btn}>Scan Alert Performa (&gt;{""}ambang m8.perf_drop)</button>
           </form>
         </div>
-        {scopedAlerts.length > 0 && (
-          <div className="mt-3 space-y-1 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800">
-            {scopedAlerts.map((a) => <p key={a.id}>⚠ {a.message}</p>)}
-          </div>
-        )}
-        <div className="mt-3 overflow-x-auto rounded-lg border border-slate-200 bg-white">
-          <table className="min-w-full text-sm">
-            <thead className="bg-slate-50 text-left text-xs uppercase text-slate-500">
-              <tr>
-                <th className="px-4 py-3">Creator</th>
-                <th className="px-4 py-3">Level</th>
-                <th className="px-4 py-3">Segmen</th>
-                <th className="px-4 py-3">GMV periode terakhir</th>
-                <th className="px-4 py-3">vs periode lalu</th>
-                {canAssign && <th className="px-4 py-3">Re-assign CPM</th>}
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100">
-              {(creators ?? []).map((c) => {
-                const g = growth.get(c.id);
-                const delta = g && g.previous ? (g.current - g.previous) / g.previous : null;
-                return (
-                  <tr key={c.id}>
-                    <td className="px-4 py-2 font-medium">{c.name} <span className="text-xs text-slate-400">{c.id}</span></td>
-                    <td className="px-4 py-2">{c.level ? `L${c.level}` : "—"} {c.level && c.level < 6 && <span className="text-xs text-slate-400">→ L{c.level + 1}</span>}</td>
-                    <td className="px-4 py-2">{c.segment ?? "—"}</td>
-                    <td className="px-4 py-2">{g ? `${rupiah(g.current)} (${g.periodStart}–${g.periodEnd})` : "—"}</td>
-                    <td className={`px-4 py-2 ${delta !== null && delta < 0 ? "text-red-600" : "text-green-700"}`}>{pct(delta)}</td>
-                    {canAssign && (
-                      <td className="px-4 py-2">
-                        <form action={assignCreator} className="flex items-center gap-1">
-                          <input type="hidden" name="creator_id" value={c.id} />
-                          <select name="owner_cpm_id" defaultValue={c.owner_cpm_id ?? ""} className="rounded-md border border-slate-300 px-2 py-1 text-xs">
-                            <option value="">— pilih CPM —</option>
-                            {(cpms ?? []).map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
-                          </select>
-                          <button type="submit" className={`${btnSmall} bg-slate-200 text-slate-700 hover:bg-slate-300`}>Assign</button>
-                        </form>
-                      </td>
-                    )}
-                  </tr>
-                );
-              })}
-              {(creators ?? []).length === 0 && (
-                <tr><td colSpan={6} className="px-4 py-6 text-center text-slate-400">Belum ada creator di scope ini.</td></tr>
-              )}
-            </tbody>
-          </table>
-        </div>
+        <CreatorGrowthPanel
+          rows={creatorGrowthRows}
+          alerts={scopedAlerts.map((a) => ({ id: a.id, message: a.message }))}
+          cpms={(cpms ?? []).map((m) => ({ id: m.id, name: m.name }))}
+          canAssign={canAssign}
+        />
       </section>
 
       {/* ===== Link Leakage Kreator (per minggu) — rollup dari engine M4 / artifak ===== */}
@@ -623,59 +553,7 @@ export default async function CmWorkspacePage({
             {rupiah(latestLeakWeek.gmv_tap)} · Potensi bocor {rupiah(latestLeakWeek.gmv_leak_potential)}
           </p>
         )}
-        <div className="mt-3 overflow-x-auto rounded-lg border border-slate-200 bg-white">
-          <table className="min-w-full text-sm">
-            <thead className="bg-slate-50 text-left text-xs uppercase text-slate-500">
-              <tr>
-                <th className="px-4 py-3">Kreator</th>
-                <th className="px-4 py-3">Minggu</th>
-                <th className="px-4 py-3">Status</th>
-                <th className="px-4 py-3">GMV Bocor</th>
-                <th className="px-4 py-3">Leak Ratio</th>
-                <th className="px-4 py-3">Efektivitas Link</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100">
-              {leakRows.map((r) => (
-                <tr key={r.creator_id}>
-                  <td className="px-4 py-2 font-medium">
-                    {creatorNameById.get(r.creator_id) ?? "—"}{" "}
-                    <span className="text-xs text-slate-400">{r.creator_id}</span>
-                  </td>
-                  <td className="px-4 py-2">
-                    {r.week}
-                    {r.source === "artifact" && (
-                      <span className="ml-1 rounded bg-indigo-100 px-1 text-[10px] text-indigo-700">artifak</span>
-                    )}
-                    {r.source === "platform" && (
-                      <span className="ml-1 rounded bg-emerald-100 px-1 text-[10px] text-emerald-700">platform</span>
-                    )}
-                  </td>
-                  <td className="px-4 py-2">
-                    {r.link_status === null ? (
-                      <span
-                        className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-500"
-                        title="Status tidak tersedia dari artifak format ringkas (v2)"
-                      >
-                        —
-                      </span>
-                    ) : (
-                      <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${LEAK_STATUS_STYLES[r.link_status] ?? ""}`}>
-                        {LEAK_STATUS_LABELS[r.link_status] ?? r.link_status}
-                      </span>
-                    )}
-                  </td>
-                  <td className="px-4 py-2">{rupiah(r.gmv_bocor)}</td>
-                  <td className="px-4 py-2">{pct1(r.leak_ratio)}</td>
-                  <td className="px-4 py-2">{pct1(effectiveness(r))}</td>
-                </tr>
-              ))}
-              {leakRows.length === 0 && (
-                <tr><td colSpan={6} className="px-4 py-6 text-center text-slate-400">Belum ada data link leakage untuk creator di scope ini.</td></tr>
-              )}
-            </tbody>
-          </table>
-        </div>
+        <LeakTable rows={leakRows} />
       </section>
 
       {/* ===== M9 Komplain Kreator ===== */}
@@ -752,94 +630,7 @@ export default async function CmWorkspacePage({
           Req kreator (langsung ke Anda) + req kategori/broadcast (BizDev tidak sebut kreator —
           Anda pilih kreator sendiri lalu konfirmasi). §2E.1.
         </p>
-        <div className="mt-3 overflow-x-auto rounded-lg border border-slate-200 bg-white">
-          <table className="min-w-full text-sm">
-            <thead className="bg-slate-50 text-left text-xs uppercase text-slate-500">
-              <tr>
-                <th className="px-4 py-3">Brand / Deal</th>
-                <th className="px-4 py-3">Sumber / Creator</th>
-                <th className="px-4 py-3">Konfirmasi CM</th>
-                <th className="px-4 py-3">Acc Brand</th>
-                <th className="px-4 py-3">Status</th>
-                <th className="px-4 py-3">Aksi</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100">
-              {(campaignReqs ?? []).map((r) => {
-                const isBroadcast = r.route_type === "category" || r.route_type === "broadcast";
-                const needsPick = isBroadcast && !r.creator_id;
-                return (
-                <tr key={r.id}>
-                  <td className="px-4 py-2">
-                    {r.deal_id ? <>{name(r.brand_deals)} <span className="text-xs text-slate-400">{r.deal_id}</span></> : <span className="text-slate-400">tanpa deal</span>}
-                    {r.request_text && (
-                      <span className="mt-0.5 block max-w-xs text-xs text-slate-500">“{r.request_text}”</span>
-                    )}
-                  </td>
-                  <td className="px-4 py-2">
-                    {r.route_type === "category" ? (
-                      <span className="rounded-full bg-teal-100 px-2 py-0.5 text-xs font-medium text-teal-800">Kategori: {r.level2_category}</span>
-                    ) : r.route_type === "broadcast" ? (
-                      <span className="rounded-full bg-purple-100 px-2 py-0.5 text-xs font-medium text-purple-800">Broadcast</span>
-                    ) : (
-                      <>{name(r.creators)} <span className="text-xs text-slate-400">{r.creator_id}</span></>
-                    )}
-                    {isBroadcast && r.creator_id && (
-                      <span className="mt-0.5 block text-xs text-slate-600">→ {name(r.creators)} <span className="text-slate-400">{r.creator_id}</span></span>
-                    )}
-                  </td>
-                  <td className="px-4 py-2">{r.cm_confirm_status}</td>
-                  <td className="px-4 py-2">{r.needs_brand_acc ? r.brand_acc_status : "tidak perlu"}</td>
-                  <td className="px-4 py-2">
-                    <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${
-                      r.final_status === "fix" ? "bg-green-100 text-green-800"
-                      : r.final_status === "batal" ? "bg-red-100 text-red-700"
-                      : "bg-amber-100 text-amber-800"}`}>
-                      {r.final_status}{r.handed_over_at ? " · handed over" : ""}
-                    </span>
-                  </td>
-                  <td className="px-4 py-2">
-                    {r.final_status === "proses" && r.cm_confirm_status === "menunggu" && !needsPick && (
-                      <div className="flex gap-1">
-                        {(["mau", "tidak"] as const).map((d) => (
-                          <form key={d} action={cmConfirmCampaign}>
-                            <input type="hidden" name="req_id" value={r.id} />
-                            <input type="hidden" name="decision" value={d} />
-                            <button type="submit" className={`${btnSmall} ${d === "mau" ? "bg-green-600 text-white hover:bg-green-500" : "bg-red-100 text-red-700 hover:bg-red-200"}`}>
-                              Creator {d}
-                            </button>
-                          </form>
-                        ))}
-                      </div>
-                    )}
-                    {r.final_status === "proses" && r.cm_confirm_status === "menunggu" && needsPick && (
-                      <div className="flex flex-col gap-1">
-                        <form action={cmClaimBroadcastRequest} className="flex items-center gap-1">
-                          <input type="hidden" name="req_id" value={r.id} />
-                          <input type="hidden" name="decision" value="mau" />
-                          <select name="creator_id" required className="rounded-md border border-slate-300 px-2 py-1 text-xs">
-                            <option value="">— pilih kreator —</option>
-                            {(creators ?? []).map((c) => <option key={c.id} value={c.id}>{c.name} ({c.id})</option>)}
-                          </select>
-                          <button type="submit" className={`${btnSmall} bg-green-600 text-white hover:bg-green-500`}>Pilih & mau</button>
-                        </form>
-                        <form action={cmClaimBroadcastRequest}>
-                          <input type="hidden" name="req_id" value={r.id} />
-                          <input type="hidden" name="decision" value="tidak" />
-                          <button type="submit" className={`${btnSmall} bg-red-100 text-red-700 hover:bg-red-200`}>Tidak ada yang cocok</button>
-                        </form>
-                      </div>
-                    )}
-                  </td>
-                </tr>
-                );
-              })}
-              {(campaignReqs ?? []).length === 0 && (
-                <tr><td colSpan={6} className="px-4 py-6 text-center text-slate-400">Belum ada req campaign masuk.</td></tr>
-              )}
-            </tbody>
-          </table>
-        </div>
+        <CampaignRequestsTable rows={campaignRequestRows} creators={creatorPickOptions} />
       </section>
 
       {/* ===== §2A.4 Req creator (sample/ads/HSL) + §2A.5 shop potensial ===== */}
@@ -850,7 +641,7 @@ export default async function CmWorkspacePage({
             <form action={createCreatorRequest} className="mt-3 grid gap-2 rounded-lg border border-slate-200 bg-white p-4 sm:grid-cols-2">
               <select name="creator_id" required className={input}>
                 <option value="">— creator —</option>
-                {(creators ?? []).map((c) => <option key={c.id} value={c.id}>{c.name} ({c.id})</option>)}
+                {creators.map((c) => <option key={c.id} value={c.id}>{c.name} ({c.id})</option>)}
               </select>
               <select name="type" required className={input}>
                 <option value="sample">Sample produk</option>
@@ -949,7 +740,7 @@ export default async function CmWorkspacePage({
             </select>
             <select name="creator_id" className={input}>
               <option value="">Untuk creator (opsional)</option>
-              {(creators ?? []).map((c) => <option key={c.id} value={c.id}>{c.name} ({c.id})</option>)}
+              {creators.map((c) => <option key={c.id} value={c.id}>{c.name} ({c.id})</option>)}
             </select>
             <button type="submit" className={`${btn} lg:col-span-2`}>Daftarkan Deal CM</button>
           </form>
@@ -1003,7 +794,7 @@ export default async function CmWorkspacePage({
           <form action={createContract} className="mt-3 grid gap-2 rounded-lg border border-slate-200 bg-white p-4 sm:grid-cols-2 lg:grid-cols-4">
             <select name="creator_id" required className={input}>
               <option value="">— creator TC/Celeb —</option>
-              {(creators ?? []).filter((c) => c.segment === "tc" || c.segment === "celeb")
+              {creators.filter((c) => c.segment === "tc" || c.segment === "celeb")
                 .map((c) => <option key={c.id} value={c.id}>{c.name} ({c.segment})</option>)}
             </select>
             <input name="contract_doc" placeholder="Link dokumen kontrak" className={input} />
