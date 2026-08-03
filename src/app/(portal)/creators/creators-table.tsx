@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { useCreatorFilter } from "@/components/creator-filter";
 import { MAX_BULK_DELETE } from "@/lib/creators/delete";
 import { creatorClassLabel } from "@/lib/creators/creator-class";
@@ -108,7 +108,10 @@ function followersValue(raw: string | null): number | null {
   return Number.isFinite(n) ? n * mult : null;
 }
 
-const td = "px-3 py-2 whitespace-nowrap";
+// Padding dirapatkan (px-2) dan font dikecilkan di <table>: 25 kolom tidak akan
+// pernah muat di laptop, tapi preset "Ringkas" + sel yang lebih rapat membuat
+// kolom yang benar-benar dipakai sehari-hari muat tanpa scroll horizontal.
+const td = "px-2 py-2 whitespace-nowrap";
 
 /** Badge per kelas kreator — Reguler netral, dua kelas lain diberi warna supaya menonjol. */
 const CREATOR_CLASS_BADGE: Record<string, string> = {
@@ -128,55 +131,202 @@ const DEFAULT_PAGE_SIZE = 10;
 /** Nilai yang bisa dibandingkan untuk pengurutan; null = sel kosong. */
 type SortValue = string | number | null;
 
+/** Yang dibutuhkan sel selain barisnya sendiri. */
+interface CellContext {
+  nowMs: number;
+  canUpload: boolean;
+}
+
 interface TableColumn {
-  /** Judul kolom. */
+  /** Judul kolom — sekaligus kunci identitas kolom (dipakai state urut & pilih kolom). */
   label: string;
   /** Keterangan kecil di samping judul (mis. "(avg/bln)"). */
   hint?: string;
+  /**
+   * Ikut tampil pada preset "Ringkas" (tampilan awal). Kolom di luar preset ini
+   * tetap ada, tinggal dicentang lewat menu Kolom.
+   */
+  compact?: boolean;
   /**
    * Nilai pengurutan baris ini. Kolom tanpa `value` tidak bisa diklik —
    * dipakai untuk kolom aksi/centang yang tidak punya urutan bermakna.
    */
   value?: (c: CreatorTableRow, nowMs: number) => SortValue;
+  /** Isi sel. Header DAN body sama-sama dibangun dari daftar ini, jadi kolom yang
+   *  disembunyikan tidak mungkin membuat header & isi bergeser. */
+  cell: (c: CreatorTableRow, ctx: CellContext) => ReactNode;
+  /** Kelas <td>; default `td` (nowrap). */
+  className?: string;
 }
 
 /**
- * Definisi kolom tabel — URUTANNYA HARUS SAMA dengan urutan <td> di body.
- * Header dibangun dari daftar ini supaya tombol urut tidak perlu ditulis 25 kali,
- * dan supaya menambah kolom tidak bisa lupa menambah pengurutnya.
+ * Definisi kolom tabel kreator — satu sumber untuk header, isi sel, pengurutan,
+ * dan menu pilih-kolom. Menambah kolom = menambah satu entri di sini.
+ *
+ * `compact: true` menandai kolom yang paling sering dipakai CM sehari-hari;
+ * itulah yang tampil secara default supaya tabel muat di layar laptop tanpa
+ * scroll horizontal (sisanya tinggal dicentang).
  */
 const COLUMNS: TableColumn[] = [
-  { label: "Username", value: (c) => c.username },
-  { label: "Nama Creator", value: (c) => c.name },
-  { label: "No HP", value: (c) => c.phone },
-  { label: "Platform", value: (c) => c.platform },
-  { label: "Jenis", value: (c) => c.jenis_creator },
-  { label: "Kelas Kreator", value: (c) => creatorClassLabel(c.creator_class) },
-  { label: "Niche (Top 3)", value: (c) => c.top_niches?.[0] ?? c.niche },
-  { label: "Followers", value: (c) => followersValue(c.followers) },
-  { label: "Kualitas", value: (c) => c.content_quality },
-  { label: "GMV Total", hint: "(avg/bln)", value: (c) => c.gmv },
-  { label: "GMV Live", hint: "(avg/bln)", value: (c) => c.gmv_live },
-  { label: "GMV Video", hint: "(avg/bln)", value: (c) => c.gmv_video },
-  // Fraksi (0,22) dan nilai legacy persen (22) disamakan dulu, seperti formatShare.
+  {
+    label: "Username",
+    compact: true,
+    value: (c) => c.username,
+    className: `${td} font-medium`,
+    cell: (c) => (
+      <>
+        {c.profile_link ? (
+          <a href={c.profile_link} target="_blank" className="text-blue-700 hover:underline">
+            {c.username ?? "—"}
+          </a>
+        ) : (
+          c.username ?? "—"
+        )}
+        <span className="ml-1 font-mono text-[10px] text-slate-400">{c.id}</span>
+      </>
+    ),
+  },
+  {
+    label: "Nama Creator",
+    compact: true,
+    value: (c) => c.name,
+    cell: (c) => (
+      <Link href={`/creators/${c.id}`} className="text-blue-700 hover:underline">
+        {c.name}
+      </Link>
+    ),
+  },
+  { label: "No HP", value: (c) => c.phone, cell: (c) => c.phone ?? "—" },
+  {
+    label: "Platform",
+    value: (c) => c.platform,
+    className: `${td} capitalize`,
+    cell: (c) => c.platform ?? "—",
+  },
+  { label: "Jenis", value: (c) => c.jenis_creator, cell: (c) => c.jenis_creator ?? "—" },
+  {
+    label: "Kelas Kreator",
+    compact: true,
+    value: (c) => creatorClassLabel(c.creator_class),
+    cell: (c) => (
+      <span className={creatorClassBadge(c.creator_class)}>{creatorClassLabel(c.creator_class)}</span>
+    ),
+  },
+  {
+    label: "Niche (Top 3)",
+    value: (c) => c.top_niches?.[0] ?? c.niche,
+    className: "px-2 py-2",
+    cell: (c) => {
+      const niches: string[] = c.top_niches ?? (c.niche ? [c.niche] : []);
+      if (!niches.length) return "—";
+      return (
+        <span className="flex flex-wrap gap-1">
+          {niches.slice(0, 3).map((n) => (
+            <span key={n} className="rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-700">
+              {n}
+            </span>
+          ))}
+        </span>
+      );
+    },
+  },
+  {
+    label: "Followers",
+    compact: true,
+    value: (c) => followersValue(c.followers),
+    cell: (c) => c.followers ?? "—",
+  },
+  { label: "Kualitas", value: (c) => c.content_quality, cell: (c) => c.content_quality ?? "—" },
+  { label: "GMV Total", hint: "(avg/bln)", compact: true, value: (c) => c.gmv, cell: (c) => formatRp(c.gmv) },
+  { label: "GMV Live", hint: "(avg/bln)", value: (c) => c.gmv_live, cell: (c) => formatRp(c.gmv_live) },
+  { label: "GMV Video", hint: "(avg/bln)", value: (c) => c.gmv_video, cell: (c) => formatRp(c.gmv_video) },
   {
     label: "Sharing Komisi",
-    value: (c) => (c.commission_share == null ? null : c.commission_share <= 1 ? c.commission_share * 100 : c.commission_share),
+    compact: true,
+    // Fraksi (0,22) dan nilai legacy persen (22) disamakan dulu, seperti formatShare.
+    value: (c) =>
+      c.commission_share == null
+        ? null
+        : c.commission_share <= 1
+          ? c.commission_share * 100
+          : c.commission_share,
+    cell: (c) => formatShare(c.commission_share),
   },
-  { label: "RC Live", value: (c) => c.rc_live },
-  { label: "RC Video", value: (c) => c.rc_video },
-  { label: "Rate Card (Rp)", value: (c) => c.rate_card },
-  { label: "CM", value: (c) => c.cmName },
-  { label: "Level", value: (c) => c.level },
+  {
+    label: "RC Live",
+    value: (c) => c.rc_live,
+    className: `${td} max-w-[160px] truncate`,
+    cell: (c) => <span title={c.rc_live ?? ""}>{c.rc_live ?? "—"}</span>,
+  },
+  {
+    label: "RC Video",
+    value: (c) => c.rc_video,
+    className: `${td} max-w-[160px] truncate`,
+    cell: (c) => <span title={c.rc_video ?? ""}>{c.rc_video ?? "—"}</span>,
+  },
+  {
+    label: "Rate Card (Rp)",
+    value: (c) => c.rate_card,
+    className: "px-2 py-2",
+    cell: (c, ctx) =>
+      ctx.canUpload ? (
+        <form action={updateRateCard} className="flex items-center gap-1">
+          <input type="hidden" name="creator_id" value={c.id} />
+          <input
+            name="rate_card"
+            defaultValue={c.rate_card ?? ""}
+            placeholder="—"
+            aria-label={`Rate card ${c.username ?? c.name}`}
+            className="w-20 rounded border border-slate-200 px-1.5 py-1 text-xs"
+          />
+          <button type="submit" className="rounded bg-slate-100 px-1.5 py-1 text-xs hover:bg-slate-200">
+            ✓
+          </button>
+        </form>
+      ) : (
+        formatRp(c.rate_card)
+      ),
+  },
+  { label: "CM", compact: true, value: (c) => c.cmName, cell: (c) => c.cmName ?? "—" },
+  { label: "Level", compact: true, value: (c) => c.level, cell: (c) => (c.level ? `L${c.level}` : "—") },
   // Tanggal ISO ("2026-01-31") urut leksikografis = urut kronologis.
-  { label: "Join", value: (c) => c.join_date },
-  { label: "End Date", value: (c) => c.contract_end_date },
-  { label: "Sisa Kontrak", value: (c, nowMs) => contractDays(c.join_date, c.contract_end_date, nowMs) },
-  { label: "Domisili", value: (c) => c.domisili },
-  { label: "Alamat Lengkap", value: (c) => c.alamat },
-  { label: "UID", value: (c) => c.uid },
-  { label: "Status", value: (c) => c.status },
+  { label: "Join", value: (c) => c.join_date, cell: (c) => c.join_date ?? "—" },
+  {
+    label: "End Date",
+    compact: true,
+    value: (c) => c.contract_end_date,
+    cell: (c) => c.contract_end_date ?? "—",
+  },
+  {
+    label: "Sisa Kontrak",
+    compact: true,
+    value: (c, nowMs) => contractDays(c.join_date, c.contract_end_date, nowMs),
+    cell: (c, ctx) => {
+      const r = contractRemaining(c.join_date, c.contract_end_date, ctx.nowMs);
+      return <span className={r.danger ? "font-medium text-red-600" : undefined}>{r.label}</span>;
+    },
+  },
+  { label: "Domisili", value: (c) => c.domisili, cell: (c) => c.domisili ?? "—" },
+  {
+    label: "Alamat Lengkap",
+    value: (c) => c.alamat,
+    className: "max-w-[220px] truncate px-2 py-2",
+    cell: (c) => <span title={c.alamat ?? ""}>{c.alamat ?? "—"}</span>,
+  },
+  {
+    label: "UID",
+    value: (c) => c.uid,
+    className: `${td} font-mono text-[10px] text-slate-400`,
+    cell: (c) => c.uid ?? "—",
+  },
+  { label: "Status", compact: true, value: (c) => c.status, cell: (c) => c.status },
 ];
+
+/** Label kolom yang tampil pada preset "Ringkas". */
+const COMPACT_LABELS = COLUMNS.filter((c) => c.compact).map((c) => c.label);
+const ALL_LABELS = COLUMNS.map((c) => c.label);
+/** Pilihan kolom disimpan per-browser supaya tidak perlu diatur ulang tiap kunjungan. */
+const COLUMN_PREF_KEY = "mcn.creators.columns.v1";
 
 type SortDir = "asc" | "desc";
 
@@ -248,6 +398,54 @@ export function CreatorsTable({
   // kembali ke urutan bawaan, jadi user selalu bisa membatalkan pengurutan.
   const [sort, setSort] = useState<{ label: string; dir: SortDir } | null>(null);
 
+  // Kolom yang ditampilkan. Nilai awal = preset "Ringkas" (sama di server & klien
+  // supaya tidak hydration-mismatch); preferensi tersimpan dibaca setelah mount.
+  const [shownLabels, setShownLabels] = useState<string[]>(COMPACT_LABELS);
+  const [columnMenuOpen, setColumnMenuOpen] = useState(false);
+
+  useEffect(() => {
+    try {
+      const saved = window.localStorage.getItem(COLUMN_PREF_KEY);
+      if (!saved) return;
+      const parsed: unknown = JSON.parse(saved);
+      if (!Array.isArray(parsed)) return;
+      // Saring terhadap ALL_LABELS: kolom yang sudah dihapus/diganti namanya di
+      // kode tidak boleh menghidupkan kembali entri usang dari localStorage.
+      const valid = ALL_LABELS.filter((l) => parsed.includes(l));
+      if (valid.length > 0) setShownLabels(valid);
+    } catch {
+      // localStorage diblokir / JSON rusak → pakai preset bawaan saja.
+    }
+  }, []);
+
+  const applyColumns = useCallback((labels: string[]) => {
+    const ordered = ALL_LABELS.filter((l) => labels.includes(l));
+    setShownLabels(ordered);
+    try {
+      window.localStorage.setItem(COLUMN_PREF_KEY, JSON.stringify(ordered));
+    } catch {
+      // Preferensi gagal disimpan bukan alasan membatalkan perubahan tampilan.
+    }
+  }, []);
+
+  const toggleColumn = useCallback(
+    (labelToToggle: string) => {
+      const next = shownLabels.includes(labelToToggle)
+        ? shownLabels.filter((l) => l !== labelToToggle)
+        : [...shownLabels, labelToToggle];
+      // Minimal satu kolom harus tersisa — tabel tanpa kolom tidak bisa dipulihkan
+      // lewat UI-nya sendiri.
+      if (next.length === 0) return;
+      applyColumns(next);
+    },
+    [shownLabels, applyColumns]
+  );
+
+  const visibleColumns = useMemo(
+    () => COLUMNS.filter((c) => shownLabels.includes(c.label)),
+    [shownLabels]
+  );
+
   const toggleSort = useCallback((label: string) => {
     setSort((prev) => {
       if (prev?.label !== label) return { label, dir: "asc" };
@@ -281,8 +479,9 @@ export function CreatorsTable({
 
   const labelOf = (c: CreatorTableRow) => c.username || c.name || c.id;
 
-  /** Kolom data + kolom centang + kolom Aksi — dipakai colSpan baris "kosong". */
-  const colCount = COLUMNS.length + (canDelete ? 1 : 0) + (canEdit || canDelete ? 1 : 0);
+  /** Kolom data terlihat + kolom centang + kolom Aksi — dipakai colSpan baris "kosong". */
+  const colCount = visibleColumns.length + (canDelete ? 1 : 0) + (canEdit || canDelete ? 1 : 0);
+  const cellCtx: CellContext = { nowMs, canUpload };
 
   const toggleOne = useCallback((id: string) => {
     setSelected((prev) => {
@@ -355,8 +554,66 @@ export function CreatorsTable({
         </div>
       )}
 
+      {/* Pemilih kolom: 25 kolom mustahil muat di laptop, jadi defaultnya preset
+          "Ringkas" dan sisanya dinyalakan sesuai kebutuhan. Pilihan tersimpan di
+          browser masing-masing. */}
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 px-3 py-2">
+        <div className="relative">
+          <button
+            type="button"
+            onClick={() => setColumnMenuOpen((v) => !v)}
+            aria-expanded={columnMenuOpen}
+            className="rounded-md border border-slate-300 px-3 py-1 text-sm text-slate-700 hover:bg-slate-50"
+          >
+            Kolom ({shownLabels.length}/{ALL_LABELS.length}) {columnMenuOpen ? "▴" : "▾"}
+          </button>
+          {columnMenuOpen && (
+            <>
+              <div className="fixed inset-0 z-10" onClick={() => setColumnMenuOpen(false)} />
+              <div className="absolute left-0 z-20 mt-1 w-64 rounded-lg border border-slate-200 bg-white p-2 shadow-lg">
+                <div className="flex gap-1 border-b border-slate-100 pb-2">
+                  <button
+                    type="button"
+                    onClick={() => applyColumns(COMPACT_LABELS)}
+                    className="flex-1 rounded-md bg-slate-100 px-2 py-1 text-xs font-medium text-slate-700 hover:bg-slate-200"
+                  >
+                    Ringkas
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => applyColumns(ALL_LABELS)}
+                    className="flex-1 rounded-md bg-slate-100 px-2 py-1 text-xs font-medium text-slate-700 hover:bg-slate-200"
+                  >
+                    Semua kolom
+                  </button>
+                </div>
+                <div className="max-h-72 overflow-y-auto pt-1">
+                  {COLUMNS.map((col) => (
+                    <label
+                      key={col.label}
+                      className="flex cursor-pointer items-center gap-2 rounded px-1 py-1 text-sm hover:bg-slate-50"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={shownLabels.includes(col.label)}
+                        onChange={() => toggleColumn(col.label)}
+                        className="h-4 w-4 rounded border-slate-300"
+                      />
+                      <span className="text-slate-700">{col.label}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+            </>
+          )}
+        </div>
+        <span className="text-xs text-slate-400">
+          Klik judul kolom untuk mengurutkan · pilihan kolom tersimpan di browser ini
+        </span>
+      </div>
+
       <div className="overflow-x-auto">
-        <table className="min-w-full text-sm">
+        <table className="min-w-full text-xs sm:text-sm">
           <thead className="bg-slate-50 text-left text-xs uppercase text-slate-500">
             <tr>
               {canDelete && (
@@ -373,7 +630,7 @@ export function CreatorsTable({
                   />
                 </th>
               )}
-              {COLUMNS.map((col) => {
+              {visibleColumns.map((col) => {
                 const active = sort?.label === col.label;
                 const title = (
                   <>
@@ -381,11 +638,11 @@ export function CreatorsTable({
                     {col.hint && <span className="normal-case text-slate-400"> {col.hint}</span>}
                   </>
                 );
-                if (!col.value) return <th key={col.label} className="px-3 py-3">{title}</th>;
+                if (!col.value) return <th key={col.label} className="px-2 py-3">{title}</th>;
                 return (
                   <th
                     key={col.label}
-                    className="px-3 py-3"
+                    className="px-2 py-3"
                     aria-sort={active ? (sort!.dir === "asc" ? "ascending" : "descending") : "none"}
                   >
                     <button
@@ -411,13 +668,11 @@ export function CreatorsTable({
                   </th>
                 );
               })}
-              {(canEdit || canDelete) && <th className="px-3 py-3">Aksi</th>}
+              {(canEdit || canDelete) && <th className="px-2 py-3">Aksi</th>}
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
             {visibleRows.map((c) => {
-              const remaining = contractRemaining(c.join_date, c.contract_end_date, nowMs);
-              const niches: string[] = c.top_niches ?? (c.niche ? [c.niche] : []);
               return (
                 <tr key={c.id} className={selected.has(c.id) ? "bg-red-50/60" : undefined}>
                   {canDelete && (
@@ -431,81 +686,11 @@ export function CreatorsTable({
                       />
                     </td>
                   )}
-                  <td className={`${td} font-medium`}>
-                    {c.profile_link ? (
-                      <a href={c.profile_link} target="_blank" className="text-blue-700 hover:underline">
-                        {c.username ?? "—"}
-                      </a>
-                    ) : (
-                      c.username ?? "—"
-                    )}
-                    <span className="ml-1 font-mono text-[10px] text-slate-400">{c.id}</span>
-                  </td>
-                  <td className={td}>
-                    <Link href={`/creators/${c.id}`} className="text-blue-700 hover:underline">
-                      {c.name}
-                    </Link>
-                  </td>
-                  <td className={td}>{c.phone ?? "—"}</td>
-                  <td className={`${td} capitalize`}>{c.platform ?? "—"}</td>
-                  <td className={td}>{c.jenis_creator ?? "—"}</td>
-                  <td className={td}>
-                    <span className={creatorClassBadge(c.creator_class)}>
-                      {creatorClassLabel(c.creator_class)}
-                    </span>
-                  </td>
-                  <td className="px-3 py-2">
-                    {niches.length ? (
-                      <span className="flex flex-wrap gap-1">
-                        {niches.slice(0, 3).map((n) => (
-                          <span key={n} className="rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-700">
-                            {n}
-                          </span>
-                        ))}
-                      </span>
-                    ) : (
-                      "—"
-                    )}
-                  </td>
-                  <td className={td}>{c.followers ?? "—"}</td>
-                  <td className={td}>{c.content_quality ?? "—"}</td>
-                  <td className={td}>{formatRp(c.gmv)}</td>
-                  <td className={td}>{formatRp(c.gmv_live)}</td>
-                  <td className={td}>{formatRp(c.gmv_video)}</td>
-                  <td className={td}>{formatShare(c.commission_share)}</td>
-                  <td className={`${td} max-w-[180px] truncate`} title={c.rc_live ?? ""}>{c.rc_live ?? "—"}</td>
-                  <td className={`${td} max-w-[180px] truncate`} title={c.rc_video ?? ""}>{c.rc_video ?? "—"}</td>
-                  <td className="px-3 py-2">
-                    {canUpload ? (
-                      <form action={updateRateCard} className="flex items-center gap-1">
-                        <input type="hidden" name="creator_id" value={c.id} />
-                        <input
-                          name="rate_card"
-                          defaultValue={c.rate_card ?? ""}
-                          placeholder="—"
-                          className="w-24 rounded border border-slate-200 px-2 py-1 text-xs"
-                        />
-                        <button type="submit" className="rounded bg-slate-100 px-2 py-1 text-xs hover:bg-slate-200">
-                          ✓
-                        </button>
-                      </form>
-                    ) : (
-                      formatRp(c.rate_card)
-                    )}
-                  </td>
-                  <td className={td}>{c.cmName ?? "—"}</td>
-                  <td className={td}>{c.level ? `L${c.level}` : "—"}</td>
-                  <td className={td}>{c.join_date ?? "—"}</td>
-                  <td className={td}>{c.contract_end_date ?? "—"}</td>
-                  <td className={`${td} ${remaining.danger ? "font-medium text-red-600" : ""}`}>
-                    {remaining.label}
-                  </td>
-                  <td className={td}>{c.domisili ?? "—"}</td>
-                  <td className="max-w-[240px] truncate px-3 py-2" title={c.alamat ?? ""}>
-                    {c.alamat ?? "—"}
-                  </td>
-                  <td className={`${td} font-mono text-[10px] text-slate-400`}>{c.uid ?? "—"}</td>
-                  <td className={td}>{c.status}</td>
+                  {visibleColumns.map((col) => (
+                    <td key={col.label} className={col.className ?? td}>
+                      {col.cell(c, cellCtx)}
+                    </td>
+                  ))}
                   {(canEdit || canDelete) && (
                     <td className={td}>
                       <div className="flex items-center gap-1">

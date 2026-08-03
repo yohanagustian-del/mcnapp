@@ -20,6 +20,15 @@ export const PLATFORMS = ["tiktok", "shopee"] as const;
 export const SEGMENTS = ["tc", "incubation", "celeb"] as const;
 export const STATUSES = ["prospek", "binding", "aktif", "nonaktif"] as const;
 
+/**
+ * Status untuk kreator BARU saat kolom Status di sheet kosong / tidak dikenali.
+ *
+ * `aktif`, bukan `prospek`: sheet yang diunggah lewat form ini adalah master data
+ * kreator yang SUDAH bergabung, jadi menandainya prospek membuat seluruh hasil
+ * import salah status dan harus dibetulkan satu per satu.
+ */
+export const DEFAULT_IMPORT_STATUS = "aktif";
+
 /** "beauty; skincare, fashion" → top-3 level-2 categories. */
 export function parseNiches(raw: string | undefined): string[] | null {
   if (!raw?.trim()) return null;
@@ -34,6 +43,36 @@ export function parseLevel(raw: string): number | null {
   const n = Number(m[1]);
   return n >= 1 && n <= 8 ? n : null;
 }
+
+/**
+ * Field form "Tambah Kreator" — namanya SENGAJA sama dengan kunci header sheet
+ * yang sudah dinormalisasi, supaya isian form bisa langsung disuap ke
+ * `buildMasterCreatorRow` (form manual = import satu baris, satu parser).
+ *
+ * `sharing_komisi` tidak ada di sini: commission_share read-only, sync platform
+ * (CLAUDE.md #3) — tidak bisa diisi manual maupun dari sheet.
+ */
+export const MANUAL_FIELDS = [
+  "username",
+  "nama_creator",
+  "kategory",
+  "kelas_kreator",
+  "platform",
+  "no_hp",
+  "link_akun",
+  "uid",
+  "followers",
+  "kualitas",
+  "domisili",
+  "alamat_lengkap",
+  "level",
+  "rc_live",
+  "rc_video",
+  "rate_card",
+  "join_date",
+  "end_date",
+  "status",
+] as const;
 
 export type MasterRowOutcome =
   /** Baris kosong (baris contoh template / baris sela) — dilewati diam-diam. */
@@ -141,7 +180,9 @@ export function buildMasterCreatorRow(
     kind: "row",
     username,
     name,
-    insertStatus: STATUSES.includes(statusRaw as (typeof STATUSES)[number]) ? statusRaw : "prospek",
+    insertStatus: STATUSES.includes(statusRaw as (typeof STATUSES)[number])
+      ? statusRaw
+      : DEFAULT_IMPORT_STATUS,
     payload,
     note,
   };

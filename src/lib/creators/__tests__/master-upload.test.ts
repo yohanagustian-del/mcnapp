@@ -108,13 +108,15 @@ describe("buildMasterCreatorRow", () => {
     expect("commission_share" in out.payload).toBe(false);
   });
 
-  it("status tidak dikenal / kosong → prospek untuk baris insert", () => {
+  /** Sheet master = kreator yang sudah bergabung, jadi default-nya aktif (bukan prospek). */
+  it("status kosong / tidak dikenal → aktif untuk baris insert", () => {
     const bad = buildMasterCreatorRow(row({ status: "entah" }), cmByName);
     const empty = buildMasterCreatorRow(row(), cmByName);
-    const ok = buildMasterCreatorRow(row({ status: "aktif" }), cmByName);
-    expect(bad.kind === "row" && bad.insertStatus).toBe("prospek");
-    expect(empty.kind === "row" && empty.insertStatus).toBe("prospek");
-    expect(ok.kind === "row" && ok.insertStatus).toBe("aktif");
+    const explicit = buildMasterCreatorRow(row({ status: "prospek" }), cmByName);
+    expect(bad.kind === "row" && bad.insertStatus).toBe("aktif");
+    expect(empty.kind === "row" && empty.insertStatus).toBe("aktif");
+    // Status yang DITULIS user tetap dipakai apa adanya.
+    expect(explicit.kind === "row" && explicit.insertStatus).toBe("prospek");
   });
 });
 

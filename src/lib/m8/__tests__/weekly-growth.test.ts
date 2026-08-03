@@ -1,8 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
+  aggregateWeeklyByGroup,
   availableMonths,
   buildMonthlyAverages,
   buildMonthlyGrowth,
+  summarizeWeeks,
+  sumWeeks,
   weekIndexOf,
   type AvgMonthlyGmvInputRow,
   type WeeklyGrowthInputRow,
@@ -256,5 +259,76 @@ describe("buildMonthlyAverages (task A.1 — /creators master list avg/bulan)", 
     expect(avg.gmv).toBeCloseTo(150, 5);
     expect(avg.gmvLive).toBeCloseTo(65, 5);
     expect(avg.gmvVideo).toBeCloseTo(85, 5);
+  });
+});
+
+describe("sumWeeks", () => {
+  it("menjumlahkan deret mingguan, minggu tanpa data mana pun tetap null", () => {
+    expect(
+      sumWeeks([
+        [100, null, 300, null, null],
+        [50, 20, null, null, null],
+      ])
+    ).toEqual([150, 20, 300, null, null]);
+  });
+
+  it("deret kosong → semua minggu null", () => {
+    expect(sumWeeks([])).toEqual([null, null, null, null, null]);
+  });
+
+  /** "Belum ada upload" (null) tidak boleh sama dengan "ada upload, GMV 0". */
+  it("membedakan Rp0 dari minggu tanpa upload", () => {
+    expect(sumWeeks([[0, null, null, null, null]])).toEqual([0, null, null, null, null]);
+  });
+});
+
+describe("summarizeWeeks", () => {
+  it("delta dibanding minggu TERISI sebelumnya, bukan minggu sebelumnya yang kosong", () => {
+    const s = summarizeWeeks([100, null, 200, null, null]);
+    expect(s.monthTotal).toBe(300);
+    expect(s.deltas[0]).toBeNull(); // minggu terisi pertama
+    expect(s.deltas[1]).toBeNull(); // kosong
+    expect(s.deltas[2]).toBeCloseTo(1, 5); // 100 → 200
+    expect(s.monthGrowthPct).toBeCloseTo(1, 5);
+  });
+
+  it("hanya satu minggu terisi → growth null (tidak ada pembanding)", () => {
+    expect(summarizeWeeks([500, null, null, null, null]).monthGrowthPct).toBeNull();
+  });
+
+  it("minggu pembanding bernilai 0 → delta null, bukan Infinity", () => {
+    const s = summarizeWeeks([0, 100, null, null, null]);
+    expect(s.deltas[1]).toBeNull();
+    expect(s.monthGrowthPct).toBeNull();
+  });
+});
+
+describe("aggregateWeeklyByGroup (rollup per CM)", () => {
+  const rows = [
+    { cm: "cm-a", weeks: [100, 200, null, null, null] },
+    { cm: "cm-a", weeks: [50, null, 400, null, null] },
+    { cm: "cm-b", weeks: [10, 5, null, null, null] },
+    { cm: "", weeks: [7, null, null, null, null] }, // kreator tanpa CM
+  ];
+  const grouped = aggregateWeeklyByGroup(rows, (r) => r.cm, (r) => r.weeks);
+  const byKey = new Map(grouped.map((g) => [g.key, g]));
+
+  it("menjumlahkan minggu seluruh anggota grup dan menghitung jumlah anggota", () => {
+    const a = byKey.get("cm-a")!;
+    expect(a.members).toBe(2);
+    expect(a.weeks).toEqual([150, 200, 400, null, null]);
+    expect(a.monthTotal).toBe(750);
+  });
+
+  /** Growth dihitung dari HASIL PENJUMLAHAN, bukan rata-rata delta per kreator —
+   *  kalau tidak, kreator kecil punya bobot sama dengan kreator besar. */
+  it("growth diturunkan dari deret gabungan", () => {
+    const b = byKey.get("cm-b")!;
+    expect(b.monthGrowthPct).toBeCloseTo((5 - 10) / 10, 5);
+  });
+
+  it("kreator tanpa CM tetap jadi satu grup sendiri (tidak dibuang)", () => {
+    expect(byKey.get("")!.monthTotal).toBe(7);
+    expect(grouped).toHaveLength(3);
   });
 });

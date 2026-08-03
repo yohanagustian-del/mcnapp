@@ -8,6 +8,7 @@ import { CreatorsWithoutCmAlert } from "@/components/creators-without-cm-alert";
 import { uploadCreators } from "./actions";
 import { CreatorsTable, type CreatorTableRow } from "./creators-table";
 import { CreatorImportPanel } from "./creator-import-panel";
+import { CreatorCreateDialog } from "./creator-create-dialog";
 
 export const dynamic = "force-dynamic";
 
@@ -72,6 +73,18 @@ export default async function CreatorsPage() {
   // Kreator tanpa CM (mis. dibuat otomatis dari upload data platform mingguan).
   const withoutCm = await loadCreatorsWithoutCm();
 
+  // Pilihan CM untuk form "Tambah Kreator": SELURUH CM aktif dari tabel Tim —
+  // bukan cmOptions di bawah (yang hanya berisi CM yang sudah punya kreator, jadi
+  // CM baru tidak akan pernah bisa dipilih saat mendaftarkan kreator pertamanya).
+  const { data: activeCms } = canUpload
+    ? await supabase
+        .from("team_members")
+        .select("id, name")
+        .in("role", ["cm_lead", "cpm", "director", "head", "spv"])
+        .eq("active", true)
+        .order("name")
+    : { data: [] as { id: string; name: string }[] };
+
   // CM options for the multi-select — derived from the creators actually listed (the
   // team_members join already resolves owner_cpm_id → CM name), so the dropdown never
   // offers a CM with zero creators in view.
@@ -86,7 +99,14 @@ export default async function CreatorsPage() {
   return (
     <CreatorFilterProvider cms={cmOptions} searchLabel="username kreator">
       <div>
-        <h1 className="text-2xl font-semibold">Kreator</h1>
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <h1 className="text-2xl font-semibold">Kreator</h1>
+          {canUpload && (
+            <CreatorCreateDialog
+              cms={(activeCms ?? []).map((m) => ({ id: m.id, name: m.name }))}
+            />
+          )}
+        </div>
         <p className="mt-1 text-sm text-slate-500">
           Master data kreator (format sheet &quot;data creator&quot;). GMV total / live / video adalah
           RATA-RATA BULANAN — dihitung otomatis dari upload data platform mingguan di{" "}

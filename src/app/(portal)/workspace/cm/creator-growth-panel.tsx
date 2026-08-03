@@ -1,10 +1,81 @@
 "use client";
 
+import { useActionState, useEffect, useState } from "react";
 import { rupiah, pct } from "@/lib/utils/format";
 import { TableFilterBar, TablePagination, useTableControls } from "@/components/table-controls";
 import { assignCreator } from "./actions";
 
 const btnSmall = "rounded-md px-2 py-1 text-xs font-medium";
+
+/** Berapa lama notifikasi "Re-assign berhasil" tetap terlihat sebelum hilang sendiri. */
+const NOTICE_MS = 5000;
+
+/**
+ * Form re-assign CPM satu baris + notifikasi hasilnya.
+ *
+ * Sebelumnya form ini memakai `action={assignCreator}` polos: kalau berhasil
+ * halaman ter-revalidate tanpa tanda apa pun (user tidak tahu tersimpan atau
+ * tidak), dan kalau gagal action-nya melempar sehingga seluruh halaman jatuh ke
+ * error boundary. Sekarang action mengembalikan status, ditampilkan sebagai
+ * notifikasi kecil di baris yang bersangkutan.
+ */
+function AssignCpmForm({
+  creatorId,
+  currentCpmId,
+  cpms,
+}: {
+  creatorId: string;
+  currentCpmId: string | null;
+  cpms: CpmOption[];
+}) {
+  const [state, formAction, pending] = useActionState(assignCreator, null);
+  const [visible, setVisible] = useState(false);
+
+  // Notifikasi sukses hilang sendiri; error dibiarkan sampai percobaan berikutnya
+  // supaya pesan penyebabnya sempat terbaca.
+  useEffect(() => {
+    if (!state) return;
+    setVisible(true);
+    if (!state.ok) return;
+    const t = setTimeout(() => setVisible(false), NOTICE_MS);
+    return () => clearTimeout(t);
+  }, [state]);
+
+  return (
+    <div>
+      <form action={formAction} className="flex items-center gap-1">
+        <input type="hidden" name="creator_id" value={creatorId} />
+        <select
+          name="owner_cpm_id"
+          defaultValue={currentCpmId ?? ""}
+          aria-label="CPM tujuan"
+          className="rounded-md border border-slate-300 px-2 py-1 text-xs"
+        >
+          <option value="">— pilih CPM —</option>
+          {cpms.map((m) => (
+            <option key={m.id} value={m.id}>{m.name}</option>
+          ))}
+        </select>
+        <button
+          type="submit"
+          disabled={pending}
+          className={`${btnSmall} bg-slate-200 text-slate-700 hover:bg-slate-300 disabled:opacity-50`}
+        >
+          {pending ? "…" : "Assign"}
+        </button>
+      </form>
+      {state && visible && (
+        <p
+          role="status"
+          className={`mt-1 text-xs ${state.ok ? "text-green-700" : "text-red-600"}`}
+        >
+          {state.ok ? "✓ " : "⚠ "}
+          {state.message}
+        </p>
+      )}
+    </div>
+  );
+}
 
 /** Satu baris tabel Creator & Growth Mingguan (growth sudah dihitung server — CLAUDE.md #4). */
 export interface CreatorGrowthRow {
@@ -113,22 +184,11 @@ export function CreatorGrowthPanel({
                   </td>
                   {canAssign && (
                     <td className="px-4 py-2">
-                      <form action={assignCreator} className="flex items-center gap-1">
-                        <input type="hidden" name="creator_id" value={c.creatorId} />
-                        <select
-                          name="owner_cpm_id"
-                          defaultValue={c.ownerCpmId ?? ""}
-                          className="rounded-md border border-slate-300 px-2 py-1 text-xs"
-                        >
-                          <option value="">— pilih CPM —</option>
-                          {cpms.map((m) => (
-                            <option key={m.id} value={m.id}>{m.name}</option>
-                          ))}
-                        </select>
-                        <button type="submit" className={`${btnSmall} bg-slate-200 text-slate-700 hover:bg-slate-300`}>
-                          Assign
-                        </button>
-                      </form>
+                      <AssignCpmForm
+                        creatorId={c.creatorId}
+                        currentCpmId={c.ownerCpmId}
+                        cpms={cpms}
+                      />
                     </td>
                   )}
                 </tr>

@@ -6,6 +6,7 @@ import { getProjectRequirements } from "@/lib/m7/requirements";
 import { ProjectRequirementsPanel } from "@/components/project-requirements-panel";
 import { latestTwoPeriods, type PeriodSummaryPoint } from "@/lib/m8/routing";
 import {
+  aggregateWeeklyByGroup,
   availableMonths,
   buildMonthlyGrowth,
   type MonthlyGrowth,
@@ -25,6 +26,7 @@ import type { LiveScheduleSlot } from "@/lib/schedule/types";
 import { ComplaintReplyForm, ComplaintStatusForm } from "./complaint-forms";
 import { rupiah } from "@/lib/utils/format";
 import { WeeklyGrowthTable, type WeeklyGrowthRow } from "./weekly-growth-table";
+import { CmWeeklyGrowthTable, type CmWeeklyGrowthRow } from "./cm-weekly-growth-table";
 import { CreatorGrowthPanel, type CreatorGrowthRow } from "./creator-growth-panel";
 import { LeakTable, type LeakTableRow } from "./leak-table";
 import { CampaignRequestsTable, type CampaignRequestRow } from "./campaign-requests-table";
@@ -277,6 +279,29 @@ export default async function CmWorkspacePage({
         monthGrowthPct: g.monthGrowthPct,
       };
     });
+
+  // Rollup baris di atas ke level CM (tabel "Growth Mingguan per CM"). Diagregasi
+  // di server dari weeklyGrowthRows yang SAMA — bukan query/perhitungan kedua,
+  // jadi angka per-CM selalu konsisten dengan tabel per-kreator (CLAUDE.md #4).
+  const cmNameByOwnerId = new Map<string, string>();
+  for (const r of weeklyGrowthRows) {
+    if (r.ownerCpmId && r.cmName) cmNameByOwnerId.set(r.ownerCpmId, r.cmName);
+  }
+  const cmWeeklyGrowthRows: CmWeeklyGrowthRow[] = aggregateWeeklyByGroup(
+    weeklyGrowthRows,
+    (r) => r.ownerCpmId ?? "",
+    (r) => r.weeks
+  ).map((g) => ({
+    cpmId: g.key || null,
+    // owner_cpm_id terisi tapi tidak ada di team_members = anggota nonaktif/terhapus;
+    // ditandai eksplisit daripada ditampilkan sebagai uuid mentah.
+    cmName: g.key ? cmNameByOwnerId.get(g.key) ?? "CM tidak dikenal" : "Tanpa CM",
+    creatorCount: g.members,
+    weeks: g.weeks,
+    deltas: g.deltas,
+    monthTotal: g.monthTotal,
+    monthGrowthPct: g.monthGrowthPct,
+  }));
 
   let campaignReqQuery = supabase
     .from("campaign_requests")
@@ -537,6 +562,26 @@ export default async function CmWorkspacePage({
           cpms={(cpms ?? []).map((m) => ({ id: m.id, name: m.name }))}
           canAssign={canAssign}
         />
+      </section>
+
+      {/* ===== Rollup growth mingguan ke level CM ===== */}
+      <section>
+        <h2 className="text-lg font-medium">
+          Growth Mingguan per CM{selectedMonth ? ` — ${selectedMonth}` : ""}
+        </h2>
+        <p className="mt-1 text-xs text-slate-500">
+          Tabel yang sama seperti Pertumbuhan GMV Mingguan, tapi dijumlahkan per CM: W1-W5 =
+          total GMV seluruh kreator yang di-handle CM itu, Growth = minggu terisi terakhir vs
+          minggu terisi pertama. Mengikuti bulan yang dipilih di atas. Murni agregasi
+          deterministik — 0 token AI.
+        </p>
+        {!selectedMonth ? (
+          <p className="mt-4 rounded-lg border border-slate-200 bg-white p-6 text-center text-sm text-slate-400">
+            Belum ada data GMV mingguan untuk creator di scope ini — upload via /ingest.
+          </p>
+        ) : (
+          <CmWeeklyGrowthTable rows={cmWeeklyGrowthRows} />
+        )}
       </section>
 
       {/* ===== Link Leakage Kreator (per minggu) — rollup dari engine M4 / artifak ===== */}

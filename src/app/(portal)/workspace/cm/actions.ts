@@ -18,33 +18,51 @@ function assertCreatorScope(actor: TeamMember, ownerCpmId: string | null) {
   }
 }
 
+/**
+ * Hasil re-assign untuk `useActionState` di tabel Creator & Growth Mingguan.
+ * Dikembalikan (bukan dilempar) supaya UI bisa menampilkan notifikasi berhasil /
+ * gagal di baris yang bersangkutan tanpa memicu error boundary seluruh halaman.
+ */
+export type AssignCreatorState = { ok: boolean; message: string } | null;
+
 /** Assign/re-assign creator ke CPM (§2A.1) — CM Lead/Head; perubahan owner ter-audit. */
-export async function assignCreator(formData: FormData): Promise<void> {
-  const actor = await requirePermission("m8.assign_creator");
-  const creatorId = String(formData.get("creator_id") ?? "").trim();
-  const newOwnerId = String(formData.get("owner_cpm_id") ?? "").trim();
-  if (!creatorId || !newOwnerId) throw new Error("Creator & CPM tujuan wajib dipilih");
+export async function assignCreator(
+  _prev: AssignCreatorState,
+  formData: FormData
+): Promise<AssignCreatorState> {
+  try {
+    const actor = await requirePermission("m8.assign_creator");
+    const creatorId = String(formData.get("creator_id") ?? "").trim();
+    const newOwnerId = String(formData.get("owner_cpm_id") ?? "").trim();
+    if (!creatorId || !newOwnerId) throw new Error("Creator & CPM tujuan wajib dipilih");
 
-  const admin = createAdminClient();
-  const [{ data: creator }, { data: owner }] = await Promise.all([
-    admin.from("creators").select("id, owner_cpm_id").eq("id", creatorId).maybeSingle(),
-    admin.from("team_members").select("id, role, active").eq("id", newOwnerId).maybeSingle(),
-  ]);
-  if (!creator) throw new Error(`Creator ${creatorId} tidak ditemukan`);
-  if (!owner || !owner.active || !["cpm", "cm_lead"].includes(owner.role)) {
-    throw new Error("Tujuan assignment harus CPM/CM Lead aktif");
+    const admin = createAdminClient();
+    const [{ data: creator }, { data: owner }] = await Promise.all([
+      admin.from("creators").select("id, owner_cpm_id").eq("id", creatorId).maybeSingle(),
+      admin.from("team_members").select("id, name, role, active").eq("id", newOwnerId).maybeSingle(),
+    ]);
+    if (!creator) throw new Error(`Creator ${creatorId} tidak ditemukan`);
+    if (!owner || !owner.active || !["cpm", "cm_lead"].includes(owner.role)) {
+      throw new Error("Tujuan assignment harus CPM/CM Lead aktif");
+    }
+    if (creator.owner_cpm_id === newOwnerId) {
+      return { ok: true, message: `Sudah di-handle ${owner.name} — tidak ada perubahan` };
+    }
+
+    const { error } = await admin
+      .from("creators").update({ owner_cpm_id: newOwnerId }).eq("id", creatorId);
+    if (error) throw new Error(`Gagal assign: ${error.message}`);
+
+    await writeAudit({
+      actorId: actor.id, action: "m8.assign_creator", entityType: "creators", entityId: creatorId,
+      before: { owner_cpm_id: creator.owner_cpm_id }, after: { owner_cpm_id: newOwnerId },
+      type: "auto",
+    });
+    revalidatePath("/workspace/cm");
+    return { ok: true, message: `Re-assign berhasil — sekarang di-handle ${owner.name}` };
+  } catch (e) {
+    return { ok: false, message: e instanceof Error ? e.message : "Gagal re-assign creator" };
   }
-
-  const { error } = await admin
-    .from("creators").update({ owner_cpm_id: newOwnerId }).eq("id", creatorId);
-  if (error) throw new Error(`Gagal assign: ${error.message}`);
-
-  await writeAudit({
-    actorId: actor.id, action: "m8.assign_creator", entityType: "creators", entityId: creatorId,
-    before: { owner_cpm_id: creator.owner_cpm_id }, after: { owner_cpm_id: newOwnerId },
-    type: "auto",
-  });
-  revalidatePath("/workspace/cm");
 }
 
 export interface AssignCmResult {

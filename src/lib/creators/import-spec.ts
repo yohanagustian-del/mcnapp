@@ -1,5 +1,6 @@
 import { parseRupiah } from "@/lib/utils/rupiah";
 import { parseFlexibleDate } from "@/lib/utils/date";
+import { DEFAULT_IMPORT_STATUS } from "./master-upload";
 import {
   CREATOR_CLASS_LABEL,
   CREATOR_CLASS_OPTIONS,
@@ -173,7 +174,7 @@ export const IMPORT_COLUMNS: ImportColumn[] = [
     label: "Status",
     aliases: ["status"],
     required: false,
-    note: `Opsional. Salah satu: ${STATUSES.join(", ")}. Kosong saat kreator baru → prospek.`,
+    note: `Opsional. Salah satu: ${STATUSES.join(", ")}. Kosong saat kreator baru → ${DEFAULT_IMPORT_STATUS}.`,
   },
 ];
 
@@ -373,10 +374,14 @@ function buildPayload(
   return payload;
 }
 
-/** Status yang dipakai saat baris ini menghasilkan kreator baru. */
+/**
+ * Status yang dipakai saat baris ini menghasilkan kreator baru.
+ * Kosong / tidak dikenali → `aktif` (DEFAULT_IMPORT_STATUS), sama dengan form
+ * Upload Master Data Creator — satu aturan untuk kedua jalur import.
+ */
 export function insertStatus(values: Record<string, string>): string {
   const raw = (values["Status"] ?? "").toLowerCase();
-  return STATUSES.includes(raw as (typeof STATUSES)[number]) ? raw : "prospek";
+  return STATUSES.includes(raw as (typeof STATUSES)[number]) ? raw : DEFAULT_IMPORT_STATUS;
 }
 
 /**
