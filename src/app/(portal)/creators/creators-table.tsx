@@ -54,6 +54,17 @@ function formatShare(v: number | null | undefined): string {
 }
 
 /**
+ * Sisa kontrak dalam hari, atau null kalau salah satu tanggal belum terisi.
+ * Dipisah dari label supaya pengurutan kolom "Sisa Kontrak" memakai angka
+ * (bukan teks "habis 3 hr lalu" yang urutannya tidak bermakna).
+ */
+function contractDays(join: string | null, end: string | null, nowMs: number): number | null {
+  if (!join || !end) return null;
+  const days = Math.ceil((new Date(end).getTime() - nowMs) / 86_400_000);
+  return Number.isFinite(days) ? days : null;
+}
+
+/**
  * Sisa kontrak per hari ini (computed, tidak disimpan). `nowMs` comes from the server
  * render so SSR and hydration agree on the day count.
  *
@@ -65,11 +76,36 @@ function contractRemaining(
   end: string | null,
   nowMs: number
 ): { label: string; danger: boolean } {
-  if (!join || !end) return { label: "—", danger: false };
-  const days = Math.ceil((new Date(end).getTime() - nowMs) / 86_400_000);
+  const days = contractDays(join, end, nowMs);
+  if (days === null) return { label: "—", danger: false };
   if (days < 0) return { label: `habis ${-days} hr lalu`, danger: true };
   if (days <= 60) return { label: `${days} hari`, danger: days <= 30 };
   return { label: `${Math.floor(days / 30)} bln ${days % 30} hr`, danger: false };
+}
+
+/** Suffix jumlah follower yang lazim ditulis manual di sheet. */
+const FOLLOWER_MULTIPLIER: Record<string, number> = {
+  k: 1e3, rb: 1e3, ribu: 1e3, m: 1e6, jt: 1e6, juta: 1e6,
+};
+
+/**
+ * `followers` disimpan sebagai teks bebas ("595000", "595.000", "120K", "1,2jt"),
+ * jadi pengurutan apa adanya akan menaruh "1,2jt" di bawah "999". Diubah ke angka
+ * supaya kolomnya bisa diurutkan; format yang tidak dikenali → null (paling bawah).
+ */
+function followersValue(raw: string | null): number | null {
+  if (!raw) return null;
+  const m = raw.trim().toLowerCase().replace(/\s+/g, "").match(/^([\d.,]+)(k|rb|ribu|m|jt|juta)?$/);
+  if (!m) return null;
+  const mult = m[2] ? FOLLOWER_MULTIPLIER[m[2]] : 1;
+  // Tanpa suffix, titik/koma pasti pemisah ribuan ("595.000"). Dengan suffix,
+  // pemisah terakhir dibaca sebagai desimal ("1,2jt" = 1.200.000).
+  const digits =
+    mult === 1
+      ? m[1].replace(/[.,]/g, "")
+      : m[1].replace(/,/g, ".").replace(/\.(?=.*\.)/g, "");
+  const n = Number(digits);
+  return Number.isFinite(n) ? n * mult : null;
 }
 
 const td = "px-3 py-2 whitespace-nowrap";
@@ -88,6 +124,90 @@ function creatorClassBadge(value: string | null): string {
 
 const PAGE_SIZES = [10, 20, 50, 100] as const;
 const DEFAULT_PAGE_SIZE = 10;
+
+/** Nilai yang bisa dibandingkan untuk pengurutan; null = sel kosong. */
+type SortValue = string | number | null;
+
+interface TableColumn {
+  /** Judul kolom. */
+  label: string;
+  /** Keterangan kecil di samping judul (mis. "(avg/bln)"). */
+  hint?: string;
+  /**
+   * Nilai pengurutan baris ini. Kolom tanpa `value` tidak bisa diklik —
+   * dipakai untuk kolom aksi/centang yang tidak punya urutan bermakna.
+   */
+  value?: (c: CreatorTableRow, nowMs: number) => SortValue;
+}
+
+/**
+ * Definisi kolom tabel — URUTANNYA HARUS SAMA dengan urutan <td> di body.
+ * Header dibangun dari daftar ini supaya tombol urut tidak perlu ditulis 25 kali,
+ * dan supaya menambah kolom tidak bisa lupa menambah pengurutnya.
+ */
+const COLUMNS: TableColumn[] = [
+  { label: "Username", value: (c) => c.username },
+  { label: "Nama Creator", value: (c) => c.name },
+  { label: "No HP", value: (c) => c.phone },
+  { label: "Platform", value: (c) => c.platform },
+  { label: "Jenis", value: (c) => c.jenis_creator },
+  { label: "Kelas Kreator", value: (c) => creatorClassLabel(c.creator_class) },
+  { label: "Niche (Top 3)", value: (c) => c.top_niches?.[0] ?? c.niche },
+  { label: "Followers", value: (c) => followersValue(c.followers) },
+  { label: "Kualitas", value: (c) => c.content_quality },
+  { label: "GMV Total", hint: "(avg/bln)", value: (c) => c.gmv },
+  { label: "GMV Live", hint: "(avg/bln)", value: (c) => c.gmv_live },
+  { label: "GMV Video", hint: "(avg/bln)", value: (c) => c.gmv_video },
+  // Fraksi (0,22) dan nilai legacy persen (22) disamakan dulu, seperti formatShare.
+  {
+    label: "Sharing Komisi",
+    value: (c) => (c.commission_share == null ? null : c.commission_share <= 1 ? c.commission_share * 100 : c.commission_share),
+  },
+  { label: "RC Live", value: (c) => c.rc_live },
+  { label: "RC Video", value: (c) => c.rc_video },
+  { label: "Rate Card (Rp)", value: (c) => c.rate_card },
+  { label: "CM", value: (c) => c.cmName },
+  { label: "Level", value: (c) => c.level },
+  // Tanggal ISO ("2026-01-31") urut leksikografis = urut kronologis.
+  { label: "Join", value: (c) => c.join_date },
+  { label: "End Date", value: (c) => c.contract_end_date },
+  { label: "Sisa Kontrak", value: (c, nowMs) => contractDays(c.join_date, c.contract_end_date, nowMs) },
+  { label: "Domisili", value: (c) => c.domisili },
+  { label: "Alamat Lengkap", value: (c) => c.alamat },
+  { label: "UID", value: (c) => c.uid },
+  { label: "Status", value: (c) => c.status },
+];
+
+type SortDir = "asc" | "desc";
+
+/** String kosong diperlakukan sama dengan null supaya sel kosong selalu di bawah. */
+function normalizeSortValue(v: SortValue): SortValue {
+  return v === "" ? null : v;
+}
+
+/**
+ * Bandingkan dua sel. Sel kosong SELALU di bawah, baik urut naik maupun turun —
+ * kalau ikut dibalik, klik "Z→A" hanya menampilkan satu halaman penuh "—".
+ * Teks dibandingkan dengan locale Indonesia + `numeric` supaya "L2" < "L10".
+ */
+function compareRows(
+  a: CreatorTableRow,
+  b: CreatorTableRow,
+  column: TableColumn,
+  dir: SortDir,
+  nowMs: number
+): number {
+  const av = normalizeSortValue(column.value!(a, nowMs));
+  const bv = normalizeSortValue(column.value!(b, nowMs));
+  if (av === null && bv === null) return 0;
+  if (av === null) return 1;
+  if (bv === null) return -1;
+  const cmp =
+    typeof av === "number" && typeof bv === "number"
+      ? av - bv
+      : String(av).localeCompare(String(bv), "id", { numeric: true, sensitivity: "base" });
+  return dir === "asc" ? cmp : -cmp;
+}
 
 /**
  * Master creator table. Rows are filtered client-side by the shared username search +
@@ -124,7 +244,27 @@ export function CreatorsTable({
   const [pageSize, setPageSize] = useState<number>(DEFAULT_PAGE_SIZE);
   const [page, setPage] = useState(1);
 
-  const total = filteredRows.length;
+  // null = urutan bawaan dari server (terbaru dulu). Klik header: naik → turun →
+  // kembali ke urutan bawaan, jadi user selalu bisa membatalkan pengurutan.
+  const [sort, setSort] = useState<{ label: string; dir: SortDir } | null>(null);
+
+  const toggleSort = useCallback((label: string) => {
+    setSort((prev) => {
+      if (prev?.label !== label) return { label, dir: "asc" };
+      return prev.dir === "asc" ? { label, dir: "desc" } : null;
+    });
+    setPage(1);
+  }, []);
+
+  // Pengurutan dilakukan setelah filter dan SEBELUM pagination, jadi yang diurutkan
+  // seluruh hasil filter — bukan cuma 10 baris yang kebetulan tampil.
+  const sortedRows = useMemo(() => {
+    const column = sort ? COLUMNS.find((c) => c.label === sort.label) : undefined;
+    if (!sort || !column?.value) return filteredRows;
+    return [...filteredRows].sort((a, b) => compareRows(a, b, column, sort.dir, nowMs));
+  }, [filteredRows, sort, nowMs]);
+
+  const total = sortedRows.length;
   const pageCount = Math.max(1, Math.ceil(total / pageSize));
   // Menyempitkan filter bisa membuat halaman aktif melewati akhir daftar —
   // tarik kembali ke halaman terakhir yang masih ada.
@@ -135,14 +275,14 @@ export function CreatorsTable({
   const safePage = Math.min(page, pageCount);
   const start = (safePage - 1) * pageSize;
   const visibleRows = useMemo(
-    () => filteredRows.slice(start, start + pageSize),
-    [filteredRows, start, pageSize]
+    () => sortedRows.slice(start, start + pageSize),
+    [sortedRows, start, pageSize]
   );
 
   const labelOf = (c: CreatorTableRow) => c.username || c.name || c.id;
 
-  /** 25 kolom data + kolom centang + kolom Aksi — dipakai colSpan baris "kosong". */
-  const colCount = 25 + (canDelete ? 1 : 0) + (canEdit || canDelete ? 1 : 0);
+  /** Kolom data + kolom centang + kolom Aksi — dipakai colSpan baris "kosong". */
+  const colCount = COLUMNS.length + (canDelete ? 1 : 0) + (canEdit || canDelete ? 1 : 0);
 
   const toggleOne = useCallback((id: string) => {
     setSelected((prev) => {
@@ -233,31 +373,44 @@ export function CreatorsTable({
                   />
                 </th>
               )}
-              <th className="px-3 py-3">Username</th>
-              <th className="px-3 py-3">Nama Creator</th>
-              <th className="px-3 py-3">No HP</th>
-              <th className="px-3 py-3">Platform</th>
-              <th className="px-3 py-3">Jenis</th>
-              <th className="px-3 py-3">Kelas Kreator</th>
-              <th className="px-3 py-3">Niche (Top 3)</th>
-              <th className="px-3 py-3">Followers</th>
-              <th className="px-3 py-3">Kualitas</th>
-              <th className="px-3 py-3">GMV Total <span className="normal-case text-slate-400">(avg/bln)</span></th>
-              <th className="px-3 py-3">GMV Live <span className="normal-case text-slate-400">(avg/bln)</span></th>
-              <th className="px-3 py-3">GMV Video <span className="normal-case text-slate-400">(avg/bln)</span></th>
-              <th className="px-3 py-3">Sharing Komisi</th>
-              <th className="px-3 py-3">RC Live</th>
-              <th className="px-3 py-3">RC Video</th>
-              <th className="px-3 py-3">Rate Card (Rp)</th>
-              <th className="px-3 py-3">CM</th>
-              <th className="px-3 py-3">Level</th>
-              <th className="px-3 py-3">Join</th>
-              <th className="px-3 py-3">End Date</th>
-              <th className="px-3 py-3">Sisa Kontrak</th>
-              <th className="px-3 py-3">Domisili</th>
-              <th className="px-3 py-3">Alamat Lengkap</th>
-              <th className="px-3 py-3">UID</th>
-              <th className="px-3 py-3">Status</th>
+              {COLUMNS.map((col) => {
+                const active = sort?.label === col.label;
+                const title = (
+                  <>
+                    {col.label}
+                    {col.hint && <span className="normal-case text-slate-400"> {col.hint}</span>}
+                  </>
+                );
+                if (!col.value) return <th key={col.label} className="px-3 py-3">{title}</th>;
+                return (
+                  <th
+                    key={col.label}
+                    className="px-3 py-3"
+                    aria-sort={active ? (sort!.dir === "asc" ? "ascending" : "descending") : "none"}
+                  >
+                    <button
+                      type="button"
+                      onClick={() => toggleSort(col.label)}
+                      title={
+                        active && sort!.dir === "desc"
+                          ? `Klik untuk kembali ke urutan bawaan (${col.label})`
+                          : `Urutkan berdasarkan ${col.label}`
+                      }
+                      className={`flex w-full items-center gap-1 text-left uppercase hover:text-slate-800 ${
+                        active ? "text-slate-800" : ""
+                      }`}
+                    >
+                      <span>{title}</span>
+                      <span
+                        aria-hidden
+                        className={`text-[10px] ${active ? "text-slate-700" : "text-slate-300"}`}
+                      >
+                        {active ? (sort!.dir === "asc" ? "▲" : "▼") : "↕"}
+                      </span>
+                    </button>
+                  </th>
+                );
+              })}
               {(canEdit || canDelete) && <th className="px-3 py-3">Aksi</th>}
             </tr>
           </thead>

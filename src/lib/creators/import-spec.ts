@@ -179,11 +179,12 @@ export const IMPORT_COLUMNS: ImportColumn[] = [
 
 /**
  * Header yang dicari `parseSheet` untuk melewati baris judul di atas header.
- * Harus dalam bentuk normalisasi parseSheet (huruf kecil, spasi → "_"), BUKAN
- * bentuk kanonik: template menulis "Username*" → "username*", sedangkan file
- * buatan tangan biasanya "Username" → "username". Keduanya diterima.
+ * Harus dalam bentuk normalisasi parseSheet (huruf kecil, spasi → "_", penanda
+ * wajib "*" dibuang), jadi "Username*" dari template dan "Username" dari file
+ * buatan tangan sama-sama jatuh ke "username". Bentuk lama "username*" tetap
+ * didaftarkan supaya file yang dinormalisasi versi lama tidak ikut tertolak.
  */
-export const SHEET_REQUIRED_HEADERS = ["username*", "username"];
+export const SHEET_REQUIRED_HEADERS = ["username", "username*"];
 
 /**
  * Header sheet → bentuk kanonik untuk pencocokan: huruf kecil, hanya a-z0-9.

@@ -3,43 +3,29 @@
 import { revalidatePath } from "next/cache";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { writeAudit } from "@/lib/audit";
-import { requirePermission } from "@/lib/rbac";
+import { requirePermission, CM_ROLES, MANAGEMENT_ROLES } from "@/lib/rbac";
 import { genId } from "@/lib/utils/id";
 import { parseSheet } from "@/lib/utils/sheet";
 import { parseRupiah } from "@/lib/utils/rupiah";
-import { parseFlexibleDate } from "@/lib/utils/date";
-import { parseCount, pick, pickPrefix } from "@/lib/platform-csv";
-import { parseCreatorClass } from "@/lib/creators/creator-class";
+import { buildMasterCreatorRow, STATUSES } from "@/lib/creators/master-upload";
 import { fetchAll } from "@/lib/supabase/fetch-all";
 import type { UploadReport } from "@/app/(portal)/tim/actions";
 
-const SEGMENTS = ["tc", "incubation", "celeb"] as const;
-const STATUSES = ["prospek", "binding", "aktif", "nonaktif"] as const;
-
-const PLATFORMS = ["tiktok", "shopee"] as const;
-
-/** "beauty; skincare, fashion" → top-3 level-2 categories. */
-function parseNiches(raw: string | undefined): string[] | null {
-  if (!raw?.trim()) return null;
-  const parts = raw.split(/[;,|]/).map((s) => s.trim()).filter(Boolean);
-  return parts.length ? parts.slice(0, 3) : null;
-}
-
-/** "Lv 0" / "Lv 3" / "3" → level int 1..8 (0 / kosong / tak valid → null). */
-function parseLevel(raw: string): number | null {
-  const m = raw.match(/(\d)/);
-  if (!m) return null;
-  const n = Number(m[1]);
-  return n >= 1 && n <= 8 ? n : null;
-}
+/** Role yang boleh muncul sebagai CM di kolom "CM" (owner_cpm_id) — sama dengan Import Kreator. */
+const CM_OWNER_ROLES = [...CM_ROLES, ...MANAGEMENT_ROLES];
 
 /**
  * Ingest master sheet "data creator" (format asli, header Indonesia) ATAU
- * template lama (name,niche,...). Match by Username (lalu Nama) → UPDATE;
- * belum ada → INSERT (id CRT- dari util terpusat). GMV total/live/video di
- * master TIDAK dioverwrite dari sheet bila kosong — sumbernya upload data
+ * template Import Kreator (Username*, CM*, …). Match by Username (lalu Nama) →
+ * UPDATE; belum ada → INSERT (id CRT- dari util terpusat). GMV total/live/video
+ * di master TIDAK dioverwrite dari sheet bila kosong — sumbernya upload data
  * platform (/metrics). commission_share TIDAK diterima dari sheet mana pun —
  * hanya sync platform (read-only, CLAUDE.md #3).
+ *
+ * Username = kunci baris, bukan Nama Creator: nama tampilan berubah-ubah dan
+ * sering dikosongkan di sheet, sedangkan username itu identitas akun. Baris
+ * tanpa username DILEWATI (tidak bisa dicocokkan / dijadikan kunci); baris tanpa
+ * Nama Creator tetap masuk dengan nama = username.
  */
 export async function uploadCreators(formData: FormData): Promise<UploadReport> {
   const actor = await requirePermission("creators.bulk_upload");
@@ -49,6 +35,16 @@ export async function uploadCreators(formData: FormData): Promise<UploadReport> 
   const { rows, errors } = await parseSheet(file);
   const report: UploadReport = { inserted: 0, skipped: errors.map((e) => ({ row: -1, reason: e })) };
   const admin = createAdminClient();
+
+  // Kolom "CM" berisi NAMA — di-resolve ke team_members.id (creators.owner_cpm_id).
+  const { data: members, error: memberError } = await admin
+    .from("team_members")
+    .select("id, name")
+    .in("role", CM_OWNER_ROLES)
+    .eq("active", true);
+  if (memberError) throw new Error(`Gagal memuat daftar CM: ${memberError.message}`);
+  const cmByName = new Map<string, string>();
+  for (const m of members ?? []) if (m.name) cmByName.set(String(m.name).trim().toLowerCase(), m.id);
 
   // Existing creators for upsert matching (username first, then display name).
   // Paginated: PostgREST caps one select at 1000 rows and ignores a larger
@@ -62,67 +58,36 @@ export async function uploadCreators(formData: FormData): Promise<UploadReport> 
     if (c.username) byKey.set(String(c.username).toLowerCase(), c.id);
     if (c.name) byKey.set(String(c.name).toLowerCase(), c.id);
   }
+  /** Kreator yang sudah dipakai baris lain di upload ini — lihat fallback nama di bawah. */
+  const consumed = new Set<string>();
 
   for (const [i, raw] of rows.entries()) {
     const rowNum = i + 2;
 
-    const username = pick(raw, ["username"]);
-    const name = pick(raw, ["nama_creator", "name"]) || username;
-    if (!name) {
-      report.skipped.push({ row: rowNum, reason: "Username / Nama Creator kosong" });
+    const outcome = buildMasterCreatorRow(raw, cmByName);
+    // Baris kosong (baris contoh template / baris sela) dilewati diam-diam —
+    // bukan kesalahan yang perlu diperbaiki user.
+    if (outcome.kind === "empty") continue;
+    if (outcome.kind === "skip") {
+      report.skipped.push({ row: rowNum, reason: outcome.reason });
       continue;
     }
+    // Catatan "perlu review" (mis. nama CM salah ketik): barisnya TETAP disimpan.
+    if (outcome.note) report.skipped.push({ row: rowNum, reason: outcome.note });
 
-    const nicheRaw =
-      pickPrefix(raw, ["niche_(", "niche"]) || pick(raw, ["niches", "top_niches"]);
-    const topNiches = parseNiches(nicheRaw);
-    const platformRaw = pick(raw, ["platform"]).toLowerCase();
-    const segmentRaw = pick(raw, ["segment"]).toLowerCase();
-    const statusRaw = pick(raw, ["status"]).toLowerCase();
+    const { username, name, payload } = outcome;
 
-    const gmv = parseRupiah(pick(raw, ["total_gmv", "gmv"]));
-    const gmvLive = parseRupiah(pick(raw, ["gmv_live"]));
-    const gmvVideo = parseRupiah(pick(raw, ["gmv_video"]));
-
-    const payload: Record<string, unknown> = {
-      name,
-      username: username || null,
-      profile_link: pick(raw, ["link_akun", "link_profile", "profile_link"]) || null,
-      phone: pick(raw, ["no_hp", "phone"]) || null,
-      tim_akuisisi: pick(raw, ["tim_akuisisi"]) || null,
-      uid: pick(raw, ["uid"]) || null,
-      followers: pick(raw, ["followers", "follower_tier"]) || null,
-      content_quality: pick(raw, ["kualitas_konten", "content_quality"]) || null,
-      join_date: parseFlexibleDate(pickPrefix(raw, ["join_date"])),
-      domisili: pickPrefix(raw, ["domisili"]) || null,
-      alamat: pick(raw, ["alamat_lengkap", "alamat"]) || null,
-      jenis_creator: pick(raw, ["jenis_creator"]) || null,
-      // Kosong / tak dikenali → dibuang di bawah, lalu DEFAULT 'reguler' di DB yang
-      // berlaku untuk insert; baris update tidak kehilangan kelas lamanya.
-      creator_class: parseCreatorClass(pick(raw, ["kelas_kreator", "kelas", "creator_class"])),
-      niche: topNiches?.[0] ?? null,
-      top_niches: topNiches,
-      rc_live: pick(raw, ["rc_live", "ratecard_live"]) || null,
-      rc_video: pick(raw, ["rc_video", "ratecard_vt", "ratecard_video"]) || null,
-      level: parseLevel(pick(raw, ["level_creator", "level"])),
-      target_gmv_monthly: parseRupiah(pickPrefix(raw, ["target_gmv"])),
-      total_konten: parseCount(pick(raw, ["total_konten"])),
-      notes_endorsement: pick(raw, ["notes_endorsement", "notes"]) || null,
-      contract_end_date:
-        parseFlexibleDate(pick(raw, ["end_date_kontrak_tertulis", "contract_end_date"])) ??
-        parseFlexibleDate(pick(raw, ["end_date_dashboard"])),
-    };
-    if (PLATFORMS.includes(platformRaw as (typeof PLATFORMS)[number])) payload.platform = platformRaw;
-    if (SEGMENTS.includes(segmentRaw as (typeof SEGMENTS)[number])) payload.segment = segmentRaw;
-    // GMV dari sheet hanya dipakai bila terisi — sumber utama = upload /metrics.
-    if (gmv !== null) payload.gmv = gmv;
-    if (gmvLive !== null) payload.gmv_live = gmvLive;
-    if (gmvVideo !== null) payload.gmv_video = gmvVideo;
-    // Drop null/empty supaya UPDATE tidak menghapus data yang sudah ada.
-    for (const k of Object.keys(payload)) if (payload[k] === null) delete payload[k];
-
-    const matchKey = (username || name).toLowerCase();
-    const existingId = byKey.get(matchKey) ?? byKey.get(name.toLowerCase());
+    // Cocokkan by username dulu; fallback ke nama tampilan supaya kreator yang
+    // sudah pernah masuk tanpa username (sheet lama) di-UPDATE, bukan diduplikasi.
+    //
+    // Fallback nama hanya boleh mengenai kreator yang BELUM dipakai baris lain di
+    // upload ini: nama tampilan tidak unik (satu sheet bisa punya beberapa
+    // "Evelyn" dengan username berbeda), dan tanpa penjagaan ini semuanya akan
+    // menimpa satu baris yang sama — beberapa kreator hilang tanpa jejak.
+    const matchKey = username.toLowerCase();
+    const byName = byKey.get(name.toLowerCase());
+    const existingId =
+      byKey.get(matchKey) ?? (byName && !consumed.has(byName) ? byName : undefined);
 
     if (existingId) {
       const { error } = await admin.from("creators").update(payload).eq("id", existingId);
@@ -134,6 +99,10 @@ export async function uploadCreators(formData: FormData): Promise<UploadReport> 
         actorId: actor.id, action: "creator.master_update", entityType: "creators",
         entityId: existingId, after: payload, type: "auto",
       });
+      // Baris berikutnya dengan username yang sama kini ikut mengarah ke id ini
+      // (sebelum update, kreator itu mungkin hanya terdaftar lewat nama).
+      byKey.set(matchKey, existingId);
+      consumed.add(existingId);
       report.inserted++;
       continue;
     }
@@ -145,12 +114,14 @@ export async function uploadCreators(formData: FormData): Promise<UploadReport> 
       const id = genId("CRT");
       const { error } = await admin.from("creators").insert({
         id,
-        status: STATUSES.includes(statusRaw as (typeof STATUSES)[number]) ? statusRaw : "prospek",
+        status: outcome.insertStatus,
         ...payload,
       });
       if (!error) {
         inserted = true;
         byKey.set(matchKey, id);
+        byKey.set(name.toLowerCase(), id);
+        consumed.add(id);
         await writeAudit({
           actorId: actor.id, action: "creator.bulk_insert", entityType: "creators",
           entityId: id, after: payload, type: "auto",

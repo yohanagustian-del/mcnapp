@@ -138,7 +138,7 @@ export default async function CreatorsPage() {
               <CsvUploadForm
                 action={uploadCreators}
                 buttonLabel="Upload Master Data Creator"
-                helpText="Terima sheet 'data creator' asli (xlsx/csv, header Indonesia: Username, Nama Creator, No HP, UID, Followers, Join Date, Niche (kategori 2), RC Live, RC Video, dll). Match by Username → update; belum ada → dibuat baru. GMV & sharing komisi TIDAK diambil dari sheet."
+                helpText="Terima sheet 'data creator' asli (xlsx/csv, header Indonesia: Username, Nama Creator, No HP, UID, Followers, Join Date, End Date, Niche (kategori 2), RC Live, RC Video, dll) MAUPUN template Import Kreator hasil download (Username*, CM*, …) — kolom CM ikut terbaca. Username WAJIB (jadi kunci pencocokan): baris tanpa username dilewati, baris tanpa Nama Creator tetap masuk memakai username sebagai nama. Match by Username → update; belum ada → dibuat baru. GMV & sharing komisi TIDAK diambil dari sheet."
               />
             </div>
           </div>

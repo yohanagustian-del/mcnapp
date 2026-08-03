@@ -1,10 +1,7 @@
 import * as XLSX from "xlsx";
-import { parseCsv, type CsvParseResult } from "./csv";
-
-/** Normalize a header the same way parseCsv does. */
-function normalizeHeader(h: string): string {
-  return h.trim().toLowerCase().replace(/\s+/g, "_");
-}
+// Satu normalisasi header untuk XLSX dan CSV — kalau keduanya punya salinan
+// sendiri, file yang sama bisa terbaca beda tergantung formatnya.
+import { normalizeHeader, parseCsv, type CsvParseResult } from "./csv";
 
 function sheetToRows(ws: XLSX.WorkSheet, skipRows: number): Record<string, string>[] {
   // raw:false → formatted strings (dates & numbers as displayed), matching CSV exports.
