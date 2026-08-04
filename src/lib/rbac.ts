@@ -85,7 +85,13 @@ export const NAV_ITEMS: NavItem[] = [
 /** Server-side write permissions per action (enforced in server actions + RLS, not just UI). */
 export const PERMISSIONS: Record<string, Role[]> = {
   "team.bulk_upload": MANAGEMENT_ROLES,
-  "creators.bulk_upload": [...MANAGEMENT_ROLES, ...ACQUISITION_ROLES],
+  // Tambah kreator (manual satu baris lewat tombol "Tambah Kreator" di tab Kreator,
+  // import Username+CM, dan upload master sheet lengkap). CM ikut punya izin ini:
+  // CM-lah yang mendaftarkan kreator yang mereka pegang, dan mereka sudah boleh
+  // mengedit seluruh kolom lewat creators.edit — menambah baris tidak lebih berisiko
+  // daripada mengubahnya (CLAUDE.md #2: menambah data ≠ merugikan). Menghapus TETAP
+  // management saja (creators.delete). Dicermin RLS creators_insert (0030).
+  "creators.bulk_upload": [...MANAGEMENT_ROLES, ...CM_ROLES, ...ACQUISITION_ROLES],
   // Edit master data kreator per-row (username sering ganti, no HP, RC, level, dll).
   // Dimiliki CM (Creator Manager) + management + akuisisi + creator_support — sejajar
   // dengan RLS creators_update (0002). commission_share TETAP read-only (CLAUDE.md #3).
