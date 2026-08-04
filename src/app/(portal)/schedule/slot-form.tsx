@@ -211,7 +211,7 @@ export function SlotForm({
                   type="checkbox" name="pk_ready" disabled={locked}
                   defaultChecked={slot?.pk_ready ?? false}
                 />
-                PK siap
+                Product Knowledge Siap
               </label>
               <label className="flex items-center gap-1">
                 <input

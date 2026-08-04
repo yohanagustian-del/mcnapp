@@ -73,10 +73,11 @@ export default async function CreatorsPage() {
   // Kreator tanpa CM (mis. dibuat otomatis dari upload data platform mingguan).
   const withoutCm = await loadCreatorsWithoutCm();
 
-  // Pilihan CM untuk form "Tambah Kreator": SELURUH CM aktif dari tabel Tim —
-  // bukan cmOptions di bawah (yang hanya berisi CM yang sudah punya kreator, jadi
-  // CM baru tidak akan pernah bisa dipilih saat mendaftarkan kreator pertamanya).
-  const { data: activeCms } = canUpload
+  // Pilihan CM untuk form "Tambah Kreator" DAN dropdown CM di modal Edit: SELURUH
+  // CM aktif dari tabel Tim — bukan cmOptions di bawah (yang hanya berisi CM yang
+  // sudah punya kreator, jadi CM baru tidak akan pernah bisa dipilih saat
+  // mendaftarkan kreator pertamanya / memindah kreator ke CM baru).
+  const { data: activeCms } = canUpload || canAssignCm
     ? await supabase
         .from("team_members")
         .select("id, name")
@@ -116,9 +117,12 @@ export default async function CreatorsPage() {
           {canEdit && (
             <>
               {" "}
-              CM bisa mengedit data kreator (username, no HP, RC, rate card, level, domisili, UID,
-              status) lewat tombol <strong>Edit</strong> di setiap baris — setiap perubahan tercatat di
-              audit log.
+              CM bisa mengedit SEMUA data master kreator (username, nama, no HP, link akun, UID,
+              platform, jenis, kelas kreator, niche, followers, kualitas, level, RC live/video, rate
+              card, join date, end date, domisili, alamat, status
+              {canAssignCm && ", CM pemilik"}) lewat tombol <strong>Edit</strong> di setiap baris —
+              setiap perubahan tercatat di audit log. Yang tidak bisa diedit hanya sharing komisi
+              (sync platform) dan GMV (hasil hitung upload mingguan).
             </>
           )}
           {canDelete && (
@@ -175,6 +179,8 @@ export default async function CreatorsPage() {
             canUpload={canUpload}
             canEdit={canEdit}
             canDelete={canDelete}
+            canAssignCm={canAssignCm}
+            cmOptions={(activeCms ?? []).map((m) => ({ id: m.id, name: m.name }))}
           />
         </div>
       </div>

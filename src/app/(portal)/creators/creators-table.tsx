@@ -6,7 +6,7 @@ import { useCreatorFilter } from "@/components/creator-filter";
 import { MAX_BULK_DELETE } from "@/lib/creators/delete";
 import { creatorClassLabel } from "@/lib/creators/creator-class";
 import { updateRateCard } from "./actions";
-import { CreatorEditButton } from "./creator-edit-button";
+import { CreatorEditButton, type EditCmOption } from "./creator-edit-button";
 import { CreatorDeleteDialog, type DeleteTarget } from "./creator-delete-dialog";
 
 /** Master-data row rendered by the creators table (only the columns actually shown). */
@@ -370,12 +370,18 @@ export function CreatorsTable({
   canUpload,
   canEdit,
   canDelete,
+  canAssignCm = false,
+  cmOptions = [],
 }: {
   rows: CreatorTableRow[];
   nowMs: number;
   canUpload: boolean;
   canEdit: boolean;
   canDelete: boolean;
+  /** Izin m8.assign_creator — menampilkan dropdown CM di modal Edit. */
+  canAssignCm?: boolean;
+  /** Daftar CM aktif untuk dropdown CM di modal Edit. */
+  cmOptions?: EditCmOption[];
 }) {
   const { matches, isActive: filterActive } = useCreatorFilter();
 
@@ -695,20 +701,13 @@ export function CreatorsTable({
                     <td className={td}>
                       <div className="flex items-center gap-1">
                         {canEdit && (
+                          // CreatorTableRow memuat semua field EditableCreator,
+                          // jadi barisnya diteruskan apa adanya — tidak ada daftar
+                          // field kedua yang bisa ketinggalan saat kolom ditambah.
                           <CreatorEditButton
-                            creator={{
-                              id: c.id,
-                              name: c.name,
-                              username: c.username,
-                              phone: c.phone,
-                              rc_live: c.rc_live,
-                              rc_video: c.rc_video,
-                              rate_card: c.rate_card,
-                              level: c.level,
-                              domisili: c.domisili,
-                              uid: c.uid,
-                              status: c.status,
-                            }}
+                            creator={c}
+                            cms={cmOptions}
+                            canAssignCm={canAssignCm}
                           />
                         )}
                         {canDelete && (
