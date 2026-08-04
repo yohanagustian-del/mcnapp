@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildBdCsv, buildDetailCsv, buildSummaryCsv } from "../leak-export";
+import { buildBdCsv, buildDetailCsv, buildSummaryCsv, filterLeakDetailCsv } from "../leak-export";
 import type { BdOpportunityShop, CreatorLeakRollup, LeakDetailRow } from "../leak-compute";
 
 /** CSV backup builders — the CM's replacement for the artifact's Excel output. */
@@ -109,5 +109,52 @@ describe("buildBdCsv", () => {
   it("labels a never-partnered shop as belum ada deal", () => {
     const rows = lines(buildBdCsv(WEEK, [{ ...bdShop, dealState: "none" }]));
     expect(rows[1]).toContain("belum ada deal");
+  });
+});
+
+describe("filterLeakDetailCsv", () => {
+  // Per-creator "Detail" download in CM Workspace re-slices the weekly backup CSV,
+  // because platform-era weeks keep no per-product detail in Postgres (0027).
+  const weekly = buildDetailCsv(WEEK, [
+    detail,
+    { ...detail, creatorName: "VikaHere", productId: "P2", productName: "Toner", gmvBocor: 900_000 },
+    { ...detail, creatorName: "lain", productId: "P3", gmvBocor: 100_000 },
+  ]);
+
+  it("keeps only the requested creator's rows, matching case-insensitively", () => {
+    const { csv, rows } = filterLeakDetailCsv(weekly, ["vikahere", "Vika Display Name"]);
+    expect(rows).toBe(1);
+    expect(csv).toContain("VikaHere");
+    expect(csv).not.toContain("creator1");
+    expect(csv).not.toContain("lain");
+  });
+
+  it("matches on the display-name alias too (MCN file may print either)", () => {
+    expect(filterLeakDetailCsv(weekly, [null, "creator1"]).rows).toBe(1);
+  });
+
+  it("survives the source BOM and re-emits the full detail header (with its own BOM)", () => {
+    const { csv } = filterLeakDetailCsv(weekly, ["creator1"]);
+    expect(csv.startsWith("﻿")).toBe(true);
+    expect(lines(csv)[0]).toBe(
+      "week,creator,shop_id,shop_name,product_id,product_name,level_1_category," +
+        "level_2_category,gmv_all_mcn,gmv_tap,gmv_bocor,link_status"
+    );
+  });
+
+  it("re-escapes quoted values instead of corrupting them", () => {
+    const { csv } = filterLeakDetailCsv(weekly, ["creator1"]);
+    expect(csv).toContain('"Shop ""Bagus"""');
+    expect(csv).toContain('"Serum\nWajah"');
+  });
+
+  it("returns 0 rows (header only) when the creator has nothing in that week", () => {
+    const { csv, rows } = filterLeakDetailCsv(weekly, ["tidak-ada"]);
+    expect(rows).toBe(0);
+    expect(lines(csv)).toHaveLength(1);
+  });
+
+  it("ignores blank aliases so an empty creator column never matches everything", () => {
+    expect(filterLeakDetailCsv(weekly, ["", null, undefined]).rows).toBe(0);
   });
 });

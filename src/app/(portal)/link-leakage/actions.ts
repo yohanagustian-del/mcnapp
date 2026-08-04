@@ -12,6 +12,9 @@ import {
   assertValidObjectRef, downloadIngestFile, removeIngestFiles, type IngestObjectRef,
 } from "@/lib/ingest/storage";
 import { runLeakAnalysisFromFiles, type LeakAnalysisResult } from "@/lib/m4/leak-analysis";
+import {
+  LEAK_DETAIL_CSV_HEADER, LEAK_EXPORT_BUCKET, filterLeakDetailCsv, findLeakDetailExport,
+} from "@/lib/m4/leak-export";
 import type { UploadReport } from "@/app/(portal)/tim/actions";
 
 /**
@@ -201,4 +204,120 @@ export async function downloadLeakageCsv(formData: FormData): Promise<{ filename
 
   const suffix = [creatorId, week].filter(Boolean).join("_") || "all";
   return { filename: `leak-detail_${suffix}.csv`, csv: lines.join("\n") };
+}
+
+export type CreatorLeakDetailResult =
+  | {
+      ok: true;
+      filename: string;
+      csv: string;
+      rows: number;
+      /** `detail_table` = leakage_products (era engine); `export_backup` = CSV backup mingguan. */
+      source: "detail_table" | "export_backup";
+    }
+  | { ok: false; error: string };
+
+/** Slug aman untuk nama file unduhan (huruf/angka/dash saja). */
+function fileSlug(value: string): string {
+  return value.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "kreator";
+}
+
+/**
+ * Detail produk bocor SATU kreator pada satu minggu, sebagai CSV (tombol "Detail" di
+ * tabel Link Leakage CM Workspace).
+ *
+ * Dua sumber, dicoba berurutan — bukan dua rumus, hanya dua tempat penyimpanan hasil
+ * dari engine yang sama (CLAUDE.md #4):
+ *   1. `leakage_products` — detail per (shop, produk) era engine M4 lama.
+ *   2. Backup CSV mingguan di bucket privat `leak-exports` — era "rollup saja", di mana
+ *      detail per produk memang tidak masuk Postgres (0027). Baris disaring ke kreator
+ *      ini lewat kolom `creator` (nama/username apa adanya dari file MCN).
+ *
+ * Read-only: tidak menulis apa pun, tidak menghitung ulang bocor. Mengembalikan union
+ * (bukan throw) karena Next.js menyensor pesan error server action di production.
+ *
+ * Scope: sama seperti tabelnya di CM Workspace — CPM hanya boleh mengunduh detail
+ * kreator yang dia pegang (owner_cpm_id), role lain lintas (§2F). Dicek di server,
+ * bukan hanya di UI, karena creatorId datang dari client.
+ */
+export async function downloadCreatorLeakDetail(
+  creatorIdRaw: unknown,
+  weekRaw: unknown
+): Promise<CreatorLeakDetailResult> {
+  try {
+    const actor = await requirePermission("m4.view");
+    const creatorId = String(creatorIdRaw ?? "").trim();
+    const week = String(weekRaw ?? "").trim();
+    if (!creatorId) return { ok: false, error: "Kreator tidak dikenali." };
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(week)) return { ok: false, error: "Minggu tidak valid." };
+
+    const admin = createAdminClient();
+    const { data: creator } = await admin
+      .from("creators")
+      .select("id, name, username, owner_cpm_id")
+      .eq("id", creatorId)
+      .maybeSingle();
+    if (!creator) return { ok: false, error: `Kreator ${creatorId} tidak ditemukan.` };
+    if (actor.role === "cpm" && creator.owner_cpm_id !== actor.id) {
+      return { ok: false, error: "Kreator ini di luar scope Anda." };
+    }
+
+    const filename = `leak-detail_${fileSlug(creator.username || creator.name || creatorId)}_${week}.csv`;
+
+    // 1. Detail era engine (kalau minggu ini memang ditulis engine lama).
+    const products = await fetchAll<LeakDetailRow>(
+      admin,
+      "leakage_products",
+      "week, creator_id, shop_id, shop_name, product_id, product_name, gmv_bocor, link_status",
+      (q) => q.eq("creator_id", creatorId).eq("week", week).order("gmv_bocor", { ascending: false })
+    );
+    if (products.length > 0) {
+      const header = [...LEAK_DETAIL_CSV_HEADER];
+      const lines = [header.join(",")];
+      for (const r of products) {
+        lines.push(
+          [
+            csvCell(r.week), csvCell(creator.name), csvCell(r.shop_id), csvCell(r.shop_name),
+            csvCell(r.product_id), csvCell(r.product_name), csvCell(""), csvCell(""),
+            csvCell(""), csvCell(""),
+            csvCell(r.gmv_bocor === null ? "" : Math.round(Number(r.gmv_bocor))),
+            csvCell(r.link_status),
+          ].join(",")
+        );
+      }
+      return {
+        ok: true, filename, csv: `﻿${lines.join("\r\n")}`,
+        rows: products.length, source: "detail_table",
+      };
+    }
+
+    // 2. Backup CSV mingguan (era platform: detail per produk tidak ada di Postgres).
+    const path = await findLeakDetailExport(admin, week);
+    if (!path) {
+      return {
+        ok: false,
+        error:
+          `Detail per produk untuk minggu ${week} tidak tersedia. Backup CSV analisa hanya ` +
+          "disimpan selama masa retensi (app_config retention.leak_export_days) — jalankan " +
+          "ulang analisa minggu itu di /link-leakage untuk membuatnya kembali.",
+      };
+    }
+    const { data: blob, error: dlError } = await admin.storage.from(LEAK_EXPORT_BUCKET).download(path);
+    if (dlError || !blob) {
+      return { ok: false, error: `Gagal membaca backup analisa minggu ${week}: ${dlError?.message ?? "file kosong"}.` };
+    }
+
+    const { csv, rows } = filterLeakDetailCsv(await blob.text(), [creator.username, creator.name]);
+    if (rows === 0) {
+      return {
+        ok: false,
+        error:
+          `Tidak ada produk bocor tercatat untuk ${creator.name} di minggu ${week} ` +
+          `(kreator ini mungkin 100% via agency link pada minggu tersebut).`,
+      };
+    }
+    return { ok: true, filename, csv, rows, source: "export_backup" };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "Gagal menyiapkan detail bocor." };
+  }
 }

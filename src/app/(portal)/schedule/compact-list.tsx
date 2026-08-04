@@ -1,9 +1,13 @@
 "use client";
 
+import { useMemo } from "react";
 import Link from "next/link";
 import { slotFlags } from "@/lib/schedule/indicators";
 import type { LiveScheduleSlot } from "@/lib/schedule/types";
-import { PAGE_SIZE_10, TableFilterBar, TablePagination, useTableControls } from "@/components/table-controls";
+import {
+  PAGE_SIZE_10, TableFilterBar, TablePagination, useTableControls,
+  type FacetDef, type FacetOption,
+} from "@/components/table-controls";
 
 /** Row shape shared by the compact read-only schedule lists in workspace CM/BizDev. */
 export interface CompactSlotRow {
@@ -25,13 +29,31 @@ function timeRange(slot: LiveScheduleSlot): string {
 const searchUsername = (r: CompactSlotRow) => r.creatorUsername;
 const rowCm = (r: CompactSlotRow) => ({ id: r.ownerCpmId ?? null, name: r.cmName ?? null });
 
+/** Nilai facet "Brand" — slot OFF tidak punya brand; slot tanpa brand = Organik. */
+const ORGANIK_VALUE = "__organik__";
+function slotBrand(r: CompactSlotRow): FacetOption | null {
+  if (r.slot.status === "off") return null;
+  const brand = r.slot.brand_name?.trim();
+  // Nama brand dinormalkan ke huruf kecil sebagai nilai filter supaya "Scarlett" dan
+  // "scarlett" dari dua input tidak jadi dua opsi berbeda; label pakai ejaan aslinya.
+  return brand ? { value: brand.toLowerCase(), label: brand } : { value: ORGANIK_VALUE, label: "Organik" };
+}
+
+/** Nilai facet "Jam" — dibucket per jam mulai (HH), slot OFF/tanpa jam tidak punya nilai. */
+function slotHour(r: CompactSlotRow): FacetOption | null {
+  if (r.slot.status === "off" || !r.slot.start_time) return null;
+  const hh = r.slot.start_time.slice(0, 2);
+  return { value: hh, label: `${hh}:00–${hh}:59` };
+}
+
 /**
  * Read-only compact schedule table for workspace pages (CM / BizDev). Reuses
  * src/lib/schedule/indicators.ts for the PK/TAP/tentative/verification badges — no
  * logic duplicated. Always links out to /schedule for the full editable calendar.
  *
- * `filterable` (CM Workspace) menambah search username kreator + filter CM; paginasi
- * 10 baris per halaman selalu aktif. Semua client-side — daftar sudah dimuat server.
+ * `filterable` (CM Workspace) menambah search username kreator + filter CM, Brand,
+ * Tanggal, dan Jam; paginasi 10 baris per halaman selalu aktif. Semua client-side —
+ * daftar sudah dimuat server, jadi memfilter tidak memicu query Supabase baru.
  */
 export function CompactScheduleList({
   title,
@@ -46,10 +68,31 @@ export function CompactScheduleList({
   emptyLabel: string;
   filterable?: boolean;
 }) {
+  // Opsi tanggal butuh todayIso untuk penanda "hari ini", jadi facet dibangun di sini
+  // (dan di-memo — useTableControls memakai referensinya sebagai dependency).
+  const facets = useMemo<FacetDef<CompactSlotRow>[] | undefined>(() => {
+    if (!filterable) return undefined;
+    return [
+      { key: "brand", label: "Brand", value: slotBrand, emptyLabel: "Belum ada brand pada jadwal ini." },
+      {
+        key: "tanggal",
+        label: "Tanggal",
+        sortBy: "value",
+        emptyLabel: "Belum ada tanggal pada jadwal ini.",
+        value: (r) => ({
+          value: r.slot.schedule_date,
+          label: r.slot.schedule_date === todayIso ? `${r.slot.schedule_date} (hari ini)` : r.slot.schedule_date,
+        }),
+      },
+      { key: "jam", label: "Jam", sortBy: "value", value: slotHour, emptyLabel: "Belum ada jam mulai pada jadwal ini." },
+    ];
+  }, [filterable, todayIso]);
+
   const controls = useTableControls<CompactSlotRow>({
     rows,
     searchText: filterable ? searchUsername : undefined,
     cm: filterable ? rowCm : undefined,
+    facets,
     pageSizes: PAGE_SIZE_10,
     itemLabel: "jadwal",
   });
@@ -117,7 +160,7 @@ export function CompactScheduleList({
                 <tr>
                   <td colSpan={5} className="px-4 py-5 text-center text-slate-400">
                     {controls.filterActive
-                      ? "Tidak ada jadwal yang cocok dengan pencarian username / filter CM."
+                      ? "Tidak ada jadwal yang cocok dengan pencarian username / filter CM, Brand, Tanggal, atau Jam."
                       : emptyLabel}
                   </td>
                 </tr>

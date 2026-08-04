@@ -1,10 +1,59 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { sortRows, type SortDir, type SortValue } from "@/lib/utils/table-sort";
 
 export interface CmFilterOption {
   id: string;
   name: string;
+}
+
+/** Satu opsi pada dropdown filter generik (facet): nilai yang dicocokkan + label tampil. */
+export interface FacetOption {
+  value: string;
+  label: string;
+}
+
+/**
+ * Filter generik multi-select (brand, tanggal, jam, …) di luar filter CM bawaan.
+ * `value(row)` mengembalikan nilai facet baris, atau null kalau baris tidak punya
+ * nilai — baris tanpa nilai tidak menyumbang opsi dan ikut tersaring saat facet
+ * itu aktif (sama seperti perilaku filter CM).
+ */
+export interface FacetDef<T> {
+  /** Kunci unik (state + key React), mis. "brand". */
+  key: string;
+  /** Label tombol dropdown, mis. "Brand". */
+  label: string;
+  value: (row: T) => FacetOption | null;
+  /** Urutkan opsi berdasarkan `value` (mis. tanggal/jam) atau `label` (default). */
+  sortBy?: "label" | "value";
+  /** Teks saat data tidak punya nilai facet sama sekali. */
+  emptyLabel?: string;
+}
+
+/** Facet siap render: opsi diturunkan dari baris + state terpilih. */
+export interface FacetControl {
+  key: string;
+  label: string;
+  options: FacetOption[];
+  selected: string[];
+  toggle: (value: string) => void;
+  emptyLabel: string;
+}
+
+/** Definisi satu kolom yang bisa diurutkan lewat header tabel. */
+export interface SortDef<T> {
+  value: (row: T) => SortValue;
+  /** Arah pertama saat kolom ini baru dipilih — kolom angka biasanya "desc". */
+  firstDir?: SortDir;
+}
+
+export interface SortConfig<T> {
+  /** key kolom → cara membaca nilainya. Key dipakai juga oleh <SortableTh>. */
+  columns: Record<string, SortDef<T>>;
+  /** Urutan awal saat tabel pertama dirender. */
+  initial?: { key: string; dir: SortDir };
 }
 
 /** Ukuran halaman standar untuk tabel padat di workspace. */
@@ -25,15 +74,22 @@ interface UseTableControlsArgs<T> {
    * tidak pernah menawarkan CM tanpa baris.
    */
   cm?: (row: T) => { id: string | null; name: string | null };
+  /**
+   * Filter multi-select tambahan (brand / tanggal / jam / …). Opsi diturunkan dari
+   * baris yang ada — sama seperti filter CM. Memo-kan array ini di pemanggil.
+   */
+  facets?: FacetDef<T>[];
+  /** Kolom yang bisa diurutkan lewat header (asc/desc). Memo-kan di pemanggil. */
+  sort?: SortConfig<T>;
   pageSizes?: readonly number[];
   /** Kata benda di footer, mis. "kreator" / "baris" / "req". */
   itemLabel?: string;
 }
 
 export interface TableControls<T> {
-  /** Baris pada halaman aktif (sudah terfilter + terpaginasi). */
+  /** Baris pada halaman aktif (sudah terfilter + terurut + terpaginasi). */
   visibleRows: T[];
-  /** Seluruh baris yang lolos filter (untuk baris TOTAL / ringkasan). */
+  /** Seluruh baris yang lolos filter, sudah terurut (untuk baris TOTAL / ringkasan). */
   filteredRows: T[];
   total: number;
   start: number;
@@ -51,30 +107,41 @@ export interface TableControls<T> {
   selectedCmIds: string[];
   toggleCm: (id: string) => void;
   hasCmFilter: boolean;
+  facets: FacetControl[];
+  sortKey: string | null;
+  sortDir: SortDir;
+  toggleSort: (key: string) => void;
+  hasSort: boolean;
   filterActive: boolean;
   reset: () => void;
   itemLabel: string;
 }
 
 /**
- * Search (realtime) + filter CM (multi-select) + paginasi, semua client-side: daftar
- * penuh sudah dimuat server component, jadi mengetik tidak memicu query Supabase baru.
- * Dipakai section-section CM Workspace, panel kebutuhan project, dan jadwal live compact.
+ * Search (realtime) + filter CM (multi-select) + facet tambahan + sort header +
+ * paginasi, semua client-side: daftar penuh sudah dimuat server component, jadi
+ * mengetik/menyortir tidak memicu query Supabase baru. Dipakai section-section CM
+ * Workspace, panel kebutuhan project, dan jadwal live compact.
  */
 export function useTableControls<T>({
   rows,
   searchText,
   cm,
+  facets: facetDefs,
+  sort,
   pageSizes = PAGE_SIZES_10_20_50,
   itemLabel = "baris",
 }: UseTableControlsArgs<T>): TableControls<T> {
   const [search, setSearchRaw] = useState("");
   const [selectedCmIds, setSelectedCmIds] = useState<string[]>([]);
+  const [selectedFacets, setSelectedFacets] = useState<Record<string, string[]>>({});
+  const [sortState, setSortState] = useState<{ key: string; dir: SortDir } | null>(sort?.initial ?? null);
   const [pageSize, setPageSizeRaw] = useState<number>(pageSizes[0] ?? 10);
   const [page, setPage] = useState(1);
 
   const hasSearch = Boolean(searchText);
   const hasCmFilter = Boolean(cm);
+  const hasSort = Boolean(sort && Object.keys(sort.columns).length > 0);
 
   const cmOptions = useMemo<CmFilterOption[]>(() => {
     if (!cm) return [];
@@ -88,21 +155,56 @@ export function useTableControls<T>({
       .sort((a, b) => a.name.localeCompare(b.name, "id"));
   }, [rows, cm]);
 
+  // Opsi tiap facet diturunkan dari baris yang ada — tidak pernah menawarkan nilai
+  // yang tak punya baris (sama seperti filter CM di atas).
+  const facetOptions = useMemo<Record<string, FacetOption[]>>(() => {
+    const out: Record<string, FacetOption[]> = {};
+    for (const def of facetDefs ?? []) {
+      const byValue = new Map<string, string>();
+      for (const row of rows) {
+        const option = def.value(row);
+        if (option) byValue.set(option.value, option.label);
+      }
+      out[def.key] = [...byValue]
+        .map(([value, label]) => ({ value, label }))
+        .sort((a, b) =>
+          def.sortBy === "value"
+            ? a.value.localeCompare(b.value, "id", { numeric: true })
+            : a.label.localeCompare(b.label, "id", { numeric: true })
+        );
+    }
+    return out;
+  }, [rows, facetDefs]);
+
   const filteredRows = useMemo(() => {
     const term = search.trim().toLowerCase();
-    const selected = new Set(selectedCmIds);
-    if (!term && selected.size === 0) return rows;
+    const selectedCm = new Set(selectedCmIds);
+    const activeFacets = (facetDefs ?? [])
+      .map((def) => ({ def, selected: new Set(selectedFacets[def.key] ?? []) }))
+      .filter((f) => f.selected.size > 0);
+
+    if (!term && selectedCm.size === 0 && activeFacets.length === 0) return rows;
     return rows.filter((row) => {
       if (term && searchText && !(searchText(row) ?? "").toLowerCase().includes(term)) return false;
-      if (selected.size > 0 && cm) {
+      if (selectedCm.size > 0 && cm) {
         const { id } = cm(row);
-        if (!id || !selected.has(id)) return false;
+        if (!id || !selectedCm.has(id)) return false;
+      }
+      for (const { def, selected } of activeFacets) {
+        const option = def.value(row);
+        if (!option || !selected.has(option.value)) return false;
       }
       return true;
     });
-  }, [rows, search, selectedCmIds, searchText, cm]);
+  }, [rows, search, selectedCmIds, selectedFacets, searchText, cm, facetDefs]);
 
-  const total = filteredRows.length;
+  const sortedRows = useMemo(() => {
+    const column = sortState && sort ? sort.columns[sortState.key] : undefined;
+    if (!column || !sortState) return filteredRows;
+    return sortRows(filteredRows, column.value, sortState.dir);
+  }, [filteredRows, sortState, sort]);
+
+  const total = sortedRows.length;
   const pageCount = Math.max(1, Math.ceil(total / pageSize));
   // Menyempitkan filter bisa membuat halaman aktif melewati akhir daftar —
   // tarik kembali ke halaman terakhir yang masih ada.
@@ -113,8 +215,8 @@ export function useTableControls<T>({
   const safePage = Math.min(page, pageCount);
   const start = (safePage - 1) * pageSize;
   const visibleRows = useMemo(
-    () => filteredRows.slice(start, start + pageSize),
-    [filteredRows, start, pageSize]
+    () => sortedRows.slice(start, start + pageSize),
+    [sortedRows, start, pageSize]
   );
 
   const setSearch = useCallback((value: string) => {
@@ -129,15 +231,47 @@ export function useTableControls<T>({
     setSelectedCmIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
     setPage(1);
   }, []);
+  const toggleFacet = useCallback((key: string, value: string) => {
+    setSelectedFacets((prev) => {
+      const current = prev[key] ?? [];
+      const next = current.includes(value) ? current.filter((v) => v !== value) : [...current, value];
+      return { ...prev, [key]: next };
+    });
+    setPage(1);
+  }, []);
+  const toggleSort = useCallback(
+    (key: string) => {
+      const firstDir = sort?.columns[key]?.firstDir ?? "asc";
+      setSortState((prev) =>
+        prev?.key === key ? { key, dir: prev.dir === "asc" ? "desc" : "asc" } : { key, dir: firstDir }
+      );
+      setPage(1);
+    },
+    [sort]
+  );
   const reset = useCallback(() => {
     setSearchRaw("");
     setSelectedCmIds([]);
+    setSelectedFacets({});
     setPage(1);
   }, []);
 
+  const facets = useMemo<FacetControl[]>(
+    () =>
+      (facetDefs ?? []).map((def) => ({
+        key: def.key,
+        label: def.label,
+        options: facetOptions[def.key] ?? [],
+        selected: selectedFacets[def.key] ?? [],
+        toggle: (value: string) => toggleFacet(def.key, value),
+        emptyLabel: def.emptyLabel ?? `Belum ada ${def.label.toLowerCase()} pada data ini.`,
+      })),
+    [facetDefs, facetOptions, selectedFacets, toggleFacet]
+  );
+
   return {
     visibleRows,
-    filteredRows,
+    filteredRows: sortedRows,
     total,
     start,
     page: safePage,
@@ -154,13 +288,63 @@ export function useTableControls<T>({
     selectedCmIds,
     toggleCm,
     hasCmFilter,
-    filterActive: search.trim() !== "" || selectedCmIds.length > 0,
+    facets,
+    sortKey: sortState?.key ?? null,
+    sortDir: sortState?.dir ?? "asc",
+    toggleSort,
+    hasSort,
+    filterActive:
+      search.trim() !== "" ||
+      selectedCmIds.length > 0 ||
+      Object.values(selectedFacets).some((v) => v.length > 0),
     reset,
     itemLabel,
   };
 }
 
-/** Search box + dropdown filter CM + reset. Tidak merender apa pun kalau keduanya off. */
+/** Dropdown multi-select generik (dipakai filter CM dan semua facet). */
+function MultiSelectFilter({
+  label,
+  options,
+  selected,
+  toggle,
+  emptyLabel,
+}: {
+  label: string;
+  options: FacetOption[];
+  selected: string[];
+  toggle: (value: string) => void;
+  emptyLabel: string;
+}) {
+  return (
+    <details className="relative">
+      <summary className="cursor-pointer list-none rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-700 hover:bg-slate-50">
+        {label} {selected.length > 0 ? `(${selected.length} terpilih)` : "(semua)"} ▾
+      </summary>
+      <div className="absolute left-0 z-20 mt-1 max-h-72 w-64 overflow-y-auto rounded-md border border-slate-200 bg-white p-2 shadow-lg">
+        {options.length === 0 ? (
+          <p className="px-2 py-1 text-xs text-slate-400">{emptyLabel}</p>
+        ) : (
+          options.map((option) => (
+            <label
+              key={option.value}
+              className="flex cursor-pointer items-center gap-2 rounded px-2 py-1 text-sm hover:bg-slate-50"
+            >
+              <input
+                type="checkbox"
+                checked={selected.includes(option.value)}
+                onChange={() => toggle(option.value)}
+              />
+              <span className="truncate">{option.label}</span>
+            </label>
+          ))
+        )}
+      </div>
+    </details>
+  );
+}
+
+/** Search box + filter CM + facet tambahan + reset. Tidak merender apa pun kalau semua off. */
 export function TableFilterBar<T>({
   controls,
   searchPlaceholder = "Cari username kreator…",
@@ -170,9 +354,11 @@ export function TableFilterBar<T>({
   searchPlaceholder?: string;
   className?: string;
 }) {
-  const { hasSearch, hasCmFilter, search, setSearch, cmOptions, selectedCmIds, toggleCm, filterActive, reset } =
-    controls;
-  if (!hasSearch && !hasCmFilter) return null;
+  const {
+    hasSearch, hasCmFilter, search, setSearch, cmOptions, selectedCmIds, toggleCm,
+    facets, filterActive, reset,
+  } = controls;
+  if (!hasSearch && !hasCmFilter && facets.length === 0) return null;
 
   return (
     <div className={`flex flex-wrap items-center gap-2 ${className}`}>
@@ -188,31 +374,25 @@ export function TableFilterBar<T>({
       )}
 
       {hasCmFilter && (
-        <details className="relative">
-          <summary className="cursor-pointer list-none rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-700 hover:bg-slate-50">
-            CM {selectedCmIds.length > 0 ? `(${selectedCmIds.length} terpilih)` : "(semua)"} ▾
-          </summary>
-          <div className="absolute left-0 z-20 mt-1 max-h-72 w-64 overflow-y-auto rounded-md border border-slate-200 bg-white p-2 shadow-lg">
-            {cmOptions.length === 0 ? (
-              <p className="px-2 py-1 text-xs text-slate-400">Belum ada CM pada data ini.</p>
-            ) : (
-              cmOptions.map((option) => (
-                <label
-                  key={option.id}
-                  className="flex cursor-pointer items-center gap-2 rounded px-2 py-1 text-sm hover:bg-slate-50"
-                >
-                  <input
-                    type="checkbox"
-                    checked={selectedCmIds.includes(option.id)}
-                    onChange={() => toggleCm(option.id)}
-                  />
-                  <span className="truncate">{option.name}</span>
-                </label>
-              ))
-            )}
-          </div>
-        </details>
+        <MultiSelectFilter
+          label="CM"
+          options={cmOptions.map((o) => ({ value: o.id, label: o.name }))}
+          selected={selectedCmIds}
+          toggle={toggleCm}
+          emptyLabel="Belum ada CM pada data ini."
+        />
       )}
+
+      {facets.map((facet) => (
+        <MultiSelectFilter
+          key={facet.key}
+          label={facet.label}
+          options={facet.options}
+          selected={facet.selected}
+          toggle={facet.toggle}
+          emptyLabel={facet.emptyLabel}
+        />
+      ))}
 
       {filterActive && (
         <button
@@ -224,6 +404,45 @@ export function TableFilterBar<T>({
         </button>
       )}
     </div>
+  );
+}
+
+/**
+ * Header kolom yang bisa diklik untuk mengurutkan (asc ⇄ desc). Klik pertama pada
+ * kolom baru memakai `firstDir` dari SortConfig (kolom angka biasanya "desc"),
+ * klik berikutnya membalik arah.
+ */
+export function SortableTh<T>({
+  controls,
+  sortKey,
+  className = "",
+  children,
+}: {
+  controls: TableControls<T>;
+  sortKey: string;
+  className?: string;
+  children: React.ReactNode;
+}) {
+  const active = controls.sortKey === sortKey;
+  const dir = active ? controls.sortDir : null;
+
+  return (
+    <th
+      className={`px-4 py-3 ${className}`}
+      aria-sort={dir === "asc" ? "ascending" : dir === "desc" ? "descending" : "none"}
+    >
+      <button
+        type="button"
+        onClick={() => controls.toggleSort(sortKey)}
+        className="inline-flex items-center gap-1 uppercase hover:text-slate-800"
+        title={`Urutkan berdasarkan kolom ini (${dir === "asc" ? "sekarang naik" : dir === "desc" ? "sekarang turun" : "belum diurutkan"})`}
+      >
+        {children}
+        <span aria-hidden="true" className={active ? "text-slate-700" : "text-slate-300"}>
+          {dir === "asc" ? "▲" : dir === "desc" ? "▼" : "↕"}
+        </span>
+      </button>
+    </th>
   );
 }
 
@@ -283,3 +502,5 @@ export function TablePagination<T>({ controls }: { controls: TableControls<T> })
     </div>
   );
 }
+
+export type { SortDir, SortValue };

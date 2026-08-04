@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { parseCsv } from "@/lib/utils/csv";
 import type { BdOpportunityShop, CreatorLeakRollup, LeakDetailRow } from "./leak-compute";
 
 /**
@@ -61,13 +62,19 @@ export function buildSummaryCsv(week: string, creators: CreatorLeakRollup[]): st
   );
 }
 
+/**
+ * Column order of the detail export. Declared once so the per-creator re-export
+ * (filterLeakDetailCsv) emits exactly the columns the full weekly backup has.
+ */
+export const LEAK_DETAIL_CSV_HEADER = [
+  "week", "creator", "shop_id", "shop_name", "product_id", "product_name",
+  "level_1_category", "level_2_category", "gmv_all_mcn", "gmv_tap", "gmv_bocor", "link_status",
+] as const;
+
 /** Per-(creator, shop, product) leak detail CSV (mirrors Leaked_Products_All). */
 export function buildDetailCsv(week: string, detail: LeakDetailRow[]): string {
   return toCsv(
-    [
-      "week", "creator", "shop_id", "shop_name", "product_id", "product_name",
-      "level_1_category", "level_2_category", "gmv_all_mcn", "gmv_tap", "gmv_bocor", "link_status",
-    ],
+    [...LEAK_DETAIL_CSV_HEADER],
     detail.map((d) => [
       week, d.creatorName, d.shopId, d.shopName, d.productId, d.productName,
       d.level1Category, d.level2Category, money(d.gmvAll), money(d.gmvTap),
@@ -200,6 +207,70 @@ export async function pruneLeakExports(
   } catch {
     return 0;
   }
+}
+
+/**
+ * Narrows a stored weekly detail-export CSV down to ONE creator's rows.
+ *
+ * Per-product leak detail is deliberately absent from Postgres for platform-era
+ * weeks (only the weekly backup CSV holds it), so the per-creator "Detail" download
+ * in CM Workspace re-slices that backup instead of re-running the analysis. Pure so
+ * the matching rule is unit-testable.
+ *
+ * `aliases` = the creator's name AND username: the `creator` column carries the value
+ * exactly as printed in the MCN file, which resolveCreatorNames matches against either
+ * one (case-insensitively).
+ */
+export function filterLeakDetailCsv(
+  csvText: string,
+  aliases: Array<string | null | undefined>
+): { csv: string; rows: number } {
+  const wanted = new Set(
+    aliases.map((a) => (a ?? "").trim().toLowerCase()).filter((a) => a !== "")
+  );
+  // Strip the UTF-8 BOM written by toCsv — otherwise the first header parses as "﻿week".
+  const { rows } = parseCsv(csvText.replace(/^﻿/, ""));
+  const matched = rows.filter((r) => wanted.has((r.creator ?? "").trim().toLowerCase()));
+  return {
+    csv: toCsv(
+      [...LEAK_DETAIL_CSV_HEADER],
+      matched.map((r) => LEAK_DETAIL_CSV_HEADER.map((h) => r[h] ?? ""))
+    ),
+    rows: matched.length,
+  };
+}
+
+/**
+ * Finds the newest weekly detail backup for `week` across ALL uploader folders.
+ *
+ * The backup lives under the uid of whoever ran the analysis, and any CM may need
+ * the detail for a creator in their scope — so the lookup scans folders with the
+ * service-role client. Row-level scoping happens in the caller (RBAC + creator scope),
+ * not here. Returns null when that week predates the platform-computed era.
+ */
+export async function findLeakDetailExport(
+  admin: SupabaseClient,
+  week: string
+): Promise<string | null> {
+  const { data: folders, error } = await admin.storage
+    .from(LEAK_EXPORT_BUCKET)
+    .list("", { limit: 200 });
+  if (error || !folders) return null;
+
+  let best: { path: string; createdAt: number } | null = null;
+  for (const folder of folders) {
+    if (!folder.name) continue;
+    const { data: objects } = await admin.storage
+      .from(LEAK_EXPORT_BUCKET)
+      .list(folder.name, { limit: 100, search: `${week}__detail__` });
+    for (const o of objects ?? []) {
+      if (!o.name.startsWith(`${week}__detail__`)) continue;
+      const parsed = o.created_at ? Date.parse(o.created_at) : NaN;
+      const createdAt = Number.isFinite(parsed) ? parsed : 0;
+      if (!best || createdAt > best.createdAt) best = { path: `${folder.name}/${o.name}`, createdAt };
+    }
+  }
+  return best?.path ?? null;
 }
 
 /** Lists this user's export backups (newest first) with fresh signed URLs. */
