@@ -10,6 +10,9 @@ export const ROLES = [
   "campaign_external", "creator_support", "finance",
   // M10 §2.1: ads_support = sub-role of Campaign Ops (separate permissions, not top-level power).
   "ads_support",
+  // M14: finance_lead = Senior/Lead Finance. Only this level may REQUEST a transaction
+  // change (Director still approves); plain `finance` records + reads but cannot request.
+  "finance_lead",
   // M11 §2A: od_viewer = read-only oversight across all divisions; rejected on every mutation.
   "od_viewer",
 ] as const;
@@ -21,6 +24,9 @@ export const ACQUISITION_ROLES: Role[] = ["acquisition_lead", "acquisition_spec"
 export const CM_ROLES: Role[] = ["cm_lead", "cpm"];
 // M10 §2.1: Campaign Ops division = campaign_ops (lead/assign) + ads_support (execute/input).
 export const ADS_ROLES: Role[] = ["campaign_ops", "ads_support"];
+// M14: divisi Finance — lead (senior) + staff. Keduanya melihat dimensi pembayaran;
+// hanya finance_lead yang boleh MENGAJUKAN perubahan transaksi (approval tetap Director).
+export const FINANCE_ROLES: Role[] = ["finance_lead", "finance"];
 
 /**
  * M9 external principal. `creator_user` is NOT a team_members role — it is a separate
@@ -49,7 +55,7 @@ export interface NavItem {
 export const NAV_ITEMS: NavItem[] = [
   { href: "/dashboard", label: "Dasbor", roles: "all" },
   { href: "/creators", label: "Kreator", roles: "all" },
-  { href: "/deals", label: "Deal Brand", roles: [...MANAGEMENT_ROLES, ...BIZDEV_ROLES, "finance"] },
+  { href: "/deals", label: "Deal Brand", roles: [...MANAGEMENT_ROLES, ...BIZDEV_ROLES, ...FINANCE_ROLES] },
   { href: "/deals/baru", label: "Registrasi Deal", roles: [...MANAGEMENT_ROLES, "bizdev_lead", "bizdev"] },
   { href: "/deals/import", label: "Import Master Deal", roles: [...MANAGEMENT_ROLES, "bizdev_lead", "bd_admin"] },
   // Module 0.5: shared ingest (MCN + TAP) — process-on-ingest, drop-raw (matrix §2.8).
@@ -62,7 +68,10 @@ export const NAV_ITEMS: NavItem[] = [
   // Hidden from nav: postponed until production data is complete (user decision 2026-07-08).
   // Route & /predictor code left intact — only the menu entry is disabled.
   // { href: "/predictor", label: "Prediksi Deal (M6)", roles: [...MANAGEMENT_ROLES, "bizdev_lead", "bizdev"] },
-  { href: "/projects", label: "Special Project (M7)", roles: [...MANAGEMENT_ROLES, "cm_lead", "bizdev_lead", "acquisition_lead", "campaign_ops", "finance"] },
+  { href: "/projects", label: "Special Project (M7)", roles: [...MANAGEMENT_ROLES, "cm_lead", "bizdev_lead", "acquisition_lead", "campaign_ops", ...FINANCE_ROLES] },
+  // M14 Finance: transaksi pembayaran klien. bd_admin ikut melihat (invoicing).
+  // od_viewer SENGAJA tidak: baris transaksi memuat rekening tujuan (lihat RLS 0032).
+  { href: "/finance/transactions", label: "Transaksi Finance", roles: [...MANAGEMENT_ROLES, ...FINANCE_ROLES, "bd_admin"] },
   { href: "/workspace/cm", label: "CM Workspace", roles: [...MANAGEMENT_ROLES, ...CM_ROLES] },
   { href: "/workspace/bizdev", label: "BizDev Workspace", roles: [...MANAGEMENT_ROLES, ...BIZDEV_ROLES] },
   { href: "/workspace/acquisition", label: "Acquisition Workspace", roles: [...MANAGEMENT_ROLES, ...ACQUISITION_ROLES] },
@@ -126,7 +135,7 @@ export const PERMISSIONS: Record<string, Role[]> = {
   // M7 §2.7: buat/edit project & kelola peserta/man power = management + lead terkait + PM (campaign_ops)
   "m7.manage": [...MANAGEMENT_ROLES, "cm_lead", "bizdev_lead", "acquisition_lead", "campaign_ops"],
   // M7: input metrik harian (GMV/ads/komisi) — pengelola project + finance (dimensi biaya/ads)
-  "m7.metrics": [...MANAGEMENT_ROLES, "cm_lead", "bizdev_lead", "acquisition_lead", "campaign_ops", "finance"],
+  "m7.metrics": [...MANAGEMENT_ROLES, "cm_lead", "bizdev_lead", "acquisition_lead", "campaign_ops", ...FINANCE_ROLES],
   // ===== M8 §2F RBAC matrix =====
   // Assign/re-assign creator ke CPM: Director/Head + CM Lead
   "m8.assign_creator": [...MANAGEMENT_ROLES, "cm_lead"],
@@ -152,7 +161,7 @@ export const PERMISSIONS: Record<string, Role[]> = {
   // Tracking closing & referral: management + Akuisisi
   "m8.acquisition": [...MANAGEMENT_ROLES, ...ACQUISITION_ROLES],
   // Tandai komisi referral dibayar (dimensi pembayaran → + finance)
-  "m8.referral_pay": [...MANAGEMENT_ROLES, "acquisition_lead", "finance"],
+  "m8.referral_pay": [...MANAGEMENT_ROLES, "acquisition_lead", ...FINANCE_ROLES],
   // Log approach external creator
   "m8.external": [...MANAGEMENT_ROLES, "campaign_external"],
   // Tracker shop potensial CM→BizDev (lead manual, pelengkap lead otomatis M4)
@@ -204,6 +213,17 @@ export const PERMISSIONS: Record<string, Role[]> = {
   "m12.run_maintenance": ["director"] as Role[],
   // Manual permanent creator-data deletion (compliance): Director only + audit.
   "m12.purge_manual": ["director"] as Role[],
+  // ===== M14 Finance — transaksi & perubahan transaksi (CLAUDE.md #9) =====
+  // Catat transaksi baru: menambah data, tidak merugikan → auto (CLAUDE.md #2).
+  // Finance staff ikut, karena mereka yang menerima bukti bayar dari klien.
+  "finance.transaction_create": [...MANAGEMENT_ROLES, ...FINANCE_ROLES],
+  // AJUKAN perubahan transaksi (klien ganti metode/rekening pembayaran): Senior/Lead
+  // Finance saja — SENGAJA tanpa `finance` staff. Pengajuan belum mengubah apa pun;
+  // field terkunci baru berlaku setelah approval Director di bawah.
+  "finance.request_change": [...MANAGEMENT_ROLES, "finance_lead"],
+  // APPROVE/TOLAK perubahan: Director only. Mengubah nominal atau rekening tujuan
+  // berpotensi merugikan perusahaan → gate approval, bukan alert (CLAUDE.md #2).
+  "finance.approve_change": ["director"] as Role[],
   // NOTE: od_viewer appears in NO write permission by design — every mutation is rejected
   // server-side (requirePermission) in addition to RLS. See __tests__/rbac.test.ts.
 };

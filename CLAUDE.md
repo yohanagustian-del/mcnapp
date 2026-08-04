@@ -26,9 +26,14 @@ Platform internal MCN MEA (agency creator TikTok/Shopee). Menggabungkan tools te
 - Perubahan dari DATA PLATFORM yang merugikan (sharing turun, link makin bocor, ads > komisi) → ALERT, bukan approval (tak bisa diubah manual).
 - SELALU tulis ke `audit_logs` (type: auto | approval | platform_alert).
 
-### 3. Read-only (jangan bikin endpoint edit)
+### 3. Read-only = field bersumber PLATFORM (jangan bikin endpoint edit)
 - `agency_links.link_status` → diisi engine M4 dari upload mingguan. TIDAK ADA edit manual, siapa pun.
 - `creators.commission_share` → sync dari platform. Read-only. Turun = alert.
+- **BATAS aturan ini (direvisi 2026-08-04):** read-only absolut hanya untuk field yang DIHITUNG
+  engine atau DISYNC dari platform — di situ edit manual = memalsukan data platform.
+- Catatan internal atas kesepakatan dengan pihak luar (mis. transaksi finance: metode & tujuan
+  pembayaran klien) BUKAN data platform. Kesepakatan memang bisa berubah → boleh diubah, TAPI
+  lewat jalur approval (#9), bukan UPDATE langsung dan bukan edit di DB.
 
 ### 4. Satu sumber kebenaran (jangan duplikasi logic)
 - Report → M2. Link status & lead → M4. Proyeksi GMV → `projectGmv()` shared (M5+M6).
@@ -61,6 +66,24 @@ Platform internal MCN MEA (agency creator TikTok/Shopee). Menggabungkan tools te
 - Signature: `projectGmv(creatorId, subCategory, priceSegment, window=28d) → {min, max}`
 - Selalu return range + disclaimer. Jangan bikin dua versi.
 
+### 9. Transaksi finance BOLEH diubah — lewat change request + approval Director (M14, baru 2026-08-04)
+Klien nyata mengubah metode/rekening pembayaran setelah transaksi tercatat. Sebelum aturan ini
+satu-satunya jalan adalah edit langsung di DB — tanpa jejak, tanpa persetujuan. Aturan barunya:
+- **Pengaju**: Senior/Lead Finance (role `finance_lead`) + management. Staff `finance` TIDAK boleh
+  mengajukan — hanya mencatat transaksi baru & membaca.
+- **Pemutus**: Director SAJA (`finance.approve_change`). Head/SPV pun tidak. Pengaju ≠ pemutus.
+- **Field terkunci** (nominal, metode, termin, status bayar, bank/rekening/nama pemilik, invoice,
+  jatuh tempo, pihak terkait) → masuk `finance_transaction_changes` status `menunggu`; nilai lama
+  tetap berlaku sampai Director approve. Daftarnya dari `app_config finance.guarded_fields`.
+- **Field bebas** (keterangan) → berlaku langsung + audit `auto` (tidak merugikan, #2).
+- **TIDAK ADA UPDATE langsung** ke field terkunci. Penegakan di DB (trigger
+  `guard_finance_txn_update`), bukan cuma di server action — server action pakai service-role
+  yang bypass RLS, jadi trigger adalah penjaga yang tak bisa dilewati. Satu-satunya jalur yang
+  boleh menyentuhnya: `apply_finance_change()`, dipanggil setelah approval Director.
+- Satu transaksi maksimal SATU pengajuan `menunggu` (unique index) — kalau tidak, dua pengajuan
+  yang bertentangan bisa di-approve berurutan dan yang terakhir menang diam-diam.
+- Semua tahap (ajukan / approve / tolak / batal) → `audit_logs` type `approval`.
+
 ## Konvensi kode
 - DB: snake_case. Kode: camelCase. Komponen: PascalCase.
 - ID entity: `CRT-`, `DEAL-`, `LNK-` (text PK, generate util terpusat).
@@ -70,14 +93,21 @@ Platform internal MCN MEA (agency creator TikTok/Shopee). Menggabungkan tools te
 - UI label Bahasa Indonesia; kode/komentar Bahasa Inggris.
 
 ## Enum penting (lihat migration untuk lengkap)
-- role: director|head|spv|cm_lead|cpm|bizdev_lead|bizdev|campaign_ops|bd_admin|acquisition_lead|acquisition_spec|campaign_external|creator_support|finance
+- role: director|head|spv|cm_lead|cpm|bizdev_lead|bizdev|campaign_ops|bd_admin|acquisition_lead|acquisition_spec|campaign_external|creator_support|finance_lead|finance|ads_support|od_viewer
 - link_status: via_agency|bocor_sebagian|bocor_total|belum_ada_link
+- finance_payment_method: transfer_bank|virtual_account|ewallet|qris|kartu_kredit|tunai|potong_komisi
+- finance_change_status: menunggu|approved|ditolak|dibatalkan
 - price_segment: low(<180k)|entry(180k-800k)|sweet(800k-3.6jt)|high(3.6jt-8jt)|premium(>8jt)
 
 ## RBAC
 - Enforce di server (RLS + middleware), bukan cuma UI.
 - Management lihat cross-team; Lead lihat tim; staff lihat scope sendiri; Finance lihat dimensi pembayaran.
-- Director = owner konfigurasi OKR (target + reward) via Dashboard Director.
+- Director = owner konfigurasi OKR (target + reward) via Dashboard Director, DAN satu-satunya
+  pemberi approval perubahan transaksi finance (#9).
+- Divisi Finance dua tingkat: `finance_lead` (Senior/Lead — boleh mengajukan perubahan transaksi)
+  dan `finance` (staff — catat & baca saja).
+- `/finance/transactions` ditutup untuk `od_viewer`: baris transaksi memuat rekening tujuan,
+  di luar cakupan oversight OD (RLS 0032).
 
 ## Urutan kerja
 Ikut `docs/BUILD_PLAN.md`. Fase 0 (fondasi) blocking semua. Jangan lompat fase.

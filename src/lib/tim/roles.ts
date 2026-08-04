@@ -33,6 +33,7 @@ export const ROLE_TEAM_GROUP: Record<Role, TeamGroup> = {
   acquisition_spec: "acquisition",
   campaign_external: "external",
   creator_support: "support",
+  finance_lead: "finance",
   finance: "finance",
   od_viewer: "od",
 };

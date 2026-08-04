@@ -17,7 +17,10 @@ const ROLE_LABELS: Record<string, string> = {
   acquisition_spec: "Acquisition Specialist",
   campaign_external: "Campaign External",
   creator_support: "Creator Support",
+  finance_lead: "Senior / Lead Finance",
   finance: "Finance",
+  ads_support: "Ads Support",
+  od_viewer: "OD Oversight",
 };
 
 export default async function PortalLayout({ children }: { children: React.ReactNode }) {

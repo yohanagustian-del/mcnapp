@@ -2,6 +2,50 @@
 
 Status per sesi 2026-07-09 (sesi 5, backlog-sweep + audit deploy). Baca ini + `CLAUDE.md` sebelum lanjut.
 
+## ⚡ SESI 2026-08-04 — M14 FINANCE: MEKANISME UBAH TRANSAKSI + APPROVAL DIRECTOR
+**Masalah (QA `/finance/transactions/TRX-202608-0001`)**: halaman transaksi finance belum ada di repo,
+dan tidak ada jalur untuk Senior/Lead Finance mengubah transaksi ketika klien ganti metode/rekening
+pembayaran. Satu-satunya cara sebelumnya: edit langsung di DB — tanpa jejak, tanpa persetujuan.
+
+**Keputusan aturan (house rule DIREVISI, sesuai permintaan)**: CLAUDE.md #3 dipersempit — read-only
+absolut hanya untuk field yang dihitung engine / disync platform (`agency_links.link_status`,
+`creators.commission_share`). Transaksi finance = catatan internal atas kesepakatan, bukan data
+platform → BOLEH berubah, tapi hanya lewat change request + approval Director. Aturan baru ditulis
+sebagai **CLAUDE.md #9**. Ini bukan pengecualian terhadap #2, justru penerapannya.
+
+**Tiga tingkat izin (sengaja dipisah)**: staff `finance` catat+baca · `finance_lead` (role BARU,
+Senior/Lead Finance) mengajukan · **Director SAJA** yang menyetujui. Head/SPV tidak bisa menyetujui;
+pengaju tidak bisa menyetujui pengajuannya sendiri.
+
+**Penegakan di DB, bukan cuma server action** — server action pakai service-role (bypass RLS), jadi
+penjaga yang tak bisa dilewati adalah TRIGGER: `guard_finance_txn_update()` menolak setiap UPDATE
+yang menyentuh field terkunci. Satu-satunya jalur sah `apply_finance_change()` (SECURITY DEFINER,
+atomic: patch transaksi + tandai pengajuan approved; whitelist kolom + `jsonb_populate_record`
+sehingga tak ada dynamic SQL dan `id`/`created_by`/`created_at` tak bisa diselundupkan).
+
+**Files**: `supabase/migrations/0031_role_finance_lead.sql` (enum sendiri — label enum baru tak boleh
+dipakai di transaksi yang sama), `0032_finance_transactions.sql` (tabel + trigger + RPC + RLS +
+`app_config finance.guarded_fields`), `src/lib/finance/transaction.ts` (enum/label + nomor
+`TRX-YYYYMM-NNNN`), `src/lib/finance/change-request.ts` (diff, partisi approval-vs-langsung, validasi
+Rupiah/tanggal/enum — pure, 0 LLM), `src/app/(portal)/finance/transactions/{page.tsx,actions.ts}`,
+`.../[id]/{page.tsx,change-request-form.tsx}`, RBAC di `src/lib/rbac.ts` (+`FINANCE_ROLES`).
+
+**Migration BELUM di-apply ke staging/production** — tidak ada kredensial DB di sesi ini. 0031 harus
+jalan SEBELUM 0032 (dan sebagai transaksi terpisah). Setelah apply, `TRX-202608-0001` baru ada
+isinya kalau transaksi dicatat lewat form "Catat transaksi baru" di `/finance/transactions`
+(nomor dibuat berurutan per bulan oleh `next_finance_trx_id`, jadi transaksi pertama Agustus 2026
+otomatis bernomor TRX-202608-0001).
+
+**Verifikasi**: typecheck 0 error · **677 pass + 2 skip** (+33 tes baru: change-request 22, RBAC
+finance 11) · `next build` sukses (route `/finance/transactions` & `/finance/transactions/[id]`
+terdaftar). Migration 0031+0032 dijalankan di Postgres 16 lokal dan 10 skenario diuji langsung
+lewat SQL: UPDATE langsung field terkunci ditolak · keterangan boleh langsung · nilai transaksi
+TIDAK berubah selama pengajuan menunggu · approve menerapkan semuanya sekali jalan · approve dua
+kali ditolak · trigger kembali menjaga setelah apply (flag transaction-local) · dua pengajuan
+menunggu ditolak (unique index) · alasan kosong ditolak (check) · kolom di luar whitelist ditolak ·
+daftar field terkunci benar-benar mengikuti `app_config` (digeser → perilaku ikut bergeser) ·
+RLS: finance_lead baca 2 baris, od_viewer & creator_user 0 baris, user biasa gagal UPDATE.
+
 ## ⚡ SESI 2026-07-29 — ARTIFAK "AGENCY LEAKED GENERATOR" DIPINDAH KE DALAM PLATFORM (staging)
 **Masalah**: halaman `/link-leakage` cuma menampung hasil export artifak HTML eksternal. CM harus: export MCN+TAP → buka artifak → upload 3 file di sana → download 2 Excel → upload lagi ke `/ingest` Lane 2. File MCN+TAP yang sama sudah diupload di Lane 1 untuk agregat performa.
 
