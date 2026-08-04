@@ -10,6 +10,7 @@ import {
   refreshGmvPostJoin,
   registerCreator,
 } from "./actions";
+import { ActionForm } from "./action-form";
 
 export const dynamic = "force-dynamic";
 
@@ -97,7 +98,14 @@ export default async function AcquisitionWorkspacePage() {
             Creator baru langsung berstatus bergabung (binding) dan tersedia di master kreator sampai
             di-assign ke CM.
           </p>
-          <form action={registerCreator} className="mt-3 grid gap-2 rounded-lg border border-slate-200 bg-white p-4 sm:grid-cols-2">
+          <ActionForm
+            action={registerCreator}
+            className="mt-3 grid gap-2 rounded-lg border border-slate-200 bg-white p-4 sm:grid-cols-2"
+            submitLabel="Daftarkan Creator"
+            pendingLabel="Mendaftarkan…"
+            buttonClassName={`${btn} sm:col-span-2`}
+            resetOnSuccess
+          >
             {/* --- Wajib --- */}
             <input name="username" required placeholder="Username" className={input} />
             <input name="name" required placeholder="Nama Creator" className={input} />
@@ -141,8 +149,7 @@ export default async function AcquisitionWorkspacePage() {
             <input name="rc_live" placeholder="RC Live (opsional)" className={input} />
             <input name="rc_video" placeholder="RC Video (opsional)" className={input} />
             <input name="rate_card" placeholder="Rate Card Rp (opsional)" className={input} />
-            <button type="submit" className={`${btn} sm:col-span-2`}>Daftarkan Creator</button>
-          </form>
+          </ActionForm>
         </section>
       )}
 
@@ -173,7 +180,14 @@ export default async function AcquisitionWorkspacePage() {
         {canRecord && (
           <div>
             <h2 className="text-lg font-medium">Catat Closing Binding</h2>
-            <form action={recordAcquisition} className="mt-3 grid gap-2 rounded-lg border border-slate-200 bg-white p-4 sm:grid-cols-2">
+            <ActionForm
+              action={recordAcquisition}
+              className="mt-3 grid gap-2 rounded-lg border border-slate-200 bg-white p-4 sm:grid-cols-2"
+              submitLabel="Catat Binding"
+              pendingLabel="Mencatat…"
+              buttonClassName={`${btn} sm:col-span-2`}
+              resetOnSuccess
+            >
               <select name="creator_id" required className={input}>
                 <option value="">— creator —</option>
                 {(creators ?? []).map((c) => <option key={c.id} value={c.id}>{c.name} ({c.id}, {c.status})</option>)}
@@ -187,11 +201,17 @@ export default async function AcquisitionWorkspacePage() {
                 <input type="date" name="binding_date" required className={`${input} flex-1 text-slate-900`} />
               </label>
               <input name="notes" placeholder="Catatan" className={input} />
-              <button type="submit" className={`${btn} sm:col-span-2`}>Catat Binding</button>
-            </form>
+            </ActionForm>
 
             <h2 className="mt-6 text-lg font-medium">Catat Referral (Ajak Teman)</h2>
-            <form action={recordReferral} className="mt-3 grid gap-2 rounded-lg border border-slate-200 bg-white p-4 sm:grid-cols-2">
+            <ActionForm
+              action={recordReferral}
+              className="mt-3 grid gap-2 rounded-lg border border-slate-200 bg-white p-4 sm:grid-cols-2"
+              submitLabel="Catat Referral"
+              pendingLabel="Mencatat…"
+              buttonClassName={`${btn} sm:col-span-2`}
+              resetOnSuccess
+            >
               <select name="new_creator_id" required className={input}>
                 <option value="">— creator baru —</option>
                 {(creators ?? []).map((c) => <option key={c.id} value={c.id}>{c.name} ({c.id})</option>)}
@@ -201,8 +221,7 @@ export default async function AcquisitionWorkspacePage() {
                 <option value="platform">Program referral platform</option>
               </select>
               <input name="referrer_creator_id" placeholder="Creator perujuk (CRT-..., wajib bila antar-creator)" className={`${input} sm:col-span-2`} />
-              <button type="submit" className={`${btn} sm:col-span-2`}>Catat Referral</button>
-            </form>
+            </ActionForm>
           </div>
         )}
       </section>
@@ -212,9 +231,13 @@ export default async function AcquisitionWorkspacePage() {
         <div className="flex items-center justify-between">
           <h2 className="text-lg font-medium">Closing & Handoff ke CM</h2>
           {canRecord && (
-            <form action={refreshGmvPostJoin}>
-              <button type="submit" className={btn}>Refresh GMV Post-Join (window KR)</button>
-            </form>
+            <ActionForm
+              action={refreshGmvPostJoin}
+              submitLabel="Refresh GMV Post-Join (window KR)"
+              pendingLabel="Menghitung…"
+              buttonClassName={btn}
+              compact
+            />
           )}
         </div>
         <div className="mt-3 overflow-x-auto rounded-lg border border-slate-200 bg-white">
@@ -255,13 +278,16 @@ export default async function AcquisitionWorkspacePage() {
                       {a.handoff_done ? (
                         <span className="rounded-full bg-green-100 px-2 py-0.5 text-xs font-medium text-green-800">selesai</span>
                       ) : canRecord ? (
-                        <form action={markHandoffDone}>
+                        <ActionForm
+                          action={markHandoffDone}
+                          submitLabel="Tandai handoff"
+                          pendingLabel="Memproses…"
+                          buttonClassName={`${btnSmall} bg-slate-900 text-white`}
+                          buttonTitle={c?.owner_cpm_id ? undefined : "Creator belum di-assign CPM"}
+                          compact
+                        >
                           <input type="hidden" name="acquisition_id" value={a.id} />
-                          <button type="submit" className={`${btnSmall} bg-slate-900 text-white`}
-                            title={c?.owner_cpm_id ? "" : "Creator belum di-assign CPM"}>
-                            Tandai handoff
-                          </button>
-                        </form>
+                        </ActionForm>
                       ) : "belum"}
                     </td>
                   </tr>
@@ -300,10 +326,15 @@ export default async function AcquisitionWorkspacePage() {
                   <td className="px-4 py-2">{rupiah(r.commission_amount)}</td>
                   <td className="px-4 py-2">
                     {r.commission_status === "dibayar" ? "dibayar" : canPay && r.referral_source === "antar_creator" ? (
-                      <form action={markReferralPaid}>
+                      <ActionForm
+                        action={markReferralPaid}
+                        submitLabel="Tandai dibayar"
+                        pendingLabel="Memproses…"
+                        buttonClassName={`${btnSmall} bg-green-600 text-white`}
+                        compact
+                      >
                         <input type="hidden" name="referral_id" value={r.id} />
-                        <button type="submit" className={`${btnSmall} bg-green-600 text-white`}>Tandai dibayar</button>
-                      </form>
+                      </ActionForm>
                     ) : r.commission_status}
                   </td>
                 </tr>
