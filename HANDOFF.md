@@ -30,6 +30,20 @@ dipakai di transaksi yang sama), `0032_finance_transactions.sql` (tabel + trigge
 Rupiah/tanggal/enum — pure, 0 LLM), `src/app/(portal)/finance/transactions/{page.tsx,actions.ts}`,
 `.../[id]/{page.tsx,change-request-form.tsx}`, RBAC di `src/lib/rbac.ts` (+`FINANCE_ROLES`).
 
+**⚠ APP-nya BEDA REPO.** `/finance/transactions` di `web-internal-mea.vercel.app` dilayani
+**`MEAgrup/AgencyAPP`**, BUKAN `mcnapp` (dikonfirmasi user; `mcnapp` tidak punya route/tabel finance
+sama sekali sebelum sesi ini). `MEAgrup/AgencyAPP` tidak bisa dilampirkan ke sesi ini — beda owner,
+`add_repo` menolak dengan `cross-tier adds are not supported`. `yohanagustian-del/agencyapp` yang
+bisa dilampirkan ternyata repo dokumen CDPS, bukan app-nya.
+**Fallback yang dibuat**: `docs/port/finance-transaction-approval/` — versi LEPAS dari mekanisme ini
+(migration standalone tanpa schema MCN MEA, logika TS nol-dependensi, harness uji-diri 11 skenario,
+panduan port). Implementasi di `mcnapp` tetap berlaku sebagai acuan yang berjalan. Diuji di Postgres
+16 **DB kosong**: migration apply bersih + idempotent (2×), FK auto-attach terbukti dua arah (dipasang
+kalau tabel tujuan ada, dilewati kalau tidak), `verify.sql` 11/11 lulus lalu rollback bersih,
+`change-request.ts` lulus `tsc --strict` tanpa node_modules/alias/lib DOM.
+**Jalur paling bersih untuk melanjutkan**: buka sesi baru dengan `MEAgrup/AgencyAPP` sebagai source
+AWAL, lalu tempel port kit itu (jangan rancang ulang).
+
 **Migration BELUM di-apply ke staging/production** — tidak ada kredensial DB di sesi ini. 0031 harus
 jalan SEBELUM 0032 (dan sebagai transaksi terpisah). Setelah apply, `TRX-202608-0001` baru ada
 isinya kalau transaksi dicatat lewat form "Catat transaksi baru" di `/finance/transactions`
