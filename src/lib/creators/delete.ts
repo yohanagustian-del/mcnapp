@@ -10,7 +10,8 @@
  *                report terkirim, komisi akuisisi/referral, request campaign,
  *                akun portal, dst). Ada satu baris saja → hapus DITOLAK; kreator
  *                cukup di-set status `nonaktif`.
- *  - DERIVED   : hasil turunan upload data platform mingguan / engine M4-M5.
+ *  - DERIVED   : hasil turunan upload data platform mingguan / engine M4-M5,
+ *                plus riwayat internal tentang kreator (merge map dedup).
  *                Tidak bermakna tanpa kreatornya dan akan terbentuk lagi pada
  *                upload berikutnya → ikut dihapus bersama kreator.
  *
@@ -58,7 +59,6 @@ export const MATERIAL_CHILDREN: CreatorChildRef[] = [
   { table: "creator_complaints", column: "creator_id", label: "komplain kreator (M9)" },
   { table: "creator_feedback", column: "creator_id", label: "feedback kreator (M9)" },
   { table: "creator_pending_registrations", column: "creator_id", label: "registrasi tertunda" },
-  { table: "creators_merge_map", column: "winner_id", label: "riwayat merge kreator" },
 ];
 
 /**
@@ -66,8 +66,16 @@ export const MATERIAL_CHILDREN: CreatorChildRef[] = [
  *
  * Urutan tidak penting (semua difilter by creator_id, tidak ada FK antar mereka
  * yang menghalangi), tapi dijalankan sebelum baris `creators` dihapus.
+ *
+ * `creators_merge_map` ada di sini, bukan di material: isinya riwayat dedup
+ * (loser_id → winner_id) TENTANG kreator, bukan data komersial milik kreator.
+ * Dedup sekali jalan 30 Juli 2026 memetakan 2.054 baris duplikat ke 588 winner,
+ * jadi selama dia material praktis SELURUH master kreator jadi tak bisa dihapus
+ * dan fitur hapus mati total. Baris merge yang menunjuk winner yang sudah tidak
+ * ada pun tidak punya makna, jadi ikut terhapus.
  */
 export const DERIVED_CHILDREN: CreatorChildRef[] = [
+  { table: "creators_merge_map", column: "winner_id", label: "riwayat merge kreator" },
   { table: "platform_metrics_raw", column: "creator_id", label: "metrik platform mentah" },
   { table: "transactions_all", column: "creator_id", label: "transaksi (CSV all)" },
   { table: "transactions_agency_link", column: "creator_id", label: "transaksi (CSV agency link)" },

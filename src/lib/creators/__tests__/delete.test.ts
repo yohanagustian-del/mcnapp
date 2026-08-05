@@ -52,6 +52,17 @@ describe("klasifikasi anak creators (hapus kreator)", () => {
     }
   });
 
+  /**
+   * Riwayat dedup bukan data komersial milik kreator. Kalau dia material,
+   * 588 dari 595 kreator produksi (dedup 30 Juli 2026) jadi permanen tak bisa
+   * dihapus dan fitur hapus mati total — regresi yang mahal untuk diulang.
+   */
+  it("creators_merge_map ada di derived, bukan material", () => {
+    expect(MATERIAL_CHILDREN.some((c) => c.table === "creators_merge_map")).toBe(false);
+    const mm = DERIVED_CHILDREN.find((c) => c.table === "creators_merge_map");
+    expect(mm?.column).toBe("winner_id");
+  });
+
   /** referrals punya DUA FK (perekrut + kreator baru) — keduanya harus diperiksa. */
   it("memeriksa kedua kolom FK referrals", () => {
     const cols = MATERIAL_CHILDREN.filter((c) => c.table === "referrals").map((c) => c.column);
