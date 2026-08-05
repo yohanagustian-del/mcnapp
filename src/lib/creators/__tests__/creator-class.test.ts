@@ -9,11 +9,11 @@ import {
 } from "../creator-class";
 
 describe("kelas kreator — nilai & label", () => {
-  it("hanya tiga kelas: Reguler, Top Creator, Influencer", () => {
+  it("hanya tiga kelas: Reguler, Kreator Prioritas, Influencer", () => {
     expect(CREATOR_CLASSES).toEqual(["reguler", "top_creator", "influencer"]);
     expect(CREATOR_CLASS_OPTIONS.map((o) => o.label)).toEqual([
       "Reguler",
-      "Top Creator",
+      "Kreator Prioritas",
       "Influencer",
     ]);
   });
@@ -27,11 +27,19 @@ describe("kelas kreator — nilai & label", () => {
 describe("parseCreatorClass", () => {
   it("menerima label persis seperti di template", () => {
     expect(parseCreatorClass("Reguler")).toBe("reguler");
-    expect(parseCreatorClass("Top Creator")).toBe("top_creator");
+    expect(parseCreatorClass("Kreator Prioritas")).toBe("top_creator");
     expect(parseCreatorClass("Influencer")).toBe("influencer");
   });
 
+  /** Sheet lama & template yang sudah ter-download masih menulis "Top Creator". */
+  it("masih menerima label lama Top Creator", () => {
+    expect(parseCreatorClass("Top Creator")).toBe("top_creator");
+    expect(parseCreatorClass("top")).toBe("top_creator");
+  });
+
   it("toleran terhadap kapital, spasi, underscore, dan hyphen", () => {
+    expect(parseCreatorClass("  kreator prioritas ")).toBe("top_creator");
+    expect(parseCreatorClass("KREATOR_PRIORITAS")).toBe("top_creator");
     expect(parseCreatorClass("  top creator ")).toBe("top_creator");
     expect(parseCreatorClass("TOP_CREATOR")).toBe("top_creator");
     expect(parseCreatorClass("top-creator")).toBe("top_creator");
@@ -58,7 +66,7 @@ describe("parseCreatorClass", () => {
 describe("creatorClassLabel", () => {
   it("memetakan nilai DB ke label tampilan", () => {
     expect(creatorClassLabel("reguler")).toBe("Reguler");
-    expect(creatorClassLabel("top_creator")).toBe("Top Creator");
+    expect(creatorClassLabel("top_creator")).toBe("Kreator Prioritas");
     expect(creatorClassLabel("influencer")).toBe("Influencer");
   });
 

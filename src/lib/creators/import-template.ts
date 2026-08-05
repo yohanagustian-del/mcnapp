@@ -1,6 +1,10 @@
 import * as XLSX from "xlsx";
 import { IMPORT_COLUMNS } from "./import-spec";
-import { CREATOR_CLASS_OPTIONS } from "./creator-class";
+import {
+  CREATOR_CLASS_LABEL,
+  CREATOR_CLASS_OPTIONS,
+  DEFAULT_CREATOR_CLASS,
+} from "./creator-class";
 
 export const TEMPLATE_FILENAME = "template_kreator.xlsx";
 
@@ -40,7 +44,11 @@ export function buildCreatorTemplate(cmNames: string[] = []): ArrayBuffer {
     ["Tidak ada kolom Niche: niche diisi otomatis dari upload data platform mingguan."],
     [
       `Kelas Kreator hanya menerima: ${CREATOR_CLASS_OPTIONS.map((o) => o.label).join(" / ")}. ` +
-        "Dikosongkan = Reguler.",
+        `Dikosongkan = ${CREATOR_CLASS_LABEL[DEFAULT_CREATOR_CLASS]}.`,
+    ],
+    [
+      `Istilah lama "Top Creator" sekarang bernama "${CREATOR_CLASS_LABEL.top_creator}" — ` +
+        "sheet lama yang masih menulis Top Creator tetap terbaca.",
     ],
     ["Sharing Komisi hanya MENGISI yang masih kosong. Nilai yang sudah ada tidak ditimpa dari file"],
     ["(read-only, sync platform) dan selisihnya dicatat sebagai alert, bukan diterapkan."],

@@ -327,6 +327,9 @@ export async function refreshGmvPostJoin(
  * baru langsung status 'binding' (user: "bergabung") sampai handoff ke CM lewat
  * markHandoffDone menaikkan ke 'aktif'. Deterministik, 0 token AI.
  *
+ * Kolom WAJIB hanya empat: username, CM (owner_cpm_id), join date, akhir kontrak.
+ * Sisanya opsional dan dilengkapi belakangan lewat Edit di tab Kreator.
+ *
  * Aturan username (case-insensitive, ada index lower(username)):
  *  - belum ada          → INSERT baris baru (id CRT- terpusat, retry tabrakan).
  *  - ada + kontrak habis → RENEWAL: UPDATE baris yang sama (tanpa duplikat id).
@@ -339,26 +342,20 @@ export async function registerCreator(
   try {
     const actor = await requirePermission("m8.acquisition");
 
-    // ---- WAJIB ----
+    // ---- WAJIB: username, CM, join date, akhir kontrak. Sisanya opsional ----
+    // Akuisisi sering menutup binding sebelum data lengkap terkumpul (UID, domisili,
+    // sharing komisi menyusul dari platform/kontrak). Menahan registrasi sampai semua
+    // kolom terisi memaksa specialist mengisi data karangan — justru sumber data kotor
+    // yang platform ini dibuat untuk menghilangkan. Kolom opsional dilengkapi belakangan
+    // lewat Edit di tab Kreator.
     const username = String(formData.get("username") ?? "").trim();
-    const name = String(formData.get("name") ?? "").trim();
-    const phone = String(formData.get("phone") ?? "").trim();
-    const followers = String(formData.get("followers") ?? "").trim();
     const ownerCpmId = String(formData.get("owner_cpm_id") ?? "").trim();
     const joinDate = String(formData.get("join_date") ?? "").trim();
     const contractEndDate = String(formData.get("contract_end_date") ?? "").trim();
-    const domisili = String(formData.get("domisili") ?? "").trim();
-    const uid = String(formData.get("uid") ?? "").trim();
-    const shareRaw = String(formData.get("commission_share") ?? "").trim();
 
     const missing = { status: "error" as const };
     if (!username) return { ...missing, message: "Username wajib diisi" };
-    if (!name) return { ...missing, message: "Nama Creator wajib diisi" };
-    if (!phone) return { ...missing, message: "No HP wajib diisi" };
-    if (!followers) return { ...missing, message: "Followers wajib diisi" };
     if (!ownerCpmId) return { ...missing, message: "CM wajib dipilih" };
-    if (!domisili) return { ...missing, message: "Domisili wajib diisi" };
-    if (!uid) return { ...missing, message: "UID wajib diisi" };
     if (!/^\d{4}-\d{2}-\d{2}$/.test(joinDate)) return { ...missing, message: "Tanggal Join wajib diisi" };
     if (!/^\d{4}-\d{2}-\d{2}$/.test(contractEndDate)) {
       return { ...missing, message: "Akhir Kontrak wajib diisi" };
@@ -367,17 +364,31 @@ export async function registerCreator(
       return { ...missing, message: "Akhir Kontrak harus setelah tanggal Join" };
     }
 
-    // Sharing Komisi diinput sebagai persen (22 = 22%).
-    const sharePct = Number(shareRaw);
-    if (!shareRaw || Number.isNaN(sharePct) || sharePct < 0 || sharePct > 100) {
-      return { ...missing, message: "Sharing Komisi wajib diisi angka 0–100 (mis. 22 untuk 22%)" };
+    // ---- OPSIONAL: kosong → null (kolom nullable di DB) ----
+    // `creators.name` NOT NULL → kosong dipakai username, sama seperti import sheet
+    // (lihat IMPORT_COLUMNS "Nama Creator").
+    const name = String(formData.get("name") ?? "").trim() || username;
+    const phone = String(formData.get("phone") ?? "").trim() || null;
+    const followers = String(formData.get("followers") ?? "").trim() || null;
+    const domisili = String(formData.get("domisili") ?? "").trim() || null;
+    const uid = String(formData.get("uid") ?? "").trim() || null;
+
+    // Sharing Komisi diinput sebagai persen (22 = 22%); kosong → null, menyusul dari
+    // sync platform.
+    const shareRaw = String(formData.get("commission_share") ?? "").trim();
+    let commissionShare: number | null = null;
+    if (shareRaw) {
+      const sharePct = Number(shareRaw);
+      if (Number.isNaN(sharePct) || sharePct < 0 || sharePct > 100) {
+        return { ...missing, message: "Sharing Komisi harus angka 0–100 (mis. 22 untuk 22%)" };
+      }
+      // commission_share disimpan sebagai fraksi (0.22 = 22%), sama seperti sumber
+      // sync platform (lihat formatShare). Ini nilai AWAL saat registrasi saja —
+      // TIDAK ADA endpoint edit/update untuk commission_share (CLAUDE.md #3): setelah
+      // ini kolomnya read-only dan perubahan hanya datang dari sync platform. INSERT
+      // & RENEWAL lewat service-role client (bypass trigger protect_commission_share).
+      commissionShare = sharePct / 100;
     }
-    // commission_share disimpan sebagai fraksi (0.22 = 22%), sama seperti sumber
-    // sync platform (lihat formatShare). Ini nilai AWAL saat registrasi saja —
-    // TIDAK ADA endpoint edit/update untuk commission_share (CLAUDE.md #3): setelah
-    // ini kolomnya read-only dan perubahan hanya datang dari sync platform. INSERT
-    // & RENEWAL lewat service-role client (bypass trigger protect_commission_share).
-    const commissionShare = sharePct / 100;
 
     // Level opsional; bila diisi harus 1–8.
     const levelRaw = String(formData.get("level") ?? "").trim();
@@ -390,7 +401,6 @@ export async function registerCreator(
       level = n;
     }
 
-    // ---- OPSIONAL (kosong → null / omit) ----
     const platformRaw = String(formData.get("platform") ?? "").trim().toLowerCase();
     const platform = PLATFORMS.includes(platformRaw as (typeof PLATFORMS)[number]) ? platformRaw : null;
     const topNiches = parseNiches(String(formData.get("top_niches") ?? "").trim());

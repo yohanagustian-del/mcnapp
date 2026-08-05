@@ -70,7 +70,7 @@ export const IMPORT_COLUMNS: ImportColumn[] = [
     label: "Kelas Kreator",
     aliases: ["kelaskreator", "kelas", "creatorclass", "kelascreator"],
     required: false,
-    note: `Opsional. Salah satu: ${CREATOR_CLASS_OPTIONS.map((o) => o.label).join(" / ")}. Kosong atau tidak dikenali → ${CREATOR_CLASS_LABEL[DEFAULT_CREATOR_CLASS]} untuk kreator baru; kreator yang sudah ada tetap memakai kelas lamanya.`,
+    note: `Opsional. Salah satu: ${CREATOR_CLASS_OPTIONS.map((o) => o.label).join(" / ")} (istilah lama "Top Creator" = ${CREATOR_CLASS_LABEL.top_creator}, tetap terbaca). Kosong atau tidak dikenali → ${CREATOR_CLASS_LABEL[DEFAULT_CREATOR_CLASS]} untuk kreator baru; kreator yang sudah ada tetap memakai kelas lamanya.`,
   },
   {
     label: "Platform",

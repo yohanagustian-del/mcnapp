@@ -310,7 +310,7 @@ describe("Kelas Kreator lewat buildImportRows", () => {
   it("nilai dari sheet dipetakan ke creator_class", () => {
     const rows = buildImportRows(
       [
-        { username: "baru1", cm: "Netta", "kelas_kreator": "Top Creator" },
+        { username: "baru1", cm: "Netta", "kelas_kreator": "Kreator Prioritas" },
         { username: "baru2", cm: "Netta", "kelas_kreator": "influencer" },
       ],
       ctx()
@@ -345,10 +345,20 @@ describe("Kelas Kreator lewat buildImportRows", () => {
 
   it("kreator LAMA dengan kelas terisi tetap di-update", () => {
     const rows = buildImportRows(
-      [{ username: "vikahere", cm: "Netta", "kelas_kreator": "Top Creator" }],
+      [{ username: "vikahere", cm: "Netta", "kelas_kreator": "Kreator Prioritas" }],
       ctx()
     );
     expect(rows[0].payload.creator_class).toBe("top_creator");
+  });
+
+  /** Sheet lama masih menulis istilah sebelum rename label. */
+  it('label lama "Top Creator" tetap dipetakan ke top_creator', () => {
+    const rows = buildImportRows(
+      [{ username: "baru1", cm: "Netta", "kelas_kreator": "Top Creator" }],
+      ctx()
+    );
+    expect(rows[0].payload.creator_class).toBe("top_creator");
+    expect(rows[0].warnings).toEqual([]);
   });
 
   it("nilai tidak dikenali = warning, baris tetap tersimpan", () => {
@@ -383,7 +393,7 @@ describe("kolom template", () => {
     const labels = IMPORT_COLUMNS.map((c) => c.label);
     expect(labels[labels.indexOf("Kategory") + 1]).toBe("Kelas Kreator");
     const note = IMPORT_COLUMNS.find((c) => c.label === "Kelas Kreator")!.note;
-    for (const opsi of ["Reguler", "Top Creator", "Influencer"]) {
+    for (const opsi of ["Reguler", "Kreator Prioritas", "Influencer"]) {
       expect(note).toContain(opsi);
     }
   });

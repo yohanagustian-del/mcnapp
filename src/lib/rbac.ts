@@ -103,6 +103,11 @@ export const PERMISSIONS: Record<string, Role[]> = {
   "creators.delete": MANAGEMENT_ROLES,
   "deals.register": [...MANAGEMENT_ROLES, "bizdev_lead", "bizdev"],
   "deals.import_legacy": [...MANAGEMENT_ROLES, "bizdev_lead", "bd_admin"],
+  // Edit deal brand per-row: memperbaiki data master deal lama yang berantakan
+  // (shop_id kosong, exp_date teks bebas, komisi "not found") lewat form tervalidasi
+  // yang sama ketatnya dengan registrasi — CLAUDE.md #6. Dicermin RLS deals_update (0002),
+  // jadi daftar role di sini sengaja sama dengan policy tersebut.
+  "deals.edit": [...MANAGEMENT_ROLES, "bizdev_lead", "bizdev", "campaign_ops", "bd_admin", "finance"],
   // M4 §2.8: weekly CSV upload + engine run (Director/Head/SPV/CM Lead/CPM/Campaign Ops/External)
   "m4.upload": [...MANAGEMENT_ROLES, ...CM_ROLES, "campaign_ops", "campaign_external"],
   "m4.run": [...MANAGEMENT_ROLES, ...CM_ROLES, "campaign_ops"],

@@ -12,6 +12,7 @@ import { parseSheet } from "@/lib/utils/sheet";
 import { parseRupiah } from "@/lib/utils/rupiah";
 import { parseCommission } from "@/lib/utils/commission";
 import { parseFlexibleDate } from "@/lib/utils/date";
+import { commissionRaw, dealReviewFlags } from "@/lib/deals/form";
 import type { UploadReport } from "@/app/(portal)/tim/actions";
 
 /**
@@ -78,10 +79,8 @@ export async function registerDeal(
     return { ok: false, message: `Shop ID ${d.shop_id} sudah terdaftar di deal ${dupe.id}.`, fieldErrors: { shop_id: "Shop ID sudah dipakai" } };
   }
 
-  const kreatorRaw = d.komisi_kreator_max != null && d.komisi_kreator_max !== d.komisi_kreator_min
-    ? `${d.komisi_kreator_min}-${d.komisi_kreator_max}%` : `${d.komisi_kreator_min}%`;
-  const meaRaw = d.komisi_mea_max != null && d.komisi_mea_max !== d.komisi_mea_min
-    ? `${d.komisi_mea_min}-${d.komisi_mea_max}%` : `${d.komisi_mea_min}%`;
+  const kreatorRaw = commissionRaw(d.komisi_kreator_min, d.komisi_kreator_max);
+  const meaRaw = commissionRaw(d.komisi_mea_min, d.komisi_mea_max);
 
   const id = genId("DEAL");
   const record = {
@@ -163,6 +162,191 @@ export async function registerDeal(
   return {
     ok: true,
     message: `Deal ${id} tersimpan.${extras.length ? ` ${extras.join("; ")}.` : ""}`,
+  };
+}
+
+/**
+ * Angka opsional dari form: "" (input dikosongkan) → undefined, bukan 0.
+ * `z.coerce.number()` mengubah "" menjadi 0, dan untuk komisi 0% adalah nilai sah
+ * yang berbeda artinya dari "belum diisi".
+ */
+function optionalNumber(max?: number) {
+  return z.preprocess(
+    (v) => (v === "" || v === null || v === undefined ? undefined : v),
+    (max === undefined
+      ? z.coerce.number().nonnegative()
+      : z.coerce.number().min(0).max(max)
+    ).optional()
+  );
+}
+
+/**
+ * Edit deal brand (form tervalidasi, bukan free-text) — CLAUDE.md #6.
+ *
+ * Dipakai untuk membereskan baris hasil `importLegacyDeals`: shop_id kosong/bukan
+ * angka, exp_date teks bebas, komisi "not found"/"5-7%". Validasinya sama ketatnya
+ * dengan registrasi (shop_id numeric & unik, exp_date dari date picker, komisi angka
+ * %), BEDANYA kolom yang belum diketahui boleh dikosongkan → null: memaksa BizDev
+ * mengisi shop_id yang belum ketemu hanya untuk memperbaiki nama brand justru
+ * memancing isian karangan.
+ *
+ * `review_flags` DIHITUNG ULANG dari nilai yang tersimpan (bukan dipertahankan buta):
+ * setelah lewat form ini satu-satunya masalah yang mungkin tersisa adalah kolom yang
+ * memang masih kosong, karena format sudah dijamin oleh validasi.
+ */
+const dealEditSchema = z.object({
+  deal_id: z.string().min(1),
+  brand_name: z.string().min(1, "Nama brand wajib (sesuai display platform)"),
+  shop_id: z.string().regex(/^\d*$/, "Shop ID harus angka").optional().default(""),
+  niche: z.string().optional().default(""),
+  exp_date: z
+    .string()
+    .regex(/^(\d{4}-\d{2}-\d{2})?$/, "Exp date wajib dari date picker")
+    .optional()
+    .default(""),
+  komisi_kreator_min: optionalNumber(100),
+  komisi_kreator_max: optionalNumber(100),
+  komisi_mea_min: optionalNumber(100),
+  komisi_mea_max: optionalNumber(100),
+  campaign_name: z.string().optional().default(""),
+  campaign_type: z.enum(["paid", "sample", "extra_commission"]).default("paid"),
+  status: z.enum(["", "running", "hold", "done"]).default(""),
+  ads_budget: optionalNumber(),
+  service_fee: optionalNumber(),
+  gmv_tap: optionalNumber(),
+  avg_price: optionalNumber(),
+  notes: z.string().optional().default(""),
+});
+
+export async function updateDeal(
+  _prev: DealFormState | null,
+  formData: FormData
+): Promise<DealFormState> {
+  const actor = await requirePermission("deals.edit");
+
+  const parsed = dealEditSchema.safeParse(Object.fromEntries(formData.entries()));
+  if (!parsed.success) {
+    const fieldErrors: Record<string, string> = {};
+    for (const issue of parsed.error.issues) {
+      fieldErrors[String(issue.path[0])] = issue.message;
+    }
+    return { ok: false, message: "Periksa kembali isian form.", fieldErrors };
+  }
+  const d = parsed.data;
+
+  if (d.komisi_kreator_max != null && d.komisi_kreator_min == null) {
+    return { ok: false, message: "Komisi kreator: isi min dulu.", fieldErrors: { komisi_kreator_min: "Wajib bila max diisi" } };
+  }
+  if (d.komisi_mea_max != null && d.komisi_mea_min == null) {
+    return { ok: false, message: "Komisi MEA: isi min dulu.", fieldErrors: { komisi_mea_min: "Wajib bila max diisi" } };
+  }
+  if (d.komisi_kreator_max != null && d.komisi_kreator_min != null && d.komisi_kreator_max < d.komisi_kreator_min) {
+    return { ok: false, message: "Komisi kreator max < min.", fieldErrors: { komisi_kreator_max: "Max harus ≥ min" } };
+  }
+  if (d.komisi_mea_max != null && d.komisi_mea_min != null && d.komisi_mea_max < d.komisi_mea_min) {
+    return { ok: false, message: "Komisi MEA max < min.", fieldErrors: { komisi_mea_max: "Max harus ≥ min" } };
+  }
+
+  const supabase = await createClient();
+
+  const { data: before } = await supabase
+    .from("brand_deals")
+    .select(
+      "id, brand_name, shop_id, niche, exp_date, campaign_name, campaign_type, status, komisi_kreator_raw, komisi_kreator_pct, komisi_mea_raw, komisi_mea_pct, ads_budget, service_fee, gmv_tap, avg_price, notes, review_flags"
+    )
+    .eq("id", d.deal_id)
+    .maybeSingle();
+  if (!before) return { ok: false, message: `Deal ${d.deal_id} tidak ditemukan.` };
+
+  const shopId = d.shop_id.trim() || null;
+  const expDate = d.exp_date.trim() || null;
+
+  // shop_id tetap unik antar deal (satu shop = satu deal aktif); baris ini sendiri
+  // tentu saja tidak dihitung sebagai duplikat.
+  if (shopId) {
+    const { data: dupe } = await supabase
+      .from("brand_deals").select("id").eq("shop_id", shopId).neq("id", d.deal_id).maybeSingle();
+    if (dupe) {
+      return {
+        ok: false,
+        message: `Shop ID ${shopId} sudah terdaftar di deal ${dupe.id}.`,
+        fieldErrors: { shop_id: "Shop ID sudah dipakai deal lain" },
+      };
+    }
+  }
+
+  const flags = dealReviewFlags({ shopId, expDate });
+
+  const record = {
+    brand_name: d.brand_name.trim(),
+    shop_id: shopId,
+    niche: d.niche.trim() || null,
+    exp_date: expDate,
+    deal_end: expDate, // deal_end = exp_date (sama seperti registrasi)
+    komisi_kreator_raw: commissionRaw(d.komisi_kreator_min, d.komisi_kreator_max),
+    komisi_kreator_pct: d.komisi_kreator_min ?? null,
+    komisi_mea_raw: commissionRaw(d.komisi_mea_min, d.komisi_mea_max),
+    komisi_mea_pct: d.komisi_mea_min ?? null,
+    campaign_name: d.campaign_name.trim() || null,
+    campaign_type: d.campaign_type,
+    status: d.status || null,
+    ads_budget: d.ads_budget ?? null,
+    service_fee: d.service_fee ?? null,
+    gmv_tap: d.gmv_tap ?? null,
+    avg_price: d.avg_price ?? null,
+    notes: d.notes.trim() || null,
+    review_flags: flags,
+  };
+
+  // Update lewat client user-scoped supaya RLS deals_update yang menentukan boleh/tidak.
+  const { error } = await supabase.from("brand_deals").update(record).eq("id", d.deal_id);
+  if (error) return { ok: false, message: `Gagal menyimpan perubahan: ${error.message}` };
+
+  // Sinkron exp_date → cooperating_shops.deal_end untuk alert kadaluarsa M4 (CLAUDE.md #5).
+  const admin = createAdminClient();
+  const today = new Date().toISOString().slice(0, 10);
+  const extras: string[] = [];
+  // shop_id berpindah: baris shop lama tidak boleh terus mengklaim deal ini.
+  if (before.shop_id && before.shop_id !== shopId) {
+    await admin
+      .from("cooperating_shops")
+      .update({ deal_id: null, deal_end: null })
+      .eq("shop_id", before.shop_id)
+      .eq("deal_id", d.deal_id);
+  }
+  if (shopId) {
+    const { error: shopError } = await admin.from("cooperating_shops").upsert(
+      {
+        shop_id: shopId,
+        deal_id: d.deal_id,
+        deal_end: expDate,
+        active_flag: expDate ? expDate >= today : true,
+      },
+      { onConflict: "shop_id" }
+    );
+    if (shopError) extras.push(`sync cooperating_shops gagal: ${shopError.message}`);
+  }
+
+  // Koreksi data master (bukan aksi yang mengurangi income) → auto berlaku, tetap
+  // ter-log lengkap before/after (CLAUDE.md #2).
+  await writeAudit({
+    actorId: actor.id,
+    action: "brand_deal.update",
+    entityType: "brand_deals",
+    entityId: d.deal_id,
+    before,
+    after: { id: d.deal_id, ...record },
+    type: "auto",
+  });
+
+  revalidatePath("/deals");
+  revalidatePath(`/deals/${d.deal_id}`);
+  return {
+    ok: true,
+    message:
+      `Deal ${d.deal_id} tersimpan.` +
+      (flags.length ? ` Masih ada ${flags.length} flag review: ${flags.join("; ")}.` : "") +
+      (extras.length ? ` ${extras.join("; ")}.` : ""),
   };
 }
 

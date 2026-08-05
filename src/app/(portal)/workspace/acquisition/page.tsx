@@ -16,9 +16,38 @@ export const dynamic = "force-dynamic";
 
 const rupiah = (n: number | null | undefined) =>
   n === null || n === undefined ? "—" : `Rp${Math.round(Number(n)).toLocaleString("id-ID")}`;
-const input = "rounded-md border border-slate-300 px-3 py-2 text-sm";
+const input = "w-full rounded-md border border-slate-300 px-3 py-2 text-sm";
 const btn = "rounded-md bg-slate-900 px-3 py-2 text-sm font-medium text-white hover:bg-slate-700";
 const btnSmall = "rounded-md px-2 py-1 text-xs font-medium";
+
+/**
+ * Satu input berlabel untuk form registrasi creator. Label eksplisit (bukan hanya
+ * placeholder) supaya penanda wajib "*" tetap terlihat setelah kolom terisi —
+ * placeholder hilang begitu user mengetik.
+ */
+function Field({
+  label,
+  htmlFor,
+  required = false,
+  className,
+  children,
+}: {
+  label: string;
+  htmlFor: string;
+  required?: boolean;
+  className?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className={className}>
+      <label htmlFor={htmlFor} className="block text-xs font-medium text-slate-600">
+        {label}
+        {required && <span className="text-red-600"> *</span>}
+      </label>
+      <div className="mt-1">{children}</div>
+    </div>
+  );
+}
 
 export default async function AcquisitionWorkspacePage() {
   const member = await requireMember();
@@ -96,59 +125,101 @@ export default async function AcquisitionWorkspacePage() {
           <h2 className="text-lg font-medium">Daftarkan Creator Baru</h2>
           <p className="mt-1 text-sm text-slate-500">
             Creator baru langsung berstatus bergabung (binding) dan tersedia di master kreator sampai
-            di-assign ke CM.
+            di-assign ke CM. Kolom bertanda <span className="font-medium text-red-600">*</span> wajib
+            diisi; sisanya opsional dan bisa dilengkapi belakangan lewat tombol Edit di tab Kreator.
           </p>
           <ActionForm
             action={registerCreator}
-            className="mt-3 grid gap-2 rounded-lg border border-slate-200 bg-white p-4 sm:grid-cols-2"
+            className="mt-3 grid gap-3 rounded-lg border border-slate-200 bg-white p-4 sm:grid-cols-2"
             submitLabel="Daftarkan Creator"
             pendingLabel="Mendaftarkan…"
             buttonClassName={`${btn} sm:col-span-2`}
             resetOnSuccess
           >
-            {/* --- Wajib --- */}
-            <input name="username" required placeholder="Username" className={input} />
-            <input name="name" required placeholder="Nama Creator" className={input} />
-            <input name="phone" required placeholder="No HP" className={input} />
-            <input name="followers" required placeholder="Followers (cth: 20.100 - 50.000)" className={input} />
-            <input
-              type="number" name="commission_share" required step="0.1" min="0" max="100"
-              placeholder="Sharing Komisi % (cth: 22 untuk 22%)" className={input}
-            />
-            <select name="owner_cpm_id" required className={input}>
-              <option value="">— CM (owner) —</option>
-              {(cmMembers ?? []).map((m) => (
-                <option key={m.id} value={m.id}>{m.name} ({m.role})</option>
-              ))}
-            </select>
-            <label className="flex items-center gap-2 text-xs text-slate-500">Join
-              <input type="date" name="join_date" required className={`${input} flex-1 text-slate-900`} />
-            </label>
-            <label className="flex items-center gap-2 text-xs text-slate-500">Akhir Kontrak
-              <input type="date" name="contract_end_date" required className={`${input} flex-1 text-slate-900`} />
-            </label>
-            <input name="domisili" required placeholder="Domisili" className={input} />
-            <input name="uid" required placeholder="UID" className={input} />
+            {/* --- WAJIB: username, CM, join date, akhir kontrak --- */}
+            <Field label="Username" required htmlFor="ac-username">
+              <input id="ac-username" name="username" required placeholder="cth: winris12 (tanpa @)" className={input} />
+            </Field>
+            <Field label="CM (owner)" required htmlFor="ac-cm">
+              <select id="ac-cm" name="owner_cpm_id" required className={input} defaultValue="">
+                <option value="">— pilih CM —</option>
+                {(cmMembers ?? []).map((m) => (
+                  <option key={m.id} value={m.id}>{m.name} ({m.role})</option>
+                ))}
+              </select>
+            </Field>
+            <Field label="Join Date" required htmlFor="ac-join">
+              <input id="ac-join" type="date" name="join_date" required className={input} />
+            </Field>
+            <Field label="Akhir Kontrak" required htmlFor="ac-end">
+              <input id="ac-end" type="date" name="contract_end_date" required className={input} />
+            </Field>
 
             {/* --- Opsional --- */}
-            <select name="platform" className={input}>
-              <option value="">Platform (opsional)</option>
-              <option value="tiktok">TikTok</option>
-              <option value="shopee">Shopee</option>
-            </select>
-            <input name="jenis_creator" placeholder="Jenis (opsional, cth: live & vt)" className={input} />
-            <input name="top_niches" placeholder="Niche Top 3 (opsional, cth: beauty; skincare, fashion)" className={`${input} sm:col-span-2`} />
-            <input name="content_quality" placeholder="Kualitas (opsional)" className={input} />
-            <select name="level" className={input}>
-              <option value="">Level (opsional)</option>
-              {[1, 2, 3, 4, 5, 6, 7, 8].map((l) => <option key={l} value={l}>Level {l}</option>)}
-            </select>
-            <input name="gmv" placeholder="GMV Total avg/bln (opsional)" className={input} />
-            <input name="gmv_live" placeholder="GMV Live avg/bln (opsional)" className={input} />
-            <input name="gmv_video" placeholder="GMV Video avg/bln (opsional)" className={input} />
-            <input name="rc_live" placeholder="RC Live (opsional)" className={input} />
-            <input name="rc_video" placeholder="RC Video (opsional)" className={input} />
-            <input name="rate_card" placeholder="Rate Card Rp (opsional)" className={input} />
+            <p className="sm:col-span-2 border-t border-slate-100 pt-2 text-xs font-medium uppercase tracking-wide text-slate-400">
+              Opsional
+            </p>
+            <Field label="Nama Creator" htmlFor="ac-name">
+              <input id="ac-name" name="name" placeholder="kosong = pakai username" className={input} />
+            </Field>
+            <Field label="No HP" htmlFor="ac-phone">
+              <input id="ac-phone" name="phone" placeholder="628123456789" className={input} />
+            </Field>
+            <Field label="Followers" htmlFor="ac-followers">
+              <input id="ac-followers" name="followers" placeholder="cth: 20.100 - 50.000" className={input} />
+            </Field>
+            <Field label="Sharing Komisi %" htmlFor="ac-share">
+              <input
+                id="ac-share" type="number" name="commission_share" step="0.1" min="0" max="100"
+                placeholder="cth: 22 untuk 22%" className={input}
+              />
+            </Field>
+            <Field label="Domisili" htmlFor="ac-domisili">
+              <input id="ac-domisili" name="domisili" placeholder="Surabaya" className={input} />
+            </Field>
+            <Field label="UID" htmlFor="ac-uid">
+              <input id="ac-uid" name="uid" className={input} />
+            </Field>
+            <Field label="Platform" htmlFor="ac-platform">
+              <select id="ac-platform" name="platform" className={input} defaultValue="">
+                <option value="">—</option>
+                <option value="tiktok">TikTok</option>
+                <option value="shopee">Shopee</option>
+              </select>
+            </Field>
+            <Field label="Jenis Creator" htmlFor="ac-jenis">
+              <input id="ac-jenis" name="jenis_creator" placeholder="cth: live & vt" className={input} />
+            </Field>
+            <Field label="Niche Top 3" htmlFor="ac-niches" className="sm:col-span-2">
+              <input id="ac-niches" name="top_niches" placeholder="cth: beauty; skincare, fashion" className={input} />
+            </Field>
+            <Field label="Kualitas Konten" htmlFor="ac-quality">
+              <input id="ac-quality" name="content_quality" placeholder="Bagus / Cukup / Kurang" className={input} />
+            </Field>
+            <Field label="Level" htmlFor="ac-level">
+              <select id="ac-level" name="level" className={input} defaultValue="">
+                <option value="">—</option>
+                {[1, 2, 3, 4, 5, 6, 7, 8].map((l) => <option key={l} value={l}>Level {l}</option>)}
+              </select>
+            </Field>
+            <Field label="GMV Total (avg/bln)" htmlFor="ac-gmv">
+              <input id="ac-gmv" name="gmv" className={input} />
+            </Field>
+            <Field label="GMV Live (avg/bln)" htmlFor="ac-gmv-live">
+              <input id="ac-gmv-live" name="gmv_live" className={input} />
+            </Field>
+            <Field label="GMV Video (avg/bln)" htmlFor="ac-gmv-video">
+              <input id="ac-gmv-video" name="gmv_video" className={input} />
+            </Field>
+            <Field label="RC Live" htmlFor="ac-rc-live">
+              <input id="ac-rc-live" name="rc_live" className={input} />
+            </Field>
+            <Field label="RC Video" htmlFor="ac-rc-video">
+              <input id="ac-rc-video" name="rc_video" className={input} />
+            </Field>
+            <Field label="Rate Card (Rp)" htmlFor="ac-rate-card">
+              <input id="ac-rate-card" name="rate_card" className={input} />
+            </Field>
           </ActionForm>
         </section>
       )}
