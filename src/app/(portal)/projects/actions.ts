@@ -4,9 +4,11 @@ import { revalidatePath } from "next/cache";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { writeAudit } from "@/lib/audit";
 import { getConfig } from "@/lib/config";
-import { requirePermission } from "@/lib/rbac";
+import { hasPermission, requireMember, requirePermission, type TeamMember } from "@/lib/rbac";
 import { fetchAll } from "@/lib/supabase/fetch-all";
 import { parseRupiah } from "@/lib/utils/rupiah";
+import { canManageProjectParticipants, isAssignedManpower } from "@/lib/m7/access";
+import { likePatternForUsername, normalizeUsername, pickExactUsername } from "@/lib/creators/username";
 import { checkProfitability, trackDaily, type CurveShape } from "@/lib/m7/tracking";
 
 const isIsoDate = (s: string) => /^\d{4}-\d{2}-\d{2}$/.test(s);
@@ -18,6 +20,15 @@ const isIsoDate = (s: string) => /^\d{4}-\d{2}-\d{2}$/.test(s);
  * src/app/(portal)/schedule/actions.ts.
  */
 export type ProjectJoinDecisionResult =
+  | { ok: true }
+  | { ok: false; error: string };
+
+/**
+ * Sama seperti di atas: form peserta diisi manusia dan salah ketik username itu
+ * wajar, jadi penolakannya harus sampai ke layar apa adanya — bukan error generik
+ * hasil sensor Next.js di production.
+ */
+export type AddParticipantResult =
   | { ok: true }
   | { ok: false; error: string };
 
@@ -137,41 +148,102 @@ export async function setProjectStatus(formData: FormData): Promise<void> {
   revalidatePath(`/projects/${projectId}`);
 }
 
-/** Add participant. External wajib flag binding TikTok (PRD §2.3/§6.6) + audit. */
-export async function addParticipant(formData: FormData): Promise<void> {
-  const actor = await requirePermission("m7.manage");
-  const projectId = Number(formData.get("project_id"));
-  const creatorId = String(formData.get("creator_id") ?? "").trim();
-  const isExternal = formData.get("is_external") === "on";
-  const liveType = String(formData.get("live_type") ?? "solo") === "cohost" ? "cohost" : "solo";
-  const binding = formData.get("binding_bound") === "on" ? "bound" : "pending";
-  if (!projectId || !creatorId) throw new Error("Project & creator wajib dipilih");
+/**
+ * Username (mis. "vikahere") → `creators.id`. Dicocokkan case-insensitive lewat
+ * helper bersama; kalau yang diketik ternyata creator id yang terdaftar, itu tetap
+ * diterima supaya kebiasaan lama & tautan lama tidak patah.
+ */
+async function resolveCreatorId(
+  admin: ReturnType<typeof createAdminClient>,
+  typed: string
+): Promise<string> {
+  const { data: rows, error } = await admin
+    .from("creators")
+    .select("id, username")
+    .ilike("username", likePatternForUsername(typed))
+    .limit(5);
+  if (error) throw new Error(`Gagal mencari kreator: ${error.message}`);
 
-  const admin = createAdminClient();
-  const { data: creator } = await admin.from("creators").select("id").eq("id", creatorId).maybeSingle();
-  if (!creator) throw new Error(`Creator ${creatorId} tidak ditemukan`);
+  const match = pickExactUsername(rows ?? [], typed);
+  if (match) return match.id;
 
-  const { data: project } = await admin
-    .from("special_projects").select("status").eq("id", projectId).single();
-  if (project?.status === "aktif" && isExternal && binding !== "bound") {
-    throw new Error("Project sudah aktif — peserta external wajib sudah binding TikTok");
+  const { data: byId } = await admin.from("creators").select("id").eq("id", typed).maybeSingle();
+  if (byId) return byId.id;
+
+  throw new Error(
+    `Kreator dengan username "${typed}" tidak ditemukan — pilih dari daftar username, atau daftarkan kreatornya dulu di menu Kreator`
+  );
+}
+
+/**
+ * Guard peserta project: pemegang `m7.manage` untuk semua project, ATAU anggota tim
+ * yang sudah di-assign sebagai man power in-charge di project ini (M7 §2.5) — orang
+ * yang menjalankan project boleh mengisi pesertanya sendiri tanpa harus jadi lead.
+ * Dicek di server, bukan cuma disembunyikan di UI (CLAUDE.md: RBAC enforce di server).
+ */
+async function requireProjectParticipantAccess(projectId: number): Promise<TeamMember> {
+  const member = await requireMember();
+  const hasManage = hasPermission("m7.manage", member.role);
+  const assigned = hasManage
+    ? false // sudah lolos lewat permission global — tidak perlu query tambahan
+    : await isAssignedManpower(createAdminClient(), projectId, member.id);
+  if (!canManageProjectParticipants({ hasManagePermission: hasManage, isAssignedManpower: assigned })) {
+    throw new Error(
+      `Akses ditolak: role ${member.role} tidak punya izin m7.manage dan belum di-assign sebagai man power project ini`
+    );
   }
+  return member;
+}
 
-  const targetGmv = parseRupiah(String(formData.get("target_gmv") ?? ""));
-  const { error } = await admin.from("project_participants").upsert({
-    project_id: projectId, creator_id: creatorId, is_external: isExternal,
-    tiktok_binding_status: isExternal ? binding : "bound",
-    live_type: liveType, target_gmv: targetGmv,
-  }, { onConflict: "project_id,creator_id" });
-  if (error) throw new Error(`Gagal menambah peserta: ${error.message}`);
+/**
+ * Add participant. Kreator dipilih lewat USERNAME (bukan `creators.id`) — orang hafal
+ * handle akun, bukan ID internal; ID tetap diterima supaya tautan/daftar lama tidak
+ * rusak. External wajib flag binding TikTok (PRD §2.3/§6.6) + audit.
+ */
+export async function addParticipant(formData: FormData): Promise<AddParticipantResult> {
+  try {
+    const projectId = Number(formData.get("project_id"));
+    if (!projectId) throw new Error("Project wajib dipilih");
+    const actor = await requireProjectParticipantAccess(projectId);
 
-  await writeAudit({
-    actorId: actor.id, action: "m7.add_participant", entityType: "project_participants",
-    entityId: `${projectId}:${creatorId}`,
-    after: { is_external: isExternal, binding, live_type: liveType },
-    type: "auto",
-  });
-  revalidatePath(`/projects/${projectId}`);
+    // Form mengirim username; `creator_id` tetap dibaca sebagai cadangan supaya
+    // pemanggil lama (dan tempel-ID langsung) tidak patah.
+    const typed = normalizeUsername(
+      String(formData.get("creator_username") ?? "") || String(formData.get("creator_id") ?? "")
+    );
+    const isExternal = formData.get("is_external") === "on";
+    const liveType = String(formData.get("live_type") ?? "solo") === "cohost" ? "cohost" : "solo";
+    const binding = formData.get("binding_bound") === "on" ? "bound" : "pending";
+    if (!typed) throw new Error("Username kreator wajib diisi");
+
+    const admin = createAdminClient();
+    const creatorId = await resolveCreatorId(admin, typed);
+
+    const { data: project } = await admin
+      .from("special_projects").select("status").eq("id", projectId).single();
+    if (project?.status === "aktif" && isExternal && binding !== "bound") {
+      throw new Error("Project sudah aktif — peserta external wajib sudah binding TikTok");
+    }
+
+    const targetGmv = parseRupiah(String(formData.get("target_gmv") ?? ""));
+    const { error } = await admin.from("project_participants").upsert({
+      project_id: projectId, creator_id: creatorId, is_external: isExternal,
+      tiktok_binding_status: isExternal ? binding : "bound",
+      live_type: liveType, target_gmv: targetGmv,
+    }, { onConflict: "project_id,creator_id" });
+    if (error) throw new Error(`Gagal menambah peserta: ${error.message}`);
+
+    await writeAudit({
+      actorId: actor.id, action: "m7.add_participant", entityType: "project_participants",
+      entityId: `${projectId}:${creatorId}`,
+      after: { input: typed, is_external: isExternal, binding, live_type: liveType },
+      type: "auto",
+    });
+    revalidatePath(`/projects/${projectId}`);
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "Terjadi kesalahan tidak terduga." };
+  }
 }
 
 /** Metrik GMV per kreator per hari (QA: monitor performa tiap kreator project). */

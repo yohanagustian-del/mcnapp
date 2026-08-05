@@ -3,7 +3,9 @@ import { requireMember, hasPermission } from "@/lib/rbac";
 import { createClient } from "@/lib/supabase/server";
 import { getConfig } from "@/lib/config";
 import { filterLiveActive, trackDaily, type CurveShape, type LiveActivityRow } from "@/lib/m7/tracking";
-import { addParticipant, assignManpower, setProjectStatus, upsertCreatorMetric, upsertDailyMetric } from "../actions";
+import { canManageProjectParticipants } from "@/lib/m7/access";
+import { assignManpower, setProjectStatus, upsertCreatorMetric, upsertDailyMetric } from "../actions";
+import { ParticipantForm, type CreatorUsernameOption } from "./participant-form";
 
 const STATUS_LABELS: Record<string, string> = {
   on_track: "On-track", behind: "Behind", ahead: "Ahead",
@@ -38,7 +40,7 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
         .select("date, gmv_actual, ads_spend, creator_commission, mea_revenue")
         .eq("project_id", projectId).order("date"),
       supabase.from("project_participants")
-        .select("creator_id, is_external, tiktok_binding_status, live_type, target_gmv, creators(name)")
+        .select("creator_id, is_external, tiktok_binding_status, live_type, target_gmv, creators(name, username)")
         .eq("project_id", projectId),
       supabase.from("project_manpower")
         .select("member_id, role, involvement, team_members(name)")
@@ -81,12 +83,29 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
   const participantIds = new Set((participants ?? []).map((p) => p.creator_id));
   const liveActiveIds = [...liveActive.keys()].filter((cid) => !participantIds.has(cid)).slice(0, 30);
   const { data: liveActiveCreators } = liveActiveIds.length
-    ? await supabase.from("creators").select("id, name").in("id", liveActiveIds)
-    : { data: [] as { id: string; name: string }[] };
+    ? await supabase.from("creators").select("id, name, username").in("id", liveActiveIds)
+    : { data: [] as { id: string; name: string; username: string | null }[] };
 
   const { data: teamMembers } = canManage
     ? await supabase.from("team_members").select("id, name, role").eq("active", true).order("name").limit(200)
     : { data: [] as { id: string; name: string; role: string }[] };
+
+  // Man power in-charge yang sudah di-assign boleh menambah peserta project ini,
+  // walau role globalnya tidak punya m7.manage (M7 §2.5 — aturannya di lib/m7/access).
+  const isAssignedManpower = (manpower ?? []).some((m) => m.member_id === member.id);
+  const canAddParticipant = canManageProjectParticipants({
+    hasManagePermission: canManage,
+    isAssignedManpower,
+  });
+
+  // Daftar username untuk form peserta — orang hafal handle akun, bukan ID internal.
+  // Kreator yang sudah jadi peserta tidak ditawarkan lagi.
+  const { data: creatorChoices } = canAddParticipant
+    ? await supabase.from("creators").select("id, name, username").not("username", "is", null).order("username").limit(1000)
+    : { data: [] as { id: string; name: string; username: string | null }[] };
+  const usernameOptions: CreatorUsernameOption[] = (creatorChoices ?? [])
+    .filter((c) => Boolean(c.username) && !participantIds.has(c.id))
+    .map((c) => ({ id: c.id, name: c.name, username: c.username as string }));
 
   // Performa per kreator: sum GMV dari project_creator_metrics per peserta.
   const { data: creatorMetricRows } = await supabase
@@ -307,29 +326,16 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
         {/* ===== Participants ===== */}
         <div>
           <h2 className="text-lg font-medium">Peserta ({(participants ?? []).length})</h2>
-          {canManage && (
-            <form action={addParticipant}
-              className="mt-2 grid gap-2 rounded-lg border border-slate-200 bg-white p-3 text-sm sm:grid-cols-2">
-              <input type="hidden" name="project_id" value={project.id} />
-              <input name="creator_id" required placeholder="CRT-xxxxx"
-                className="rounded-md border border-slate-300 px-3 py-2" />
-              <input name="target_gmv" placeholder="Target GMV kreator (Rp, opsional)"
-                className="rounded-md border border-slate-300 px-3 py-2" />
-              <select name="live_type" className="rounded-md border border-slate-300 px-3 py-2">
-                <option value="solo">Live solo</option>
-                <option value="cohost">Live co-host (cek manual — scale up lebih lama)</option>
-              </select>
-              <label className="flex items-center gap-2 text-xs text-slate-500">
-                <input type="checkbox" name="is_external" /> External (wajib binding TikTok)
-              </label>
-              <label className="flex items-center gap-2 text-xs text-slate-500">
-                <input type="checkbox" name="binding_bound" /> Binding TikTok selesai
-              </label>
-              <button type="submit"
-                className="rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-700 sm:col-span-2">
-                Tambah Peserta
-              </button>
-            </form>
+          {canAddParticipant && (
+            <ParticipantForm
+              projectId={project.id}
+              creators={usernameOptions}
+              note={
+                isAssignedManpower && !canManage
+                  ? "Anda bisa menambah peserta karena sudah di-assign sebagai man power project ini."
+                  : undefined
+              }
+            />
           )}
           <div className="mt-2 overflow-x-auto rounded-lg border border-slate-200 bg-white">
             <table className="min-w-full text-sm">
@@ -342,11 +348,17 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {(participants ?? []).map((p) => (
+                {(participants ?? []).map((p) => {
+                  const c = p.creators as unknown as { name: string; username: string | null } | null;
+                  return (
                   <tr key={p.creator_id}>
                     <td className="px-4 py-2 font-medium">
-                      {(p.creators as unknown as { name: string } | null)?.name ?? p.creator_id}
-                      <span className="ml-1 text-xs text-slate-400">{p.creator_id}</span>
+                      {c?.name ?? p.creator_id}
+                      {/* Username = identitas yang dipakai form peserta; ID internal
+                          disembunyikan supaya tidak ada lagi yang perlu menghafalnya. */}
+                      <span className="ml-1 text-xs text-slate-400">
+                        {c?.username ? `@${c.username}` : p.creator_id}
+                      </span>
                     </td>
                     <td className="px-4 py-2">{p.is_external ? "External" : "Internal"}</td>
                     <td className="px-4 py-2">
@@ -360,7 +372,8 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
                       )}
                     </td>
                   </tr>
-                ))}
+                  );
+                })}
                 {(participants ?? []).length === 0 && (
                   <tr><td colSpan={4} className="px-4 py-6 text-center text-slate-400">Belum ada peserta.</td></tr>
                 )}
@@ -368,14 +381,20 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
             </table>
           </div>
 
-          {canManage && (liveActiveCreators ?? []).length > 0 && (
+          {canAddParticipant && (liveActiveCreators ?? []).length > 0 && (
             <div className="mt-3 rounded-lg border border-slate-200 bg-white p-3 text-sm">
               <p className="font-medium">
                 Filter live-active (GMV live ≥ {rupiah(liveMin)}/bulan) — kandidat internal:
               </p>
               <ul className="mt-1 grid gap-1 text-xs text-slate-600 sm:grid-cols-2">
                 {(liveActiveCreators ?? []).map((c) => (
-                  <li key={c.id}>{c.name} <span className="text-slate-400">{c.id} · live {rupiah(liveActive.get(c.id) ?? 0)}</span></li>
+                  <li key={c.id}>
+                    {c.name}{" "}
+                    {/* Username ditampilkan supaya bisa langsung diketik di form peserta. */}
+                    <span className="text-slate-400">
+                      {c.username ? `@${c.username}` : c.id} · live {rupiah(liveActive.get(c.id) ?? 0)}
+                    </span>
+                  </li>
                 ))}
               </ul>
             </div>
@@ -385,6 +404,10 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
         {/* ===== Man power ===== */}
         <div>
           <h2 className="text-lg font-medium">Man Power In-Charge</h2>
+          <p className="mt-1 text-xs text-slate-500">
+            Assign anggota tim yang menjalankan project ini. Anggota yang sudah di-assign
+            otomatis bisa menambah peserta project, walau role-nya bukan lead.
+          </p>
           {canManage && (
             <form action={assignManpower}
               className="mt-2 grid gap-2 rounded-lg border border-slate-200 bg-white p-3 text-sm sm:grid-cols-2">
@@ -419,6 +442,11 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
                   <tr key={m.member_id}>
                     <td className="px-4 py-2 font-medium">
                       {(m.team_members as unknown as { name: string } | null)?.name ?? m.member_id}
+                      {m.member_id === member.id && (
+                        <span className="ml-1 rounded-full bg-slate-100 px-2 py-0.5 text-xs font-normal text-slate-600">
+                          Anda
+                        </span>
+                      )}
                     </td>
                     <td className="px-4 py-2">{m.role ?? "—"}</td>
                     <td className="px-4 py-2">{m.involvement ?? "—"}</td>
