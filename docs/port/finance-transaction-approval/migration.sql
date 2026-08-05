@@ -191,6 +191,15 @@ begin
   if req.status <> 'menunggu' then
     raise exception 'Pengajuan perubahan % sudah diputuskan (status: %)', p_request_id, req.status;
   end if;
+  -- Pengaju ≠ pemutus, ditegakkan DI SINI dan bukan hanya di server action: kalau
+  -- izin "ajukan" mencakup management (dan di app mana pun biasanya begitu), tanpa cek
+  -- ini seorang Director bisa mengajukan lalu menyetujui pengajuannya sendiri —
+  -- gate approval-nya jadi tidak berarti. Cek di server action bisa dilewati siapa pun
+  -- yang bisa memanggil RPC ini dengan service-role.
+  if req.requested_by is not null and req.requested_by = p_actor then
+    raise exception 'Pengaju tidak boleh menyetujui pengajuannya sendiri (pengajuan %)', p_request_id
+      using errcode = '42501';
+  end if;
 
   select * into txn from finance_transactions where id = req.transaction_id for update;
   if not found then

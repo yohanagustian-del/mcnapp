@@ -17,8 +17,10 @@ tinggal ditempel — bukan dirancang ulang.
 | File | Isi | Sudah diuji |
 |---|---|---|
 | `migration.sql` | Tabel, penjaga (trigger), penerap (RPC), nomor transaksi, config | Postgres 16 DB **kosong** + idempotensi (apply 2×) + FK auto-attach dua arah |
-| `verify.sql` | Uji-diri 11 skenario; gagal keras kalau penjaganya bocor | 11/11 lulus, baris uji di-rollback (DB bersih) |
+| `verify.sql` | Uji-diri 12 skenario; gagal keras kalau penjaganya bocor | 12/12 lulus, baris uji di-rollback (DB bersih) |
 | `change-request.ts` | Logika pure: diff, partisi approval/langsung, validasi Rupiah/tanggal/enum | `tsc --strict` bersih **nol dependensi** (tanpa `@/`, tanpa node_modules, tanpa lib DOM) |
+| `service.ts` | **Orkestrasi lengkap** (ajukan / putuskan / batalkan) di atas 7 fungsi store yang disuntikkan host | 27 tes lewat fake store yang **meniru penjaga DB** |
+| `service.test.ts` | Tes orkestrasi tanpa database — ikut dijalankan `npm test` repo ini | 27/27 lulus |
 
 ---
 
@@ -100,36 +102,47 @@ Contoh lengkap untuk model role MCN MEA: `supabase/migrations/0032_finance_trans
 Copy `change-request.ts` ke app tujuan (mis. `lib/finance/change-request.ts`). Nol
 dependensi, jadi tidak perlu menyesuaikan import.
 
-### Langkah 4 — server action (satu-satunya bagian yang harus ditulis di app tujuan)
-Bentuknya bergantung framework/auth host, tapi kontraknya tetap:
+### Langkah 4 — orkestrasi
+Copy `service.ts` juga. Ia sudah memuat seluruh alur (`createFinanceTransaction`,
+`requestFinanceChange`, `decideFinanceChange`, `cancelFinanceChange`) dan **tidak**
+mengasumsikan framework, ORM, atau model role. Yang perlu ditulis di app tujuan tinggal
+tiga adaptor tipis:
+
+1. **`FinanceStore`** — 7 fungsi kecil (SELECT/INSERT/UPDATE + dua RPC). Tipenya ada di
+   `service.ts`; implementasi Supabase-nya bisa dicontek dari
+   `src/app/(portal)/finance/transactions/actions.ts` di repo ini.
+2. **`writeAudit`** — pembungkus tabel audit host.
+3. **`Actor`** — empat boolean: `canCreate`, `canRequest`, `canApprove`, `isManagement`.
+   Di sinilah, dan **hanya** di sini, model role host muncul. Peta untuk MCN MEA ada di
+   komentar `service.ts`.
 
 ```ts
-// AJUKAN — izin: Senior/Lead Finance + management (BUKAN staff finance)
-const diff = diffTransaction(txn, proposedFromForm);
-const { guarded, free } = partitionChanges(diff, await readConfig("finance.guarded_fields"));
-const reason = validateReason(formReason);
+const deps = { store: mySupabaseStore, writeAudit: myAudit };
+const actor = mapRoleToActor(session.role);   // satu-satunya bagian khas host
 
-if (countChanges(free) > 0) {
-  // field bebas: UPDATE biasa (trigger tidak menghalangi) + audit "auto"
-}
-if (countChanges(guarded) > 0) {
-  // INSERT ke finance_transaction_changes status 'menunggu' + audit "approval"
-  // JANGAN sentuh finance_transactions di sini — itu inti aturannya
-}
+const out = await requestFinanceChange(deps, actor, { transactionId, fields, reason });
+// out.appliedNow       → field bebas yang sudah berlaku (untuk toast UI)
+// out.awaitingApproval → field terkunci yang menunggu Director
+// out.changeRequestId  → id pengajuan, null kalau semuanya field bebas
 
-// PUTUSKAN — izin: Director SAJA
-approve
-  ? await rpc("apply_finance_change", { p_request_id, p_actor, p_note })   // atomic
-  : await update(changes, { status: "ditolak", decision_note /* wajib */ });
+await decideFinanceChange(deps, director, { requestId, approve: true, note });
 ```
 
-Empat hal yang mudah salah:
-- Baca `finance.guarded_fields` **runtime dari DB**, jangan hardcode. Kalau melenceng,
-  UI menyangka suatu field bebas lalu trigger menolaknya — dan config di DB jadi bohong.
-- Cek dulu apakah sudah ada pengajuan `menunggu` sebelum insert, supaya user dapat pesan
-  jelas, bukan error unique-violation mentah.
-- Alasan **penolakan** wajib diisi. Approve boleh tanpa catatan, tolak tidak.
-- Tulis audit di **setiap** tahap: ajukan / approve / tolak / batal.
+`service.ts` sudah menangani lima hal yang mudah salah kalau ditulis dari nol — dan
+kelimanya dipagari tes di `service.test.ts`:
+
+- `finance.guarded_fields` dibaca **runtime dari DB** lewat `store.readGuardedFields()`.
+  Kalau di-hardcode, config di DB jadi bohong dan trigger menolak perubahan yang UI kira bebas.
+- Cek pengajuan `menunggu` dilakukan **sebelum** menghitung diff, supaya user dapat pesan
+  yang bisa ditindaklanjuti, bukan unique-violation mentah.
+- Alasan wajib **hanya** kalau ada field terkunci. Kalau tidak ada yang memutuskan, alasan
+  itu tidak punya pembaca — memaksanya cuma melatih orang menulis alasan basa-basi.
+- Alasan **penolakan** wajib. Approve boleh tanpa catatan, tolak tidak.
+- **Pengaju ≠ pemutus**, termasuk untuk aktor yang punya kedua izin (mis. Director yang
+  mengajukan sendiri). Ini juga ditegakkan di `apply_finance_change()`, karena cek di
+  server action bisa dilewati siapa pun yang bisa memanggil RPC dengan service-role.
+
+Audit ditulis di **setiap** tahap: ajukan / approve / tolak / batal.
 
 ### Langkah 5 — buktikan, jangan diasumsikan
 ```bash
@@ -141,10 +154,14 @@ di-`rollback`, jadi aman dijalankan di staging.
 
 Yang diuji: nomor berurutan · UPDATE langsung 5 field terkunci ditolak · keterangan boleh
 langsung · nilai lama tetap berlaku selama menunggu · dua pengajuan menunggu ditolak ·
-alasan kosong ditolak · approve menerapkan semua sekaligus tanpa menyapu field lain ·
-approve dua kali ditolak · flag bypass tidak bocor keluar transaksi · kolom di luar
-whitelist tidak bisa diselundupkan · perilaku benar-benar mengikuti config · format
-periode divalidasi.
+alasan kosong ditolak · **pengaju tidak bisa menyetujui pengajuannya sendiri** · approve
+menerapkan semua sekaligus tanpa menyapu field lain · approve dua kali ditolak · flag
+bypass tidak bocor keluar transaksi · kolom di luar whitelist tidak bisa diselundupkan ·
+perilaku benar-benar mengikuti config · format periode divalidasi.
+
+Untuk orkestrasinya (tanpa DB): `npx vitest run docs/port` — 27 tes, fake store-nya
+**meniru penjaga DB**, jadi kalau orkestrator suatu saat menyentuh field terkunci
+langsung, tesnya gagal alih-alih lolos diam-diam.
 
 ### Langkah 6 — UI
 Acuan siap-contek di `mcnapp`:

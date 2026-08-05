@@ -71,7 +71,10 @@ Klien nyata mengubah metode/rekening pembayaran setelah transaksi tercatat. Sebe
 satu-satunya jalan adalah edit langsung di DB — tanpa jejak, tanpa persetujuan. Aturan barunya:
 - **Pengaju**: Senior/Lead Finance (role `finance_lead`) + management. Staff `finance` TIDAK boleh
   mengajukan — hanya mencatat transaksi baru & membaca.
-- **Pemutus**: Director SAJA (`finance.approve_change`). Head/SPV pun tidak. Pengaju ≠ pemutus.
+- **Pemutus**: Director SAJA (`finance.approve_change`). Head/SPV pun tidak.
+- **Pengaju ≠ pemutus** — ditegakkan di `apply_finance_change()`, bukan hanya di server action:
+  izin "ajukan" mencakup management (termasuk Director), jadi tanpa itu Director bisa
+  mengajukan lalu menyetujui pengajuannya sendiri dan gate-nya tak berarti apa-apa.
 - **Field terkunci** (nominal, metode, termin, status bayar, bank/rekening/nama pemilik, invoice,
   jatuh tempo, pihak terkait) → masuk `finance_transaction_changes` status `menunggu`; nilai lama
   tetap berlaku sampai Director approve. Daftarnya dari `app_config finance.guarded_fields`.

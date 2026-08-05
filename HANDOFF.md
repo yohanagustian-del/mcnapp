@@ -35,12 +35,28 @@ Rupiah/tanggal/enum — pure, 0 LLM), `src/app/(portal)/finance/transactions/{pa
 sama sekali sebelum sesi ini). `MEAgrup/AgencyAPP` tidak bisa dilampirkan ke sesi ini — beda owner,
 `add_repo` menolak dengan `cross-tier adds are not supported`. `yohanagustian-del/agencyapp` yang
 bisa dilampirkan ternyata repo dokumen CDPS, bukan app-nya.
-**Fallback yang dibuat**: `docs/port/finance-transaction-approval/` — versi LEPAS dari mekanisme ini
-(migration standalone tanpa schema MCN MEA, logika TS nol-dependensi, harness uji-diri 11 skenario,
-panduan port). Implementasi di `mcnapp` tetap berlaku sebagai acuan yang berjalan. Diuji di Postgres
-16 **DB kosong**: migration apply bersih + idempotent (2×), FK auto-attach terbukti dua arah (dipasang
-kalau tabel tujuan ada, dilewati kalau tidak), `verify.sql` 11/11 lulus lalu rollback bersih,
-`change-request.ts` lulus `tsc --strict` tanpa node_modules/alias/lib DOM.
+**Fallback yang dibuat**: `docs/port/finance-transaction-approval/` — versi LEPAS dari mekanisme ini:
+`migration.sql` (standalone tanpa schema MCN MEA), `change-request.ts` (logika pure nol-dependensi),
+`service.ts` + `service.test.ts` (ORKESTRASI lengkap ajukan/putuskan/batalkan di atas 7 fungsi store
+yang disuntikkan host — host cuma menulis adaptor DB/audit + peta role→4 boolean), `verify.sql`
+(uji-diri 12 skenario), `README.md`. Implementasi di `mcnapp` tetap acuan yang berjalan.
+Diuji di Postgres 16 **DB kosong**: migration apply bersih + idempotent (2×), FK auto-attach terbukti
+dua arah (dipasang kalau tabel tujuan ada, dilewati kalau tidak), `verify.sql` 12/12 lulus lalu
+rollback bersih, `change-request.ts` lulus `tsc --strict` tanpa node_modules/alias/lib DOM,
+`service.test.ts` 27/27 (fake store-nya MENIRU trigger + unique index, jadi orkestrator yang
+menyentuh field terkunci langsung akan menggagalkan tes). `vitest.config.ts` include diperluas ke
+`docs/port/**` supaya port kit tidak membusuk diam-diam.
+
+**Dua perbaikan yang muncul saat menulis `service.ts`, dibawa balik ke mcnapp:**
+1. **BUG — pengaju bisa menyetujui pengajuannya sendiri.** `finance.request_change` mencakup
+   management (termasuk Director), jadi Director bisa mengajukan lalu approve sendiri → gate
+   approval tak berarti. Diperbaiki di `apply_finance_change()` (DB, errcode 42501) DAN di
+   `decideTransactionChange`. Sengaja bukan di RBAC: yang dilarang bukan role-nya, melainkan
+   kombinasi aktor+pengajuan tertentu. Diverifikasi di Postgres: pengaju ditolak, Director lain
+   berhasil approve (`payment_method` → `qris`, `decided_by` terisi).
+2. Alasan perubahan kini wajib **hanya** kalau ada field terkunci. Kalau yang berubah cuma
+   keterangan, tidak ada yang memutuskan → alasan itu tak punya pembaca, dan memaksanya cuma
+   melatih orang menulis alasan basa-basi yang lalu menular ke pengajuan penting.
 **Jalur paling bersih untuk melanjutkan**: buka sesi baru dengan `MEAgrup/AgencyAPP` sebagai source
 AWAL, lalu tempel port kit itu (jangan rancang ulang).
 

@@ -145,6 +145,22 @@ begin
 end $$;
 
 \echo ''
+\echo '### 6b. Pengaju tidak boleh menyetujui pengajuannya sendiri'
+do $$
+declare t text; l uuid; rid bigint;
+begin
+  select id1, lead into t, l from _t;
+  select id into rid from finance_transaction_changes where transaction_id = t and status = 'menunggu';
+  begin
+    -- p_actor = pengaju
+    perform apply_finance_change(rid, l, null);
+    raise exception 'GAGAL: pengaju menyetujui pengajuannya sendiri LOLOS — gate approval tak berarti';
+  exception when insufficient_privilege then
+    raise notice 'OK ditolak: pengaju = pemutus';
+  end;
+end $$;
+
+\echo ''
 \echo '### 7. Approve → semua field diterapkan sekali jalan, keterangan tak tersapu'
 do $$
 declare t text; d uuid; rid bigint; r record;

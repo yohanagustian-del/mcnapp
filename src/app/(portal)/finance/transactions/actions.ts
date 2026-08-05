@@ -141,7 +141,11 @@ export async function requestTransactionChange(formData: FormData): Promise<void
   if (countChanges(diff) === 0) throw new Error("Tidak ada field yang berubah");
 
   const { guarded, free } = partitionChanges(diff, await guardedFields());
-  const reason = validateReason(String(formData.get("reason") ?? ""));
+  // Alasan wajib HANYA kalau ada yang perlu Director putuskan — kalau perubahannya
+  // cuma keterangan, alasan itu tidak punya pembaca. Memaksanya justru melatih orang
+  // menulis alasan basa-basi, yang lalu menular ke pengajuan yang beneran penting.
+  const rawReason = String(formData.get("reason") ?? "");
+  const reason = countChanges(guarded) > 0 ? validateReason(rawReason) : rawReason.trim();
 
   // Field bebas berlaku sekarang. Trigger DB tidak menghalangi karena field ini
   // tidak ada di finance.guarded_fields.
@@ -208,7 +212,7 @@ export async function decideTransactionChange(formData: FormData): Promise<void>
 
   const { data: req } = await admin
     .from("finance_transaction_changes")
-    .select("id, transaction_id, changes, status, reason")
+    .select("id, transaction_id, changes, status, reason, requested_by")
     .eq("id", requestId)
     .maybeSingle<{
       id: number;
@@ -216,10 +220,18 @@ export async function decideTransactionChange(formData: FormData): Promise<void>
       changes: ChangeSet;
       status: string;
       reason: string;
+      requested_by: string | null;
     }>();
   if (!req) throw new Error("Pengajuan perubahan tidak ditemukan");
   if (req.status !== "menunggu") {
     throw new Error(`Pengajuan ini sudah diputuskan (status: ${req.status})`);
+  }
+  // Pengaju ≠ pemutus. `finance.request_change` mencakup management (termasuk Director),
+  // jadi tanpa cek ini seorang Director bisa mengajukan lalu menyetujui pengajuannya
+  // sendiri — gate approval-nya jadi tidak berarti apa-apa. Cek di sini, bukan di RBAC:
+  // yang dilarang bukan role-nya, melainkan kombinasi aktor+pengajuan tertentu.
+  if (req.requested_by === actor.id) {
+    throw new Error("Pengaju tidak boleh menyetujui atau menolak pengajuannya sendiri");
   }
 
   if (approve) {
