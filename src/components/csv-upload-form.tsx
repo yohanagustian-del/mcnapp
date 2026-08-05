@@ -5,6 +5,8 @@ import { useState, useTransition } from "react";
 export interface UploadReport {
   inserted: number;
   skipped: { row: number; reason: string }[];
+  /** Alasan kegagalan yang dikembalikan action (bukan di-throw — lihat tim/actions.ts). */
+  error?: string;
 }
 
 /**
@@ -31,9 +33,17 @@ export function CsvUploadForm({
     setReport(null);
     startTransition(async () => {
       try {
-        setReport(await action(formData));
+        const result = await action(formData);
+        // Action yang mengembalikan `error` gagal secara terkendali (pesannya utuh);
+        // throw dari server action sudah disensor Next.js di production.
+        if (result.error) setError(result.error);
+        setReport(result);
       } catch (e) {
-        setError(e instanceof Error ? e.message : "Terjadi kesalahan");
+        setError(
+          e instanceof Error && !/Server Components render/i.test(e.message)
+            ? e.message
+            : "Upload gagal di server. Periksa format file (kolom wajib, sheet yang benar) lalu coba lagi."
+        );
       }
     });
   }
@@ -60,7 +70,9 @@ export function CsvUploadForm({
 
       {report && (
         <div className="mt-3 text-sm">
-          <p className="font-medium text-green-700">{report.inserted} baris berhasil diproses.</p>
+          {(report.inserted > 0 || !report.error) && (
+            <p className="font-medium text-green-700">{report.inserted} baris berhasil diproses.</p>
+          )}
           {report.skipped.length > 0 && (
             <details className="mt-2">
               <summary className="cursor-pointer text-amber-700">

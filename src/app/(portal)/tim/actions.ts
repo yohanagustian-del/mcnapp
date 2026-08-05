@@ -42,6 +42,12 @@ const memberRowSchema = z.object({
 export interface UploadReport {
   inserted: number;
   skipped: { row: number; reason: string }[];
+  /**
+   * Pesan kegagalan yang boleh dibaca pengguna. Next.js menyensor pesan error
+   * server action di production (hanya menyisakan digest), jadi action yang mau
+   * menjelaskan kenapa upload gagal harus MENGEMBALIKAN pesannya, bukan throw.
+   */
+  error?: string;
 }
 
 /**

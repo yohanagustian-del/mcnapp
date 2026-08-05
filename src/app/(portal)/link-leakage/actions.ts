@@ -5,9 +5,9 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { writeAudit } from "@/lib/audit";
 import { requirePermission } from "@/lib/rbac";
 import { isSummaryRow } from "@/lib/utils/csv";
-import { parseSheet } from "@/lib/utils/sheet";
 import { fetchAll } from "@/lib/supabase/fetch-all";
-import { parseCount, pick } from "@/lib/platform-csv";
+import { COL, parseCount, pick } from "@/lib/platform-csv";
+import { parseShopMasterRows } from "@/lib/m4/master-shop-file";
 import {
   assertValidObjectRef, downloadIngestFile, removeIngestFiles, type IngestObjectRef,
 } from "@/lib/ingest/storage";
@@ -88,62 +88,134 @@ export async function runLeakAnalysisFromStorageAction(
   }
 }
 
+/** Baris "dilewati" yang dikirim ke browser dibatasi — file master bisa puluhan ribu
+ *  baris, dan mengirim satu entri per baris membuat respons action membengkak. */
+const MAX_SKIPPED_REPORTED = 50;
+
+function capSkipped(report: UploadReport): UploadReport {
+  if (report.skipped.length <= MAX_SKIPPED_REPORTED) return report;
+  const extra = report.skipped.length - MAX_SKIPPED_REPORTED;
+  return {
+    ...report,
+    skipped: [
+      ...report.skipped.slice(0, MAX_SKIPPED_REPORTED),
+      { row: -1, reason: `…dan ${extra} baris lain dengan masalah serupa (tidak ditampilkan).` },
+    ],
+  };
+}
+
 /**
  * Weekly master refresh (PRD §2.6): Shop ID | Shop Name | Level 2 Categories |
  * Total Collaborated Creators. Platform data does NOT carry deal_end — deal_id,
  * deal_start, deal_end stay owned by brand_deals sync and are never overwritten here.
+ *
+ * TIDAK PERNAH throw: Next.js menyensor pesan error server action di production
+ * ("An error occurred in the Server Components render…"), jadi setiap kegagalan
+ * dikembalikan sebagai `report.error` supaya CM melihat penyebab aslinya.
+ *
+ * Dua sumber crash yang dulu muncul di sini, keduanya ditutup:
+ *   1. Shop ID ganda dalam satu file → satu perintah upsert menyentuh baris yang
+ *      sama dua kali → Postgres 21000 "ON CONFLICT DO UPDATE command cannot affect
+ *      row a second time". Sekarang di-dedupe (baris terakhir menang).
+ *   2. Header master tidak di sheet pertama / ada baris judul di atasnya →
+ *      parseSheet() salah baca. Sekarang pakai probing yang sama dengan analisa
+ *      kebocoran (parseShopMasterRows).
  */
 export async function uploadCooperatingShops(formData: FormData): Promise<UploadReport> {
-  const actor = await requirePermission("m4.upload");
-  const file = formData.get("file");
-  if (!(file instanceof File)) throw new Error("File Excel (.xlsx) atau CSV wajib diunggah");
-
-  const { rows, errors } = await parseSheet(file);
-  const report: UploadReport = { inserted: 0, skipped: errors.map((e) => ({ row: -1, reason: e })) };
-  const admin = createAdminClient();
-  const today = new Date().toISOString().slice(0, 10);
-
-  const upserts: Record<string, unknown>[] = [];
-  for (const [i, raw] of rows.entries()) {
-    const rowNum = i + 2;
-    if (isSummaryRow(raw)) continue;
-    const shopId = pick(raw, ["shop_id"]);
-    if (!shopId) {
-      report.skipped.push({ row: rowNum, reason: "shop_id kosong" });
-      continue;
+  const report: UploadReport = { inserted: 0, skipped: [] };
+  try {
+    const actor = await requirePermission("m4.upload");
+    const file = formData.get("file");
+    if (!(file instanceof File) || file.size === 0) {
+      return { ...report, error: "File Excel (.xlsx) atau CSV wajib diunggah." };
     }
-    upserts.push({
-      shop_id: shopId,
-      shop_name: pick(raw, ["shop_name"]) || null,
-      level2_categories: pick(raw, ["level_2_categories_(unique)", "level_2_categories", "level2_categories"]) || null,
-      total_collaborated_creators: parseCount(pick(raw, ["total_collaborated_creators"])),
+
+    const { rows, sheetName, warnings } = await parseShopMasterRows(file);
+    for (const w of warnings) report.skipped.push({ row: -1, reason: w });
+    if (rows.length === 0) {
+      return {
+        ...capSkipped(report),
+        error: `Sheet "${sheetName}" tidak berisi baris data apa pun di bawah header Shop ID.`,
+      };
+    }
+
+    const admin = createAdminClient();
+    const today = new Date().toISOString().slice(0, 10);
+
+    // Dedupe per shop_id DI DALAM file: satu perintah upsert tidak boleh menyentuh
+    // baris yang sama dua kali (Postgres 21000). Baris terakhir menang — export
+    // platform mengurutkan yang terbaru di bawah.
+    const byShopId = new Map<string, Record<string, unknown>>();
+    let duplicates = 0;
+    for (const [i, raw] of rows.entries()) {
+      const rowNum = i + 2;
+      if (isSummaryRow(raw)) continue;
+      const shopId = pick(raw, [...COL.shopId]);
+      if (!shopId) {
+        report.skipped.push({ row: rowNum, reason: "shop_id kosong" });
+        continue;
+      }
+      if (byShopId.has(shopId)) duplicates++;
+      byShopId.set(shopId, {
+        shop_id: shopId,
+        shop_name: pick(raw, [...COL.shopName]) || null,
+        level2_categories:
+          pick(raw, ["level_2_categories_(unique)", "level_2_categories", "level2_categories"]) || null,
+        total_collaborated_creators: parseCount(pick(raw, ["total_collaborated_creators"])),
+      });
+    }
+    if (duplicates > 0) {
+      report.skipped.push({
+        row: -1,
+        reason: `${duplicates} baris Shop ID ganda digabung (nilai baris terakhir yang dipakai).`,
+      });
+    }
+
+    const upserts = [...byShopId.values()];
+    if (upserts.length === 0) {
+      return {
+        ...capSkipped(report),
+        error:
+          `Tidak ada Shop ID valid di sheet "${sheetName}". Pastikan kolom "Shop ID" terisi dan ` +
+          "disimpan sebagai teks (bukan angka, agar 19 digitnya tidak jadi notasi ilmiah).",
+      };
+    }
+
+    for (let i = 0; i < upserts.length; i += 500) {
+      // Upsert only the platform-owned columns; deal fields stay untouched.
+      const { error } = await admin
+        .from("cooperating_shops")
+        .upsert(upserts.slice(i, i + 500), { onConflict: "shop_id" });
+      if (error) {
+        return {
+          ...capSkipped(report),
+          error: `Gagal refresh cooperating_shops: ${error.message}`,
+        };
+      }
+      report.inserted += upserts.slice(i, i + 500).length;
+    }
+
+    // Recompute active_flag only where deal_end is known (BUILD_PLAN Fase 1 rule).
+    await admin.from("cooperating_shops").update({ active_flag: false }).lt("deal_end", today);
+    await admin.from("cooperating_shops").update({ active_flag: true }).gte("deal_end", today);
+
+    await writeAudit({
+      actorId: actor.id,
+      action: "m4.refresh_cooperating_shops",
+      entityType: "cooperating_shops",
+      entityId: null,
+      after: { shops: report.inserted, sheet: sheetName },
+      type: "auto",
     });
-    report.inserted++;
+
+    revalidatePath("/link-leakage");
+    return capSkipped(report);
+  } catch (e) {
+    return {
+      ...capSkipped(report),
+      error: e instanceof Error ? e.message : "Gagal refresh master shop platform.",
+    };
   }
-
-  for (let i = 0; i < upserts.length; i += 500) {
-    // Upsert only the platform-owned columns; deal fields stay untouched.
-    const { error } = await admin
-      .from("cooperating_shops")
-      .upsert(upserts.slice(i, i + 500), { onConflict: "shop_id" });
-    if (error) throw new Error(`Gagal refresh cooperating_shops: ${error.message}`);
-  }
-
-  // Recompute active_flag only where deal_end is known (BUILD_PLAN Fase 1 rule).
-  await admin.from("cooperating_shops").update({ active_flag: false }).lt("deal_end", today);
-  await admin.from("cooperating_shops").update({ active_flag: true }).gte("deal_end", today);
-
-  await writeAudit({
-    actorId: actor.id,
-    action: "m4.refresh_cooperating_shops",
-    entityType: "cooperating_shops",
-    entityId: null,
-    after: { shops: report.inserted },
-    type: "auto",
-  });
-
-  revalidatePath("/link-leakage");
-  return report;
 }
 
 interface LeakDetailRow {

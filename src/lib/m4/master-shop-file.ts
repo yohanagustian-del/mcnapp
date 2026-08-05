@@ -1,4 +1,7 @@
 import * as XLSX from "xlsx";
+// Satu normalisasi header untuk seluruh platform (utils/csv) — kalau file master
+// punya salinan sendiri, kolom yang sama bisa terbaca beda di halaman berbeda.
+import { normalizeHeader as normalizeHeaderText } from "@/lib/utils/csv";
 
 /**
  * Parser for the optional "Master Data Shop" file — the third upload of the old
@@ -35,7 +38,7 @@ export interface MasterShopFileResult {
 }
 
 function normalizeHeader(h: unknown): string {
-  return String(h ?? "").trim().toLowerCase().replace(/\s+/g, "_");
+  return normalizeHeaderText(String(h ?? ""));
 }
 
 /** Finds the header row index + the id/name column indexes inside one sheet. */
@@ -53,15 +56,22 @@ function locateHeader(
   return null;
 }
 
-/**
- * Parses the master shop file into the partnered shop-id list. Throws only when
- * no sheet carries a "Shop ID" column at all (the CM uploaded the wrong file) —
- * every other defect is a warning, never a crash (CLAUDE.md #7).
- */
-export async function parseMasterShopFile(file: File): Promise<MasterShopFileResult> {
-  const wb = XLSX.read(await file.arrayBuffer(), { type: "array" });
-  const sheetsTried: string[] = [];
+/** The sheet + header row that actually carries the shop list. */
+interface LocatedShopSheet {
+  sheetName: string;
+  aoa: unknown[][];
+  headerRow: number;
+  idCol: number;
+  nameCol: number;
+}
 
+/**
+ * Probes EVERY sheet (and the first few rows of each) for a shop-id header.
+ * Returns the first hit, or the list of sheets tried so the caller can say which
+ * file the user actually uploaded.
+ */
+function locateShopSheet(wb: XLSX.WorkBook): LocatedShopSheet | { sheetsTried: string[] } {
+  const sheetsTried: string[] = [];
   for (const sheetName of wb.SheetNames) {
     const aoa = XLSX.utils.sheet_to_json<unknown[]>(wb.Sheets[sheetName], {
       header: 1,
@@ -70,57 +80,132 @@ export async function parseMasterShopFile(file: File): Promise<MasterShopFileRes
     });
     sheetsTried.push(sheetName);
     const loc = locateHeader(aoa);
-    if (!loc) continue;
-
-    const warnings: string[] = [];
-    const shopIds: string[] = [];
-    const shopNames = new Map<string, string>();
-    const seen = new Set<string>();
-    let scientific = 0;
-    let empty = 0;
-
-    for (let r = loc.headerRow + 1; r < aoa.length; r++) {
-      const row = aoa[r] ?? [];
-      const raw = String(row[loc.idCol] ?? "").trim();
-      if (raw === "" || raw === "-") {
-        empty++;
-        continue;
-      }
-      if (/e\+/i.test(raw)) {
-        scientific++;
-        continue;
-      }
-      const id = raw;
-      if (!seen.has(id)) {
-        seen.add(id);
-        shopIds.push(id);
-      }
-      if (loc.nameCol !== -1) {
-        const name = String(row[loc.nameCol] ?? "").trim();
-        if (name && !shopNames.has(id)) shopNames.set(id, name);
-      }
-    }
-
-    if (scientific > 0) {
-      warnings.push(
-        `${scientific} Shop ID di Master Data Shop rusak (notasi ilmiah, presisi hilang) dan DILEWATI — ` +
-          `simpan ulang master dengan kolom Shop ID sebagai teks, lalu upload lagi.`
-      );
-    }
-    if (empty > 0) warnings.push(`${empty} baris Master Data Shop tanpa Shop ID dilewati.`);
-    if (shopIds.length === 0) {
-      warnings.push(
-        `Sheet "${sheetName}" punya kolom Shop ID tapi tidak ada satu pun ID valid — ` +
-          `semua shop akan dihitung sebagai peluang BD (non-partnered).`
-      );
-    }
-
-    return { shopIds, shopNames, sheetName, warnings };
+    if (loc) return { sheetName, aoa, ...loc };
   }
+  return { sheetsTried };
+}
 
-  throw new Error(
+function missingShopIdError(sheetsTried: string[]): Error {
+  return new Error(
     `Master Data Shop: tidak ada sheet dengan kolom "Shop ID" (sheet diperiksa: ${
       sheetsTried.join(", ") || "tidak ada"
     }). Pastikan file yang diunggah adalah export master shop (kolom Shop ID wajib ada).`
   );
+}
+
+/**
+ * Parses the master shop file into the partnered shop-id list. Throws only when
+ * no sheet carries a "Shop ID" column at all (the CM uploaded the wrong file) —
+ * every other defect is a warning, never a crash (CLAUDE.md #7).
+ */
+export async function parseMasterShopFile(file: File): Promise<MasterShopFileResult> {
+  const wb = XLSX.read(await file.arrayBuffer(), { type: "array" });
+  const loc = locateShopSheet(wb);
+  if ("sheetsTried" in loc) throw missingShopIdError(loc.sheetsTried);
+
+  const { aoa, sheetName } = loc;
+  const warnings: string[] = [];
+  const shopIds: string[] = [];
+  const shopNames = new Map<string, string>();
+  const seen = new Set<string>();
+  let scientific = 0;
+  let empty = 0;
+
+  for (let r = loc.headerRow + 1; r < aoa.length; r++) {
+    const row = aoa[r] ?? [];
+    const raw = String(row[loc.idCol] ?? "").trim();
+    if (raw === "" || raw === "-") {
+      empty++;
+      continue;
+    }
+    if (/e\+/i.test(raw)) {
+      scientific++;
+      continue;
+    }
+    const id = raw;
+    if (!seen.has(id)) {
+      seen.add(id);
+      shopIds.push(id);
+    }
+    if (loc.nameCol !== -1) {
+      const name = String(row[loc.nameCol] ?? "").trim();
+      if (name && !shopNames.has(id)) shopNames.set(id, name);
+    }
+  }
+
+  if (scientific > 0) warnings.push(scientificNotationWarning(scientific));
+  if (empty > 0) warnings.push(`${empty} baris Master Data Shop tanpa Shop ID dilewati.`);
+  if (shopIds.length === 0) {
+    warnings.push(
+      `Sheet "${sheetName}" punya kolom Shop ID tapi tidak ada satu pun ID valid — ` +
+        `semua shop akan dihitung sebagai peluang BD (non-partnered).`
+    );
+  }
+
+  return { shopIds, shopNames, sheetName, warnings };
+}
+
+function scientificNotationWarning(count: number): string {
+  return (
+    `${count} Shop ID di Master Data Shop rusak (notasi ilmiah, presisi hilang) dan DILEWATI — ` +
+    `simpan ulang master dengan kolom Shop ID sebagai teks, lalu upload lagi.`
+  );
+}
+
+export interface ShopMasterRowsResult {
+  /** One record per data row, keyed by NORMALIZED header ("Shop Name" → "shop_name"). */
+  rows: Record<string, string>[];
+  /** Sheet the shop list was found in. */
+  sheetName: string;
+  /** Notes about rows dropped before they reached the caller. */
+  warnings: string[];
+}
+
+/**
+ * Full-row variant of parseMasterShopFile, for the weekly "Refresh Master Shop"
+ * upload (/link-leakage) which needs Shop Name / Level 2 Categories / Total
+ * Collaborated Creators too — not just the id list.
+ *
+ * Why not parseSheet(): parseSheet only ever reads sheet 0 and, without
+ * `requiredHeaders`, treats row 0 as the header. The master export is a working
+ * Google Sheet — the shop list often sits on a later sheet, under title/filter
+ * rows — so parseSheet silently produced rows whose keys were the title text and
+ * every single row was reported as "shop_id kosong". This reuses the same sheet /
+ * header probing the analysis path already trusts.
+ *
+ * Rows whose Shop ID is in scientific notation ("1.7394E+18") are DROPPED here:
+ * the 19-digit id has already lost precision, and writing it into the master
+ * would silently mis-join every later leak analysis.
+ */
+export async function parseShopMasterRows(file: File): Promise<ShopMasterRowsResult> {
+  const wb = XLSX.read(await file.arrayBuffer(), { type: "array" });
+  const loc = locateShopSheet(wb);
+  if ("sheetsTried" in loc) throw missingShopIdError(loc.sheetsTried);
+
+  const { aoa, sheetName } = loc;
+  const headers = (aoa[loc.headerRow] ?? []).map(normalizeHeader);
+  const rows: Record<string, string>[] = [];
+  const warnings: string[] = [];
+  let scientific = 0;
+
+  for (let r = loc.headerRow + 1; r < aoa.length; r++) {
+    const row = aoa[r] ?? [];
+    if (/e\+/i.test(String(row[loc.idCol] ?? "").trim())) {
+      scientific++;
+      continue;
+    }
+    const record: Record<string, string> = {};
+    let hasValue = false;
+    for (let c = 0; c < headers.length; c++) {
+      const key = headers[c];
+      if (!key) continue;
+      const value = String(row[c] ?? "").trim();
+      record[key] = value;
+      if (value !== "") hasValue = true;
+    }
+    if (hasValue) rows.push(record);
+  }
+
+  if (scientific > 0) warnings.push(scientificNotationWarning(scientific));
+  return { rows, sheetName, warnings };
 }
