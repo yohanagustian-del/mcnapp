@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { compareSortValues, sortRows } from "@/lib/utils/table-sort";
+import { compareSortValues, nextSortState, sortRows } from "@/lib/utils/table-sort";
 
 describe("compareSortValues", () => {
   it("orders numbers ascending and descending", () => {
@@ -56,5 +56,31 @@ describe("sortRows", () => {
     ];
     expect(sortRows(tied, (r) => r.v, "desc").map((r) => r.id)).toEqual(["a", "b", "c"]);
     expect(rows[0].name).toBe("andi");
+  });
+});
+
+describe("nextSortState", () => {
+  it("starts a new column at its first direction", () => {
+    expect(nextSortState(null, "gmv", "desc")).toEqual({ key: "gmv", dir: "desc" });
+    expect(nextSortState({ key: "nama", dir: "asc" }, "gmv", "desc")).toEqual({ key: "gmv", dir: "desc" });
+  });
+
+  it("flips direction on the second click of the same column", () => {
+    expect(nextSortState({ key: "gmv", dir: "desc" }, "gmv", "desc")).toEqual({ key: "gmv", dir: "asc" });
+    expect(nextSortState({ key: "nama", dir: "asc" }, "nama", "asc")).toEqual({ key: "nama", dir: "desc" });
+  });
+
+  it("cycles back to the first direction when the table is not resettable", () => {
+    expect(nextSortState({ key: "gmv", dir: "asc" }, "gmv", "desc")).toEqual({ key: "gmv", dir: "desc" });
+  });
+
+  it("returns to the default order on the third click when resettable", () => {
+    expect(nextSortState({ key: "gmv", dir: "asc" }, "gmv", "desc", { resettable: true })).toBeNull();
+    expect(
+      nextSortState({ key: "gmv", dir: "asc" }, "gmv", "desc", {
+        resettable: true,
+        fallback: { key: "periode", dir: "desc" },
+      })
+    ).toEqual({ key: "periode", dir: "desc" });
   });
 });

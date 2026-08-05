@@ -33,6 +33,31 @@ export function compareSortValues(a: SortValue, b: SortValue, dir: SortDir): num
   return dir === "asc" ? cmp : -cmp;
 }
 
+/** State pengurutan satu tabel: kolom aktif + arahnya. null = urutan bawaan. */
+export interface SortState {
+  key: string;
+  dir: SortDir;
+}
+
+/**
+ * Aturan siklus klik header, dipisah dari React supaya bisa diuji langsung.
+ *
+ * Kolom baru → `firstDir` (kolom angka biasanya "desc"). Klik lagi pada kolom yang
+ * sama → arah kebalikannya. Klik ketiga → `fallback` bila tabelnya `resettable`
+ * (urutan bawaan server, umumnya null), selain itu berputar kembali ke `firstDir`.
+ */
+export function nextSortState(
+  prev: SortState | null,
+  key: string,
+  firstDir: SortDir,
+  options: { resettable?: boolean; fallback?: SortState | null } = {}
+): SortState | null {
+  const secondDir: SortDir = firstDir === "asc" ? "desc" : "asc";
+  if (prev?.key !== key) return { key, dir: firstDir };
+  if (prev.dir === firstDir) return { key, dir: secondDir };
+  return options.resettable ? options.fallback ?? null : { key, dir: firstDir };
+}
+
 /**
  * Stable sort by one accessor. Returns a new array; ties keep their input order
  * (Array.prototype.sort is stable in ES2019+, and the index fallback below makes

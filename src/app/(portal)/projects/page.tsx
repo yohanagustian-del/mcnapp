@@ -1,18 +1,9 @@
-import Link from "next/link";
 import { requireMember, hasPermission } from "@/lib/rbac";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createProject } from "./actions";
 import { JoinRequestPanel, type JoinRequestRow } from "./join-request-panel";
-
-const STATUS_STYLES: Record<string, string> = {
-  planning: "bg-slate-100 text-slate-600",
-  aktif: "bg-green-100 text-green-800",
-  selesai: "bg-blue-100 text-blue-800",
-};
-
-const rupiah = (n: number | null) =>
-  n === null ? "—" : `Rp${Math.round(Number(n)).toLocaleString("id-ID")}`;
+import { ProjectsTable, type ProjectRow } from "./projects-table";
 
 export default async function ProjectsPage() {
   const member = await requireMember();
@@ -60,6 +51,21 @@ export default async function ProjectsPage() {
       participantCounts.set(pt.project_id, (participantCounts.get(pt.project_id) ?? 0) + 1);
     }
   }
+
+  // Baris siap-tampil untuk tabel client (search / filter status / sort / paginasi).
+  const projectRows: ProjectRow[] = (projects ?? []).map((p) => ({
+    id: p.id,
+    name: p.name,
+    type: p.type,
+    startDate: p.start_date,
+    endDate: p.end_date,
+    targetGmv: p.target_gmv,
+    adsBudgetCap: p.ads_budget_cap,
+    targetCreators: p.target_creators,
+    participants: participantCounts.get(p.id) ?? 0,
+    status: p.status,
+    achievementPct: (p.result_summary as { achievement_pct?: number } | null)?.achievement_pct ?? null,
+  }));
 
   return (
     <div>
@@ -112,66 +118,7 @@ export default async function ProjectsPage() {
         </form>
       )}
 
-      <div className="mt-6 overflow-x-auto rounded-lg border border-slate-200 bg-white">
-        <table className="min-w-full text-sm">
-          <thead className="bg-slate-50 text-left text-xs uppercase text-slate-500">
-            <tr>
-              <th className="px-4 py-3">Project</th>
-              <th className="px-4 py-3">Periode</th>
-              <th className="px-4 py-3">Target GMV</th>
-              <th className="px-4 py-3">Target Creator</th>
-              <th className="px-4 py-3">Ads Cap</th>
-              <th className="px-4 py-3">Status</th>
-              <th className="px-4 py-3">Achievement</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-slate-100">
-            {(projects ?? []).map((p) => {
-              const summary = p.result_summary as { achievement_pct?: number } | null;
-              return (
-                <tr key={p.id}>
-                  <td className="px-4 py-2 font-medium">
-                    <Link href={`/projects/${p.id}`} className="text-slate-900 underline-offset-2 hover:underline">
-                      {p.name}
-                    </Link>
-                    {p.type && <span className="ml-1 text-xs text-slate-400">{p.type}</span>}
-                  </td>
-                  <td className="px-4 py-2">{p.start_date} → {p.end_date}</td>
-                  <td className="px-4 py-2">{rupiah(p.target_gmv)}</td>
-                  <td className="px-4 py-2">
-                    {p.target_creators ? (
-                      <span className={
-                        (participantCounts.get(p.id) ?? 0) < p.target_creators
-                          ? "text-amber-700" : "text-green-700"
-                      }>
-                        {participantCounts.get(p.id) ?? 0} / {p.target_creators}
-                      </span>
-                    ) : (
-                      `${participantCounts.get(p.id) ?? 0}`
-                    )}
-                  </td>
-                  <td className="px-4 py-2">{rupiah(p.ads_budget_cap)}</td>
-                  <td className="px-4 py-2">
-                    <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${STATUS_STYLES[p.status] ?? ""}`}>
-                      {p.status}
-                    </span>
-                  </td>
-                  <td className="px-4 py-2">
-                    {summary?.achievement_pct !== undefined
-                      ? `${(summary.achievement_pct * 100).toFixed(0)}%`
-                      : "—"}
-                  </td>
-                </tr>
-              );
-            })}
-            {(projects ?? []).length === 0 && (
-              <tr>
-                <td colSpan={7} className="px-4 py-6 text-center text-slate-400">Belum ada project.</td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-      </div>
+      <ProjectsTable rows={projectRows} />
     </div>
   );
 }

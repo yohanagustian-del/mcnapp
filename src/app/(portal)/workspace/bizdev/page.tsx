@@ -1,12 +1,12 @@
 import Link from "next/link";
 import { requireMember, hasPermission } from "@/lib/rbac";
 import { createClient } from "@/lib/supabase/server";
-import { PIPELINE_STAGES } from "@/lib/m8/routing";
 import { getProjectRequirements } from "@/lib/m7/requirements";
 import { ProjectRequirementsPanel } from "@/components/project-requirements-panel";
-import { brandAccCampaign, handoverCampaign } from "../campaign-actions";
-import { processCreatorRequest, setPipelineStage } from "./actions";
+import { processCreatorRequest } from "./actions";
 import { BrandReportForm } from "./brand-report-form";
+import { CampaignReqTable, type CampaignReqRow } from "./campaign-req-table";
+import { PipelineTable, type PipelineDealRow } from "./pipeline-table";
 import { RouteCampaignForm } from "./route-campaign-form";
 import { CompactScheduleList, type CompactSlotRow } from "../../schedule/compact-list";
 import type { LiveScheduleSlot } from "@/lib/schedule/types";
@@ -92,6 +92,32 @@ export default async function BizdevWorkspacePage() {
   const name = (rel: unknown) => (rel as { name?: string } | null)?.name ?? "—";
   const dealOptions = (deals ?? []).map((d) => ({ id: d.id, brand_name: d.brand_name }));
 
+  // Baris siap-tampil untuk tabel client (sort header + paginasi 10 baris).
+  const campaignReqRows: CampaignReqRow[] = (campaignReqs ?? []).map((r) => ({
+    id: r.id,
+    dealId: r.deal_id,
+    brandName: name(r.brand_deals),
+    requestText: r.request_text,
+    routeType: r.route_type,
+    level2Category: r.level2_category,
+    creatorId: r.creator_id,
+    creatorName: name(r.creators),
+    cmOwnerName: name(r.team_members),
+    cmConfirmStatus: r.cm_confirm_status,
+    needsBrandAcc: Boolean(r.needs_brand_acc),
+    brandAccStatus: r.brand_acc_status,
+    finalStatus: r.final_status,
+    handedOverAt: r.handed_over_at,
+    creatorSourcedBy: r.creator_sourced_by,
+  }));
+  const pipelineRows: PipelineDealRow[] = (deals ?? []).map((d) => ({
+    id: d.id,
+    brandName: d.brand_name,
+    campaignName: d.campaign_name,
+    expDate: d.exp_date,
+    pipelineStage: d.pipeline_stage,
+  }));
+
   // Kolom 1 (kreator) + kolom 2 (kategori) untuk form routing — BizDev mencentang,
   // tidak lagi mengetik ID manual. Kategori dari penjualan nyata (creator_subcat_segment_gmv).
   const [{ data: routeCreators }, { data: catRows }] = canRoute
@@ -138,6 +164,7 @@ export default async function BizdevWorkspacePage() {
           rows={bdScheduleRows}
           todayIso={todayIso}
           emptyLabel="Belum ada jadwal live minggu ini yang terkait deal BD."
+          searchable
         />
       )}
 
@@ -158,92 +185,7 @@ export default async function BizdevWorkspacePage() {
 
       <section>
         <h2 className="text-lg font-medium">Status Req Campaign (§2E.2 — semua transisi ter-log)</h2>
-        <div className="mt-3 overflow-x-auto rounded-lg border border-slate-200 bg-white">
-          <table className="min-w-full text-sm">
-            <thead className="bg-slate-50 text-left text-xs uppercase text-slate-500">
-              <tr>
-                <th className="px-4 py-3">Brand</th><th className="px-4 py-3">Creator</th>
-                <th className="px-4 py-3">Sourcing</th>
-                <th className="px-4 py-3">CM Owner</th><th className="px-4 py-3">Konfirmasi CM</th>
-                <th className="px-4 py-3">Acc Brand</th><th className="px-4 py-3">Status</th>
-                <th className="px-4 py-3">Aksi</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100">
-              {(campaignReqs ?? []).map((r) => (
-                <tr key={r.id}>
-                  <td className="px-4 py-2">
-                    {r.deal_id ? name(r.brand_deals) : <span className="text-slate-400">tanpa deal</span>}
-                    {r.request_text && (
-                      <span className="mt-0.5 block max-w-xs truncate text-xs text-slate-500" title={r.request_text}>
-                        “{r.request_text}”
-                      </span>
-                    )}
-                  </td>
-                  <td className="px-4 py-2">
-                    {r.route_type === "category" ? (
-                      <span className="rounded-full bg-teal-100 px-2 py-0.5 text-xs font-medium text-teal-800">
-                        Kategori: {r.level2_category}
-                      </span>
-                    ) : r.route_type === "broadcast" ? (
-                      <span className="rounded-full bg-purple-100 px-2 py-0.5 text-xs font-medium text-purple-800">
-                        Broadcast
-                      </span>
-                    ) : (
-                      <>{name(r.creators)} <span className="text-xs text-slate-400">{r.creator_id}</span></>
-                    )}
-                    {r.route_type !== "creator" && r.creator_id && (
-                      <span className="mt-0.5 block text-xs text-slate-500">→ {name(r.creators)} {r.creator_id}</span>
-                    )}
-                  </td>
-                  <td className="px-4 py-2">
-                    {r.creator_sourced_by === "bizdev" ? (
-                      <span className="rounded-full bg-indigo-100 px-2 py-0.5 text-xs font-medium text-indigo-800">
-                        BizDev langsung
-                      </span>
-                    ) : (
-                      <span className="text-xs text-slate-500">via CM</span>
-                    )}
-                  </td>
-                  <td className="px-4 py-2">{name(r.team_members)}</td>
-                  <td className="px-4 py-2">{r.cm_confirm_status}</td>
-                  <td className="px-4 py-2">{r.needs_brand_acc ? r.brand_acc_status : "tidak perlu"}</td>
-                  <td className="px-4 py-2">
-                    <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${
-                      r.final_status === "fix" ? "bg-green-100 text-green-800"
-                      : r.final_status === "batal" ? "bg-red-100 text-red-700"
-                      : "bg-amber-100 text-amber-800"}`}>
-                      {r.final_status}{r.handed_over_at ? " · handed over" : ""}
-                    </span>
-                  </td>
-                  <td className="px-4 py-2">
-                    <div className="flex gap-1">
-                      {canBrandAcc && r.final_status === "proses" && r.brand_acc_status === "menunggu" &&
-                        (["approved", "ditolak"] as const).map((d) => (
-                          <form key={d} action={brandAccCampaign}>
-                            <input type="hidden" name="req_id" value={r.id} />
-                            <input type="hidden" name="decision" value={d} />
-                            <button type="submit" className={`${btnSmall} ${d === "approved" ? "bg-green-600 text-white" : "bg-red-100 text-red-700"}`}>
-                              Brand {d}
-                            </button>
-                          </form>
-                        ))}
-                      {canHandover && r.final_status === "fix" && !r.handed_over_at && (
-                        <form action={handoverCampaign}>
-                          <input type="hidden" name="req_id" value={r.id} />
-                          <button type="submit" className={`${btnSmall} bg-slate-900 text-white`}>Handover Campaign Ops</button>
-                        </form>
-                      )}
-                    </div>
-                  </td>
-                </tr>
-              ))}
-              {(campaignReqs ?? []).length === 0 && (
-                <tr><td colSpan={8} className="px-4 py-6 text-center text-slate-400">Belum ada req campaign.</td></tr>
-              )}
-            </tbody>
-          </table>
-        </div>
+        <CampaignReqTable rows={campaignReqRows} canBrandAcc={canBrandAcc} canHandover={canHandover} />
       </section>
 
       {/* ===== §2B.1 Tracker req dari semua CM + lead shop potensial ===== */}
@@ -345,42 +287,7 @@ export default async function BizdevWorkspacePage() {
       {/* ===== §2B.2 Pipeline deal ===== */}
       <section>
         <h2 className="text-lg font-medium">Pipeline Deal Brand</h2>
-        <div className="mt-3 overflow-x-auto rounded-lg border border-slate-200 bg-white">
-          <table className="min-w-full text-sm">
-            <thead className="bg-slate-50 text-left text-xs uppercase text-slate-500">
-              <tr>
-                <th className="px-4 py-3">Deal</th><th className="px-4 py-3">Brand</th>
-                <th className="px-4 py-3">Campaign</th><th className="px-4 py-3">Exp</th>
-                <th className="px-4 py-3">Tahap Pipeline</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100">
-              {(deals ?? []).map((d) => (
-                <tr key={d.id}>
-                  <td className="px-4 py-2 font-medium">{d.id}</td>
-                  <td className="px-4 py-2">{d.brand_name}</td>
-                  <td className="px-4 py-2">{d.campaign_name ?? "—"}</td>
-                  <td className="px-4 py-2">{d.exp_date ?? "—"}</td>
-                  <td className="px-4 py-2">
-                    {canPipeline ? (
-                      <form action={setPipelineStage} className="flex items-center gap-1">
-                        <input type="hidden" name="deal_id" value={d.id} />
-                        <select name="stage" defaultValue={d.pipeline_stage ?? ""} className="rounded-md border border-slate-300 px-2 py-1 text-xs">
-                          <option value="" disabled>— tahap —</option>
-                          {PIPELINE_STAGES.map((s) => <option key={s} value={s}>{s}</option>)}
-                        </select>
-                        <button type="submit" className={`${btnSmall} bg-slate-200 text-slate-700 hover:bg-slate-300`}>Set</button>
-                      </form>
-                    ) : (d.pipeline_stage ?? "—")}
-                  </td>
-                </tr>
-              ))}
-              {(deals ?? []).length === 0 && (
-                <tr><td colSpan={5} className="px-4 py-6 text-center text-slate-400">Belum ada deal — registrasi via <Link href="/deals/baru" className="underline">Registrasi Deal</Link>.</td></tr>
-              )}
-            </tbody>
-          </table>
-        </div>
+        <PipelineTable rows={pipelineRows} canPipeline={canPipeline} />
       </section>
 
       {/* ===== §2B.3-2B.4 Campaign & hasil + report brand ===== */}

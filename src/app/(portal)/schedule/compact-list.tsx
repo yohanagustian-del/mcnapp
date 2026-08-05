@@ -5,8 +5,8 @@ import Link from "next/link";
 import { slotFlags } from "@/lib/schedule/indicators";
 import type { LiveScheduleSlot } from "@/lib/schedule/types";
 import {
-  PAGE_SIZE_10, TableFilterBar, TablePagination, useTableControls,
-  type FacetDef, type FacetOption,
+  PAGE_SIZE_10, SortableTh, TableFilterBar, TablePagination, useTableControls,
+  type FacetDef, type FacetOption, type SortConfig,
 } from "@/components/table-controls";
 
 /** Row shape shared by the compact read-only schedule lists in workspace CM/BizDev. */
@@ -26,8 +26,37 @@ function timeRange(slot: LiveScheduleSlot): string {
   return "—";
 }
 
-const searchUsername = (r: CompactSlotRow) => r.creatorUsername;
+/**
+ * Teks yang dicocokkan search box: kreator (nama + username), brand, tanggal, dan
+ * jam — satu kotak untuk keempat kolom, jadi "scarlett", "19:00", atau "2026-08-07"
+ * sama-sama menyaring daftar.
+ */
+const searchRowText = (r: CompactSlotRow) =>
+  [
+    r.creatorName,
+    r.creatorUsername ?? "",
+    r.slot.status === "off" ? "" : r.slot.brand_name?.trim() || "Organik",
+    r.slot.schedule_date,
+    timeRange(r.slot),
+  ].join(" ");
+
 const rowCm = (r: CompactSlotRow) => ({ id: r.ownerCpmId ?? null, name: r.cmName ?? null });
+
+/**
+ * Kolom yang bisa diurutkan lewat klik header. Tanggal memakai tanggal + jam mulai
+ * sebagai satu nilai supaya hari yang sama tetap urut jamnya.
+ */
+const SORT: SortConfig<CompactSlotRow> = {
+  columns: {
+    tanggal: { value: (r) => `${r.slot.schedule_date} ${r.slot.start_time ?? ""}` },
+    kreator: { value: (r) => r.creatorName },
+    brand: { value: (r) => (r.slot.status === "off" ? null : r.slot.brand_name?.trim() || "Organik") },
+    jam: { value: (r) => r.slot.start_time },
+    status: { value: (r) => r.slot.status },
+  },
+  // Default = urutan yang dipakai server (tanggal menaik).
+  initial: { key: "tanggal", dir: "asc" },
+};
 
 /** Nilai facet "Brand" — slot OFF tidak punya brand; slot tanpa brand = Organik. */
 const ORGANIK_VALUE = "__organik__";
@@ -51,9 +80,11 @@ function slotHour(r: CompactSlotRow): FacetOption | null {
  * src/lib/schedule/indicators.ts for the PK/TAP/tentative/verification badges — no
  * logic duplicated. Always links out to /schedule for the full editable calendar.
  *
- * `filterable` (CM Workspace) menambah search username kreator + filter CM, Brand,
- * Tanggal, dan Jam; paginasi 10 baris per halaman selalu aktif. Semua client-side —
- * daftar sudah dimuat server, jadi memfilter tidak memicu query Supabase baru.
+ * Header tiap kolom bisa diklik untuk urut naik/turun dan paginasi 10 baris per
+ * halaman selalu aktif. `searchable` (BizDev Workspace) menambah search box kreator /
+ * brand / tanggal / jam; `filterable` (CM Workspace) menambah search box yang sama plus
+ * filter multi-select CM, Brand, Tanggal, dan Jam. Semua client-side — daftar sudah
+ * dimuat server, jadi memfilter tidak memicu query Supabase baru.
  */
 export function CompactScheduleList({
   title,
@@ -61,12 +92,15 @@ export function CompactScheduleList({
   todayIso,
   emptyLabel,
   filterable = false,
+  searchable = false,
 }: {
   title: string;
   rows: CompactSlotRow[];
   todayIso: string;
   emptyLabel: string;
   filterable?: boolean;
+  /** Search box tanpa filter multi-select. Implisit aktif kalau `filterable`. */
+  searchable?: boolean;
 }) {
   // Opsi tanggal butuh todayIso untuk penanda "hari ini", jadi facet dibangun di sini
   // (dan di-memo — useTableControls memakai referensinya sebagai dependency).
@@ -90,9 +124,10 @@ export function CompactScheduleList({
 
   const controls = useTableControls<CompactSlotRow>({
     rows,
-    searchText: filterable ? searchUsername : undefined,
+    searchText: filterable || searchable ? searchRowText : undefined,
     cm: filterable ? rowCm : undefined,
     facets,
+    sort: SORT,
     pageSizes: PAGE_SIZE_10,
     itemLabel: "jadwal",
   });
@@ -106,18 +141,22 @@ export function CompactScheduleList({
         </Link>
       </div>
 
-      {filterable && <TableFilterBar controls={controls} className="mt-3" />}
+      <TableFilterBar
+        controls={controls}
+        searchPlaceholder="Cari kreator / brand / tanggal / jam…"
+        className="mt-3"
+      />
 
       <div className="mt-3 rounded-lg border border-slate-200 bg-white">
         <div className="overflow-x-auto">
           <table className="min-w-full text-sm">
             <thead className="bg-slate-50 text-left text-xs uppercase text-slate-500">
               <tr>
-                <th className="px-3 py-2">Tanggal</th>
-                <th className="px-3 py-2">Kreator</th>
-                <th className="px-3 py-2">Brand</th>
-                <th className="px-3 py-2">Jam</th>
-                <th className="px-3 py-2">Status</th>
+                <SortableTh controls={controls} sortKey="tanggal" className="px-3 py-2">Tanggal</SortableTh>
+                <SortableTh controls={controls} sortKey="kreator" className="px-3 py-2">Kreator</SortableTh>
+                <SortableTh controls={controls} sortKey="brand" className="px-3 py-2">Brand</SortableTh>
+                <SortableTh controls={controls} sortKey="jam" className="px-3 py-2">Jam</SortableTh>
+                <SortableTh controls={controls} sortKey="status" className="px-3 py-2">Status</SortableTh>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
@@ -160,7 +199,7 @@ export function CompactScheduleList({
                 <tr>
                   <td colSpan={5} className="px-4 py-5 text-center text-slate-400">
                     {controls.filterActive
-                      ? "Tidak ada jadwal yang cocok dengan pencarian username / filter CM, Brand, Tanggal, atau Jam."
+                      ? "Tidak ada jadwal yang cocok dengan pencarian kreator/brand/tanggal/jam atau filter yang aktif."
                       : emptyLabel}
                   </td>
                 </tr>

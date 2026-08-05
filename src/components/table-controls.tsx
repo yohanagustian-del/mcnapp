@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { sortRows, type SortDir, type SortValue } from "@/lib/utils/table-sort";
+import { nextSortState, sortRows, type SortDir, type SortValue } from "@/lib/utils/table-sort";
 
 export interface CmFilterOption {
   id: string;
@@ -54,6 +54,12 @@ export interface SortConfig<T> {
   columns: Record<string, SortDef<T>>;
   /** Urutan awal saat tabel pertama dirender. */
   initial?: { key: string; dir: SortDir };
+  /**
+   * Klik ketiga pada kolom yang sama mengembalikan urutan ke `initial` (atau urutan
+   * bawaan dari server kalau `initial` kosong) — naik → turun → bawaan. Dipakai tabel
+   * yang urutan servernya bermakna (mis. Deal Brand: terbaru dulu).
+   */
+  resettable?: boolean;
 }
 
 /** Ukuran halaman standar untuk tabel padat di workspace. */
@@ -243,7 +249,10 @@ export function useTableControls<T>({
     (key: string) => {
       const firstDir = sort?.columns[key]?.firstDir ?? "asc";
       setSortState((prev) =>
-        prev?.key === key ? { key, dir: prev.dir === "asc" ? "desc" : "asc" } : { key, dir: firstDir }
+        nextSortState(prev, key, firstDir, {
+          resettable: sort?.resettable,
+          fallback: sort?.initial ?? null,
+        })
       );
       setPage(1);
     },
@@ -415,11 +424,12 @@ export function TableFilterBar<T>({
 export function SortableTh<T>({
   controls,
   sortKey,
-  className = "",
+  className = "px-4 py-3",
   children,
 }: {
   controls: TableControls<T>;
   sortKey: string;
+  /** Kelas <th> lengkap (termasuk padding) — tabel padat memakai px-3. */
   className?: string;
   children: React.ReactNode;
 }) {
@@ -428,13 +438,13 @@ export function SortableTh<T>({
 
   return (
     <th
-      className={`px-4 py-3 ${className}`}
+      className={className}
       aria-sort={dir === "asc" ? "ascending" : dir === "desc" ? "descending" : "none"}
     >
       <button
         type="button"
         onClick={() => controls.toggleSort(sortKey)}
-        className="inline-flex items-center gap-1 uppercase hover:text-slate-800"
+        className="inline-flex items-center gap-1 whitespace-nowrap uppercase hover:text-slate-800"
         title={`Urutkan berdasarkan kolom ini (${dir === "asc" ? "sekarang naik" : dir === "desc" ? "sekarang turun" : "belum diurutkan"})`}
       >
         {children}

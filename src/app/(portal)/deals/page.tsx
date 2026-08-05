@@ -93,7 +93,8 @@ export default async function DealsPage({
       </form>
 
       <p className="mt-3 text-xs text-slate-400">
-        Klik judul kolom untuk mengurutkan (naik → turun → urutan bawaan).
+        Klik judul kolom untuk mengurutkan (naik → turun → urutan bawaan). Tabel ditampilkan 10 baris
+        per halaman; kolom yang tidak muat bisa dilihat dengan menggeser tabel ke kanan/kiri.
       </p>
 
       <div className="mt-2">
