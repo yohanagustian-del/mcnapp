@@ -48,6 +48,14 @@ export interface UploadReport {
    * menjelaskan kenapa upload gagal harus MENGEMBALIKAN pesannya, bukan throw.
    */
   error?: string;
+  /**
+   * Rincian hasil untuk ditampilkan sebagai ringkasan ("120 produk baru", "8 perlu
+   * review", …). Opsional: upload yang tidak mengisinya tetap menampilkan jumlah
+   * baris berhasil seperti biasa.
+   */
+  summary?: { label: string; value: string }[];
+  /** Peringatan non-fatal (upload tetap berhasil), mis. kolom opsional tidak ditemukan. */
+  warning?: string;
 }
 
 /**

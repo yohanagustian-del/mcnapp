@@ -16,111 +16,433 @@ import { parseSheet } from "@/lib/utils/sheet";
 import { parseRupiah } from "@/lib/utils/rupiah";
 import { parseCommission } from "@/lib/utils/commission";
 import { isSummaryRow } from "@/lib/utils/csv";
-import { pick } from "@/lib/platform-csv";
+import { parseFlexibleDate, parsePeriodRange } from "@/lib/utils/date";
+import { pick, parseCount } from "@/lib/platform-csv";
 import { priceSegmentOf, type PriceBounds } from "@/lib/projection/gmv";
 import type { UploadReport } from "@/app/(portal)/tim/actions";
 
 // ---------- header aliases (flexible map per CLAUDE.md #7) ----------
+//
+// Superset dari dua export nyata yang dipakai tim + template lama:
+//  (a) TikTok Partner Compass → Analytics → Custom report (role TAP, dimensi
+//      Product + Shop + Product category). Ini format "metric terbaru": satu baris
+//      per (produk × campaign × periode) dengan metrik performa lengkap.
+//  (b) Campaign product list (export "product brand"): Product ID/name, Sale price,
+//      Shop name, rate komisi kreator & partner, masa berlaku produk, link produk.
+//  (c) Template master lama (Product ID, Shop ID, Price, Commission).
+// Nama kunci sudah dinormalisasi normalizeHeader() (huruf kecil, spasi → "_").
 
 const H = {
   productId: ["product_id", "product_id_"],
   productName: ["product_name", "nama_produk"],
-  shopId: ["shop_id"],
-  shopName: ["shop_name", "nama_toko"],
+  shopId: ["shop_id", "seller_id"],
+  shopName: ["shop_name", "seller_name", "nama_toko"],
   level1: ["level_1_category", "level1_category", "kategori_level_1"],
   level2: ["level_2_category", "level2_category", "kategori_level_2"],
-  price: ["price", "harga"],
-  commission: ["commission", "komisi"],
+  // Compass tidak punya kolom harga; "Sale price" datang dari campaign product list.
+  price: ["sale_price", "price", "harga"],
+  // Rate komisi KREATOR (persen).
+  commission: ["creator_commission_rate", "commission", "komisi"],
+  partnerCommissionRate: ["affiliate_partner_commission_rate", "partner_commission_rate"],
+  // Konteks campaign & periode
+  date: ["date", "periode", "tanggal"],
+  campaignId: ["campaign_id"],
+  campaignName: ["campaign_name"],
+  productLink: ["product_link"],
+  effectiveStart: ["product_effective_start_time", "effective_start"],
+  effectiveEnd: ["product_effective_end_time", "effective_end"],
+  // Metrik GMV
+  affiliateGmv: ["affiliate_gmv"],
+  affiliateVideoGmv: ["affiliate_video_gmv"],
+  affiliateLiveGmv: ["affiliate_live_gmv"],
+  settledGmv: ["settled_gmv"],
+  gmvRefund: ["gmv_(refund)", "gmv_refund"],
+  revenueShowcase: ["revenue_(showcase)", "revenue_showcase"],
+  // Volume
+  orders: ["orders"],
+  itemsSold: ["items_sold"],
+  // Kreator
+  collaboratedCreators: ["collaborated_creators"],
+  creatorsWithPosts: ["creators_with_posts"],
+  creatorsWithSales: ["creators_with_sales"],
+  // Komisi nominal
+  estPartnerCommission: ["estimated_affiliate_partner_commission"],
+  actualPartnerCommission: ["actual_affiliate_partner_commission"],
+  estCreatorCommission: ["estimated_creator_commission"],
+  actualCreatorCommission: ["actual_creator_commission"],
+  // Metrik Link / showcase
+  linkGmv: ["link_gmv"],
+  linkItemsSold: ["link_items_sold"],
+  linkOrders: ["link_orders"],
+  linkPartnerEstCommission: ["link_partner_est._commission", "link_partner_est_commission"],
+  linkCreatorEstCommission: ["link_creator_est._commission", "link_creator_est_commission"],
 };
+
+/** Kolom yang membuktikan file ini export produk (salah satu cukup). */
+const PRODUCT_HEADERS = [...H.productId, ...H.productName];
+
+/**
+ * Harga satuan dari sel yang bisa berupa rentang varian ("Rp151.153-Rp376.184").
+ * parseRupiah menolak rentang (ada tanda "-"), jadi rentang dipecah dulu dan
+ * diambil titik tengahnya — perkiraan harga satuan yang wajar untuk segmentasi.
+ * Nilai tunggal jalan seperti biasa; tidak terparse → null (caller flag review).
+ */
+export function parsePriceCell(raw: string): number | null {
+  const direct = parseRupiah(raw);
+  if (direct !== null) return direct;
+
+  const parts = raw
+    .replace(/rp\.?/gi, "")
+    .split(/\s*[-–~]\s*/)
+    .map((p) => parseRupiah(p))
+    .filter((v): v is number => v !== null && v > 0);
+  if (parts.length < 2) return parts[0] ?? null;
+  return (Math.min(...parts) + Math.max(...parts)) / 2;
+}
+
+/** "16/07/2026 00:00:00" → "2026-07-16". Bagian jam dibuang sebelum diparse. */
+function parseDateCell(raw: string): string | null {
+  return parseFlexibleDate(raw.split(/\s+/)[0] ?? "");
+}
+
+/** Sel angka bulat (orders / items sold / jumlah kreator). "" → null. */
+function num(raw: string): number | null {
+  return raw === "" ? null : parseCount(raw);
+}
+
+/** Sel nominal Rupiah dari export platform. "" → null, "Rp0" → 0. */
+function rp(raw: string): number | null {
+  return raw === "" ? null : parseRupiah(raw);
+}
+
+/** Akumulator metrik satu produk lintas baris (campaign/periode) dalam satu file. */
+interface ProductAccumulator {
+  product_id: string;
+  product_name: string | null;
+  shop_id: string | null;
+  shop_name: string | null;
+  level1_category: string | null;
+  level2_category: string | null;
+  price: number | null;
+  commissionRaw: string;
+  commission_pct: number | null;
+  commission_note: string | null;
+  partner_commission_pct: number | null;
+  product_link: string | null;
+  effective_start: string | null;
+  effective_end: string | null;
+  campaign_id: string | null;
+  campaign_name: string | null;
+  campaignIds: Set<string>;
+  /** GMV campaign yang sedang dipegang sebagai "campaign utama" produk ini. */
+  topCampaignGmv: number;
+  period_start: string | null;
+  period_end: string | null;
+  /** Metrik yang DIJUMLAH antar baris (GMV, order, komisi nominal). */
+  sums: Record<string, number | null>;
+  /** Metrik yang diambil MAX antar baris (jumlah kreator — irisannya tak diketahui). */
+  maxes: Record<string, number | null>;
+}
+
+const SUM_FIELDS = [
+  "affiliate_gmv", "affiliate_video_gmv", "affiliate_live_gmv", "settled_gmv",
+  "gmv_refund", "revenue_showcase", "orders", "items_sold",
+  "est_partner_commission", "actual_partner_commission",
+  "est_creator_commission", "actual_creator_commission",
+  "link_gmv", "link_items_sold", "link_orders",
+  "link_partner_est_commission", "link_creator_est_commission",
+] as const;
+
+const MAX_FIELDS = ["collaborated_creators", "creators_with_posts", "creators_with_sales"] as const;
+
+/** null + null = null (tetap "tidak ada data"); selebihnya dijumlah biasa. */
+function addNullable(a: number | null, b: number | null): number | null {
+  if (a === null) return b;
+  if (b === null) return a;
+  return a + b;
+}
+
+function maxNullable(a: number | null, b: number | null): number | null {
+  if (a === null) return b;
+  if (b === null) return a;
+  return Math.max(a, b);
+}
 
 async function loadPriceBounds(): Promise<PriceBounds> {
   return getConfig<PriceBounds>("segments.price_bounds");
 }
 
 /**
- * Parses & upserts a manually-uploaded master product list into products_tap
- * (source='master_upload'). Tolerant per CLAUDE.md #7: Rupiah mixed separators
- * (parseRupiah), dirty commission ("not found"/"error"/"5-7%"/empty → null +
- * needs_review, never crash), "Summary" rows skipped. Header map is flexible
- * (English snake_case + Indonesian labels).
+ * Parses & upserts an uploaded TAP product export into products_tap
+ * (source='master_upload').
+ *
+ * Format yang diterima = superset dari export nyata yang dipakai tim (lihat H di
+ * atas), dengan TikTok Partner Compass "Custom report" sebagai acuan metrik
+ * terbaru: Affiliate GMV (total/video/live), settled GMV, refund, revenue
+ * showcase, orders, items sold, jumlah kreator (collaborated / with posts / with
+ * sales), komisi partner & kreator (estimasi vs aktual), serta metrik Link.
+ *
+ * Dua perubahan penting dibanding versi lama:
+ *  1. shop_id TIDAK lagi wajib. Export Compass tidak selalu memuat dimensi Shop;
+ *     dulu setiap barisnya ditolak "shop_id kosong" sehingga upload selalu 0 baris.
+ *  2. Satu produk bisa muncul di beberapa baris (campaign/periode berbeda). Baris
+ *     digabung per product_id: metrik GMV/order/komisi DIJUMLAH, jumlah kreator
+ *     diambil MAX (irisan kreator antar campaign tidak diketahui — menjumlah akan
+ *     melebih-lebihkan), dan campaign penyumbang GMV terbesar disimpan sebagai
+ *     campaign utama produk.
+ *
+ * Tetap tolerant per CLAUDE.md #7: Rupiah campur titik/koma (parseRupiah), harga
+ * rentang varian ("Rp151.153-Rp376.184" → titik tengah), komisi kotor ("not
+ * found"/"5-7%"/kosong → null + needs_review, tidak pernah crash), baris "Summary"
+ * dilewati. Deterministik penuh — 0 LLM.
  */
 export async function uploadProductMasterList(formData: FormData): Promise<UploadReport> {
   const actor = await requirePermission("products.upload_master");
   const file = formData.get("file");
   if (!(file instanceof File)) throw new Error("File Excel (.xlsx) atau CSV wajib diunggah");
 
-  const { rows, errors } = await parseSheet(file);
+  // requiredHeaders: export Compass kadang menaruh baris judul di atas header asli.
+  const { rows, errors } = await parseSheet(file, PRODUCT_HEADERS);
   const report: UploadReport = { inserted: 0, skipped: errors.map((e) => ({ row: -1, reason: e })) };
-  if (rows.length === 0 && errors.length === 0) {
-    report.skipped.push({ row: -1, reason: "File kosong atau header tidak dikenali" });
-    return report;
+  if (rows.length === 0) {
+    return {
+      ...report,
+      error:
+        "Tidak ada baris produk yang terbaca. Pastikan file adalah export Custom report " +
+        "(kolom Product ID / Product name ada) dan sheet pertama berisi datanya.",
+    };
   }
 
   const bounds = await loadPriceBounds();
   const admin = createAdminClient();
   const today = new Date().toISOString().slice(0, 10);
 
+  // ---- Fase 1: parse + agregasi per product_id (tanpa menyentuh DB) ----
+  const byProduct = new Map<string, ProductAccumulator>();
+  let summaryRows = 0;
+
   for (const [i, raw] of rows.entries()) {
-    const rowNum = i + 2;
-    if (isSummaryRow(raw)) continue; // platform export artifact (CLAUDE.md #7)
+    const rowNum = i + 2; // header = baris 1
+    if (isSummaryRow(raw)) {
+      summaryRows++;
+      continue; // artefak export platform (CLAUDE.md #7)
+    }
+    if (Object.values(raw).every((v) => String(v ?? "").trim() === "")) continue;
 
     const productId = pick(raw, H.productId);
-    const shopId = pick(raw, H.shopId);
-    if (!productId || !shopId) {
-      report.skipped.push({ row: rowNum, reason: "product_id / shop_id kosong" });
+    if (!productId) {
+      report.skipped.push({ row: rowNum, reason: "Product ID kosong" });
       continue;
     }
-
-    const price = parseRupiah(pick(raw, H.price));
-    const priceSegment = price !== null && price > 0 ? priceSegmentOf(price, bounds) : null;
 
     const commissionRaw = pick(raw, H.commission);
     const commission = parseCommission(commissionRaw);
     const commissionKotor = commissionRaw !== "" && commission === null;
+    const partnerCommission = parseCommission(pick(raw, H.partnerCommissionRate));
+    const period = parsePeriodRange(pick(raw, H.date));
+    const affiliateGmv = rp(pick(raw, H.affiliateGmv));
 
-    const { data: existing } = await admin
-      .from("products_tap")
-      .select("first_seen")
-      .eq("product_id", productId)
-      .maybeSingle();
+    const rowSums: Record<string, number | null> = {
+      affiliate_gmv: affiliateGmv,
+      affiliate_video_gmv: rp(pick(raw, H.affiliateVideoGmv)),
+      affiliate_live_gmv: rp(pick(raw, H.affiliateLiveGmv)),
+      settled_gmv: rp(pick(raw, H.settledGmv)),
+      gmv_refund: rp(pick(raw, H.gmvRefund)),
+      revenue_showcase: rp(pick(raw, H.revenueShowcase)),
+      orders: num(pick(raw, H.orders)),
+      items_sold: num(pick(raw, H.itemsSold)),
+      est_partner_commission: rp(pick(raw, H.estPartnerCommission)),
+      actual_partner_commission: rp(pick(raw, H.actualPartnerCommission)),
+      est_creator_commission: rp(pick(raw, H.estCreatorCommission)),
+      actual_creator_commission: rp(pick(raw, H.actualCreatorCommission)),
+      link_gmv: rp(pick(raw, H.linkGmv)),
+      link_items_sold: num(pick(raw, H.linkItemsSold)),
+      link_orders: num(pick(raw, H.linkOrders)),
+      link_partner_est_commission: rp(pick(raw, H.linkPartnerEstCommission)),
+      link_creator_est_commission: rp(pick(raw, H.linkCreatorEstCommission)),
+    };
+    const rowMaxes: Record<string, number | null> = {
+      collaborated_creators: num(pick(raw, H.collaboratedCreators)),
+      creators_with_posts: num(pick(raw, H.creatorsWithPosts)),
+      creators_with_sales: num(pick(raw, H.creatorsWithSales)),
+    };
 
-    const { error } = await admin.from("products_tap").upsert(
-      {
+    const campaignId = pick(raw, H.campaignId) || null;
+    const existing = byProduct.get(productId);
+
+    if (!existing) {
+      byProduct.set(productId, {
         product_id: productId,
         product_name: pick(raw, H.productName) || null,
-        shop_id: shopId,
+        shop_id: pick(raw, H.shopId) || null,
         shop_name: pick(raw, H.shopName) || null,
         level1_category: pick(raw, H.level1) || null,
         level2_category: pick(raw, H.level2) || null,
-        price,
-        price_segment: priceSegment,
+        price: parsePriceCell(pick(raw, H.price)),
+        commissionRaw,
         commission_pct: commission ? (commission.min + commission.max) / 2 : null,
         commission_note: commission?.isRange
           ? `range ${commission.min}-${commission.max}%`
           : commissionKotor
             ? commissionRaw
             : null,
-        source: "master_upload",
-        needs_review: commissionKotor || price === null,
-        first_seen: existing?.first_seen ?? today,
-        last_seen: today,
-        updated_at: new Date().toISOString(),
-      },
-      { onConflict: "product_id" }
-    );
-
-    if (error) {
-      report.skipped.push({ row: rowNum, reason: error.message });
+        partner_commission_pct: partnerCommission
+          ? (partnerCommission.min + partnerCommission.max) / 2
+          : null,
+        product_link: pick(raw, H.productLink) || null,
+        effective_start: parseDateCell(pick(raw, H.effectiveStart)),
+        effective_end: parseDateCell(pick(raw, H.effectiveEnd)),
+        campaign_id: campaignId,
+        campaign_name: pick(raw, H.campaignName) || null,
+        campaignIds: new Set(campaignId ? [campaignId] : []),
+        topCampaignGmv: affiliateGmv ?? 0,
+        period_start: period?.start ?? null,
+        period_end: period?.end ?? null,
+        sums: rowSums,
+        maxes: rowMaxes,
+      });
       continue;
     }
-    report.inserted++;
+
+    // Baris kedua dst untuk produk yang sama: gabungkan.
+    for (const f of SUM_FIELDS) existing.sums[f] = addNullable(existing.sums[f], rowSums[f]);
+    for (const f of MAX_FIELDS) existing.maxes[f] = maxNullable(existing.maxes[f], rowMaxes[f]);
+    if (campaignId) existing.campaignIds.add(campaignId);
+    if ((affiliateGmv ?? 0) > existing.topCampaignGmv) {
+      existing.topCampaignGmv = affiliateGmv ?? 0;
+      existing.campaign_id = campaignId ?? existing.campaign_id;
+      existing.campaign_name = pick(raw, H.campaignName) || existing.campaign_name;
+    }
+    // Periode = rentang gabungan seluruh baris produk ini.
+    if (period) {
+      existing.period_start =
+        existing.period_start && existing.period_start < period.start ? existing.period_start : period.start;
+      existing.period_end =
+        existing.period_end && existing.period_end > period.end ? existing.period_end : period.end;
+    }
+    // Atribut master: baris pertama yang punya nilai yang menang (jangan timpa dengan kosong).
+    existing.product_name ??= pick(raw, H.productName) || null;
+    existing.shop_id ??= pick(raw, H.shopId) || null;
+    existing.shop_name ??= pick(raw, H.shopName) || null;
+    existing.level1_category ??= pick(raw, H.level1) || null;
+    existing.level2_category ??= pick(raw, H.level2) || null;
+    existing.product_link ??= pick(raw, H.productLink) || null;
+    existing.price ??= parsePriceCell(pick(raw, H.price));
+    if (existing.commission_pct === null && commission) {
+      existing.commission_pct = (commission.min + commission.max) / 2;
+      existing.commission_note = commission.isRange ? `range ${commission.min}-${commission.max}%` : null;
+    }
+    if (existing.partner_commission_pct === null && partnerCommission) {
+      existing.partner_commission_pct = (partnerCommission.min + partnerCommission.max) / 2;
+    }
+  }
+
+  if (byProduct.size === 0) {
+    return {
+      ...report,
+      error: "Semua baris dilewati — tidak ada Product ID yang valid di file ini.",
+    };
+  }
+
+  // ---- Fase 2: baca first_seen yang sudah ada (chunked, bukan N+1) ----
+  const productIds = [...byProduct.keys()];
+  const existingById = new Map<string, { first_seen: string | null }>();
+  for (let i = 0; i < productIds.length; i += 200) {
+    const chunk = productIds.slice(i, i + 200);
+    const { data, error } = await admin
+      .from("products_tap")
+      .select("product_id, first_seen")
+      .in("product_id", chunk);
+    if (error) return { ...report, error: `Gagal membaca katalog produk: ${error.message}` };
+    for (const r of data ?? []) {
+      existingById.set(r.product_id as string, { first_seen: (r.first_seen as string | null) ?? null });
+    }
+  }
+
+  // ---- Fase 3: bulk upsert ----
+  const now = new Date().toISOString();
+  let needsReviewCount = 0;
+  const payload = [...byProduct.values()].map((p) => {
+    // Harga: kolom harga eksplisit kalau ada, kalau tidak diperkirakan dari
+    // GMV/items sold pada file yang sama (deterministik, bukan tebakan model).
+    const itemsSold = p.sums.items_sold ?? 0;
+    const price =
+      p.price ?? (itemsSold > 0 && p.sums.affiliate_gmv ? p.sums.affiliate_gmv / itemsSold : null);
+    const commissionKotor = p.commissionRaw !== "" && p.commission_pct === null;
+    const needsReview = commissionKotor || price === null;
+    if (needsReview) needsReviewCount++;
+
+    return {
+      product_id: p.product_id,
+      product_name: p.product_name,
+      shop_id: p.shop_id,
+      shop_name: p.shop_name,
+      level1_category: p.level1_category,
+      level2_category: p.level2_category,
+      price,
+      price_segment: price !== null && price > 0 ? priceSegmentOf(price, bounds) : null,
+      commission_pct: p.commission_pct,
+      commission_note: p.commission_note,
+      partner_commission_pct: p.partner_commission_pct,
+      product_link: p.product_link,
+      effective_start: p.effective_start,
+      effective_end: p.effective_end,
+      campaign_id: p.campaign_id,
+      campaign_name: p.campaign_name,
+      campaign_count: p.campaignIds.size || null,
+      period_start: p.period_start,
+      period_end: p.period_end,
+      ...Object.fromEntries(SUM_FIELDS.map((f) => [f, p.sums[f]])),
+      ...Object.fromEntries(MAX_FIELDS.map((f) => [f, p.maxes[f]])),
+      source: "master_upload",
+      needs_review: needsReview,
+      first_seen: existingById.get(p.product_id)?.first_seen ?? today,
+      last_seen: today,
+      updated_at: now,
+    };
+  });
+
+  const failedChunks: string[] = [];
+  for (let i = 0; i < payload.length; i += 500) {
+    const chunk = payload.slice(i, i + 500);
+    const { error } = await admin.from("products_tap").upsert(chunk, { onConflict: "product_id" });
+    if (error) {
+      failedChunks.push(`${chunk.length} produk (mulai ${chunk[0]?.product_id}): ${error.message}`);
+      for (const row of chunk) {
+        report.skipped.push({ row: -1, reason: `${row.product_id}: ${error.message}` });
+      }
+      continue;
+    }
+    report.inserted += chunk.length;
+  }
+
+  const newCount = payload.filter((p) => !existingById.has(p.product_id)).length;
+  report.summary = [
+    { label: "Baris file terbaca", value: String(rows.length) },
+    { label: "Produk unik", value: String(byProduct.size) },
+    { label: "Produk baru", value: String(newCount) },
+    { label: "Produk diperbarui", value: String(byProduct.size - newCount) },
+    { label: "Perlu review", value: String(needsReviewCount) },
+    ...(summaryRows > 0 ? [{ label: 'Baris "Summary" dilewati', value: String(summaryRows) }] : []),
+  ];
+  if (failedChunks.length > 0) {
+    report.error = `Sebagian produk gagal disimpan — ${failedChunks.join("; ")}`;
+  } else if (needsReviewCount > 0) {
+    report.warning = `${needsReviewCount} produk ditandai "perlu review" (harga atau rate komisi tidak terbaca). Perbaiki lewat tombol Edit di tabel.`;
   }
 
   await writeAudit({
     actorId: actor.id,
     action: "products_tap.upload_master",
     entityType: "products_tap",
-    after: { inserted: report.inserted, skipped: report.skipped.length },
+    after: {
+      rows_read: rows.length,
+      products: byProduct.size,
+      inserted: report.inserted,
+      new: newCount,
+      needs_review: needsReviewCount,
+      skipped: report.skipped.length,
+    },
     type: "auto",
   });
 

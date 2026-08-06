@@ -93,8 +93,11 @@ export default async function DealsPage({
       </form>
 
       <p className="mt-3 text-xs text-slate-400">
-        Klik judul kolom untuk mengurutkan (naik → turun → urutan bawaan). Tabel ditampilkan 10 baris
-        per halaman; kolom yang tidak muat bisa dilihat dengan menggeser tabel ke kanan/kiri.
+        Klik judul kolom untuk mengurutkan (naik → turun → urutan bawaan). Tabel dimulai dari preset
+        kolom <strong>Ringkas</strong> supaya muat satu layar tanpa digeser kanan-kiri — kolom
+        nominal (Ads Budget, Service Fee, GMV TAP, Campaign, ID) bisa dimunculkan lewat menu{" "}
+        <strong>Kolom</strong>, dan pilihannya tersimpan di browser ini. Baris per halaman bisa
+        diatur 10/20/50/100 di bawah tabel.
       </p>
 
       <div className="mt-2">

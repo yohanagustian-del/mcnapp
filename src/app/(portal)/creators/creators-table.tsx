@@ -8,6 +8,7 @@ import { creatorClassLabel } from "@/lib/creators/creator-class";
 import { updateRateCard } from "./actions";
 import { CreatorEditButton, type EditCmOption } from "./creator-edit-button";
 import { CreatorDeleteDialog, type DeleteTarget } from "./creator-delete-dialog";
+import { CmRequestButton } from "./cm-request-button";
 
 /** Master-data row rendered by the creators table (only the columns actually shown). */
 export interface CreatorTableRow {
@@ -372,6 +373,9 @@ export function CreatorsTable({
   canDelete,
   canAssignCm = false,
   cmOptions = [],
+  canRequestCm = false,
+  viewerId = null,
+  requestedCreatorIds,
 }: {
   rows: CreatorTableRow[];
   nowMs: number;
@@ -382,6 +386,16 @@ export function CreatorsTable({
   canAssignCm?: boolean;
   /** Daftar CM aktif untuk dropdown CM di modal Edit. */
   cmOptions?: EditCmOption[];
+  /**
+   * Izin creators.request_cm TANPA izin assign (CPM). Menampilkan tombol "Request"
+   * per baris — satu-satunya jalur CPM mendapatkan kreator, karena assign mandiri
+   * memang tidak diizinkan.
+   */
+  canRequestCm?: boolean;
+  /** team_members.id user yang login — untuk menyembunyikan tombol di kreator sendiri. */
+  viewerId?: string | null;
+  /** creator_id yang sudah punya request pending dari user ini. */
+  requestedCreatorIds?: string[];
 }) {
   const { matches, isActive: filterActive } = useCreatorFilter();
 
@@ -485,8 +499,11 @@ export function CreatorsTable({
 
   const labelOf = (c: CreatorTableRow) => c.username || c.name || c.id;
 
+  const showActions = canEdit || canDelete || canRequestCm;
+  const requestedIds = useMemo(() => new Set(requestedCreatorIds ?? []), [requestedCreatorIds]);
+
   /** Kolom data terlihat + kolom centang + kolom Aksi — dipakai colSpan baris "kosong". */
-  const colCount = visibleColumns.length + (canDelete ? 1 : 0) + (canEdit || canDelete ? 1 : 0);
+  const colCount = visibleColumns.length + (canDelete ? 1 : 0) + (showActions ? 1 : 0);
   const cellCtx: CellContext = { nowMs, canUpload };
 
   const toggleOne = useCallback((id: string) => {
@@ -674,7 +691,7 @@ export function CreatorsTable({
                   </th>
                 );
               })}
-              {(canEdit || canDelete) && <th className="px-2 py-3">Aksi</th>}
+              {showActions && <th className="px-2 py-3">Aksi</th>}
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
@@ -697,9 +714,18 @@ export function CreatorsTable({
                       {col.cell(c, cellCtx)}
                     </td>
                   ))}
-                  {(canEdit || canDelete) && (
+                  {showActions && (
                     <td className={td}>
                       <div className="flex items-center gap-1">
+                        {canRequestCm && (
+                          <CmRequestButton
+                            creatorId={c.id}
+                            creatorLabel={labelOf(c)}
+                            ownerName={c.cmName}
+                            alreadyRequested={requestedIds.has(c.id)}
+                            isMine={Boolean(viewerId) && c.owner_cpm_id === viewerId}
+                          />
+                        )}
                         {canEdit && (
                           // CreatorTableRow memuat semua field EditableCreator,
                           // jadi barisnya diteruskan apa adanya — tidak ada daftar

@@ -1,11 +1,12 @@
 import { randomBytes } from "crypto";
 
-export type EntityPrefix = "CRT" | "DEAL" | "LNK";
+export type EntityPrefix = "CRT" | "DEAL" | "LNK" | "REQ";
 
 const ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"; // no 0/O, 1/I/L ambiguity
 
 /**
- * Centralized entity ID generator (text PK): CRT-xxxxx, DEAL-xxxxx, LNK-xxxxx.
+ * Centralized entity ID generator (text PK): CRT-xxxxx, DEAL-xxxxx, LNK-xxxxx,
+ * REQ-xxxxx (request penugasan CM).
  * 5 chars from a 31-char alphabet ≈ 28M combinations; callers must retry on
  * unique-constraint violation (see insertWithGeneratedId).
  */

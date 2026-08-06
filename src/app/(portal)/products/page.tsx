@@ -3,22 +3,26 @@ import { requireMember, hasPermission, canAccessNav, NAV_ITEMS } from "@/lib/rba
 import { createClient } from "@/lib/supabase/server";
 import { CsvUploadForm } from "@/components/csv-upload-form";
 import { uploadMasterProducts } from "./actions";
+import { ProductsTable, SEGMENT_LABEL, type ProductRow } from "./products-table";
+import { UploadTutorial } from "./upload-tutorial";
 
 export const dynamic = "force-dynamic";
 
-function formatRp(v: number | null | undefined): string {
-  return v != null ? `Rp${Number(v).toLocaleString("id-ID")}` : "—";
-}
-
-const SEGMENT_LABEL: Record<string, string> = {
-  low: "Low (<180rb)",
-  entry: "Entry (180rb-800rb)",
-  sweet: "Sweet (800rb-3,6jt)",
-  high: "High (3,6jt-8jt)",
-  premium: "Premium (>8jt)",
-};
-
-const td = "px-3 py-2 whitespace-nowrap";
+/** Kolom yang dibaca tabel — sama persis dengan ProductRow, satu daftar saja. */
+const SELECT_COLUMNS = [
+  "product_id", "product_name", "shop_id", "shop_name",
+  "level1_category", "level2_category", "price", "price_segment",
+  "commission_pct", "commission_note", "partner_commission_pct", "product_link",
+  "campaign_name", "campaign_count", "period_start", "period_end",
+  "affiliate_gmv", "affiliate_video_gmv", "affiliate_live_gmv",
+  "settled_gmv", "gmv_refund", "revenue_showcase",
+  "orders", "items_sold",
+  "collaborated_creators", "creators_with_posts", "creators_with_sales",
+  "est_partner_commission", "actual_partner_commission",
+  "est_creator_commission", "actual_creator_commission",
+  "link_gmv", "link_items_sold", "link_orders",
+  "source", "active", "needs_review", "first_seen", "last_seen",
+].join(", ");
 
 export default async function ProductsPage({
   searchParams,
@@ -29,23 +33,25 @@ export default async function ProductsPage({
   const navItem = NAV_ITEMS.find((n) => n.href === "/products");
   if (navItem && !canAccessNav(navItem, member.role)) redirect("/dashboard");
   const canUpload = hasPermission("products.upload_master", member.role);
+  const canEdit = hasPermission("products.edit", member.role);
 
   const { level2, segment, review } = await searchParams;
 
   const supabase = await createClient();
   let query = supabase
     .from("products_tap")
-    .select(
-      "product_id, product_name, shop_id, shop_name, level1_category, level2_category, price, price_segment, commission_pct, commission_note, source, active, needs_review, first_seen, last_seen"
-    )
+    .select(SELECT_COLUMNS)
+    // Urutan bawaan: produk penyumbang GMV terbesar dulu (produk tanpa metrik di
+    // bawah), bukan sekadar yang terakhir terlihat — itu yang dicari saat matching.
+    .order("affiliate_gmv", { ascending: false, nullsFirst: false })
     .order("last_seen", { ascending: false })
-    .limit(500);
+    .limit(1000);
 
   if (level2) query = query.ilike("level2_category", `%${level2}%`);
   if (segment) query = query.eq("price_segment", segment);
   if (review === "1") query = query.eq("needs_review", true);
 
-  const { data: products } = await query;
+  const { data: products, error } = await query;
 
   const { data: categoryRows } = await supabase
     .from("products_tap")
@@ -54,27 +60,39 @@ export default async function ProductsPage({
     .limit(1000);
   const categories = [...new Set((categoryRows ?? []).map((r) => r.level2_category).filter(Boolean))].sort();
 
+  const rows = (products ?? []) as unknown as ProductRow[];
+
   return (
     <div>
       <h1 className="text-2xl font-semibold">Produk TAP</h1>
       <p className="mt-1 text-sm text-slate-500">
-        Katalog produk TAP MEA — gabungan upload master product list + derive otomatis dari file TAP
-        mingguan (/ingest). Dipakai untuk Product×Creator Matching (rule-based, 0 token AI): cocokkan
-        segmen harga kemampuan jual kreator dengan produk di segmen sama.
+        Katalog produk TAP MEA — gabungan upload custom report TikTok Partner Compass + derive
+        otomatis dari file TAP mingguan (/ingest). Dipakai untuk Product×Creator Matching
+        (rule-based, 0 token AI): cocokkan segmen harga kemampuan jual kreator dengan produk di
+        segmen sama.
       </p>
 
       {canUpload && (
-        <div className="mt-6">
-          <CsvUploadForm
-            action={uploadMasterProducts}
-            buttonLabel="Upload Master Product List"
-            helpText='Kolom yang dikenali: Product ID, Product Name, Shop ID, Shop Name, Level 1 Category,
-              Level 2 Category, Price/Harga, Commission/Komisi. Rupiah campur (titik/koma ribuan) & komisi
-              kotor ("not found", "5-7%") ditangani otomatis dengan flag "perlu review", tidak crash.
-              Baris "Summary" dilewati. Segmen harga dihitung dari Price memakai app_config
-              segments.price_bounds.'
-          />
-        </div>
+        <>
+          <div className="mt-6">
+            <UploadTutorial />
+          </div>
+
+          <div className="mt-4">
+            <CsvUploadForm
+              action={uploadMasterProducts}
+              buttonLabel="Upload Master Product List"
+              helpText='Terima langsung export "Custom report" TikTok Partner Compass (Product ID, Product
+                name, Shop, Level 1/2 category, Affiliate GMV total/video/live, Orders, Items sold,
+                Collaborated creators, komisi estimasi & aktual, Settled GMV, refund, metrik Link)
+                MAUPUN campaign product list (Sale price, Creator/Partner commission rate, masa berlaku,
+                link produk). Kolom Shop opsional. Rupiah campur (titik/koma ribuan), harga rentang
+                varian, dan komisi kotor ("not found", "5-7%") ditangani otomatis dengan flag "perlu
+                review", tidak crash. Baris "Summary" dilewati. Segmen harga dihitung dari harga memakai
+                app_config segments.price_bounds.'
+            />
+          </div>
+        </>
       )}
 
       <form className="mt-6 flex flex-wrap items-end gap-3 rounded-lg border border-slate-200 bg-white p-4" method="get">
@@ -111,64 +129,14 @@ export default async function ProductsPage({
         </button>
       </form>
 
-      <div className="mt-6 overflow-x-auto rounded-lg border border-slate-200 bg-white">
-        <table className="min-w-full text-sm">
-          <thead className="bg-slate-50 text-left text-xs uppercase text-slate-500">
-            <tr>
-              <th className="px-3 py-3">Produk</th>
-              <th className="px-3 py-3">Shop</th>
-              <th className="px-3 py-3">Kategori L1/L2</th>
-              <th className="px-3 py-3">Harga</th>
-              <th className="px-3 py-3">Segmen</th>
-              <th className="px-3 py-3">Komisi</th>
-              <th className="px-3 py-3">Sumber</th>
-              <th className="px-3 py-3">Terakhir Terlihat</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-slate-100">
-            {(products ?? []).map((p) => (
-              <tr key={p.product_id} className={p.needs_review ? "bg-amber-50" : undefined}>
-                <td className={`${td} font-medium`}>
-                  {p.product_name ?? "—"}
-                  <span className="ml-1 font-mono text-[10px] text-slate-400">{p.product_id}</span>
-                </td>
-                <td className={td}>
-                  {p.shop_name ?? "—"}
-                  <span className="ml-1 font-mono text-[10px] text-slate-400">{p.shop_id}</span>
-                </td>
-                <td className={td}>{[p.level1_category, p.level2_category].filter(Boolean).join(" / ") || "—"}</td>
-                <td className={td}>{formatRp(p.price)}</td>
-                <td className={td}>{p.price_segment ? SEGMENT_LABEL[p.price_segment] ?? p.price_segment : "—"}</td>
-                <td className={td}>
-                  {p.commission_pct != null ? `${Number(p.commission_pct).toFixed(1)}%` : "—"}
-                  {p.commission_note && (
-                    <span className="ml-1 text-xs text-amber-600" title={p.commission_note}>
-                      ⚠ {p.commission_note}
-                    </span>
-                  )}
-                </td>
-                <td className={td}>
-                  <span
-                    className={`rounded-full px-2 py-0.5 text-xs ${
-                      p.source === "master_upload" ? "bg-blue-100 text-blue-700" : "bg-slate-100 text-slate-700"
-                    }`}
-                  >
-                    {p.source === "master_upload" ? "Master Upload" : "Derive TAP"}
-                  </span>
-                  {!p.active && <span className="ml-1 text-xs text-red-600">nonaktif</span>}
-                </td>
-                <td className={td}>{p.last_seen ?? "—"}</td>
-              </tr>
-            ))}
-            {(products ?? []).length === 0 && (
-              <tr>
-                <td colSpan={8} className="px-4 py-6 text-center text-slate-400">
-                  Belum ada produk TAP. Upload master list atau tunggu ingest mingguan.
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
+      {error && (
+        <p className="mt-4 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+          Gagal memuat katalog produk: {error.message}
+        </p>
+      )}
+
+      <div className="mt-6">
+        <ProductsTable rows={rows} canEdit={canEdit} />
       </div>
     </div>
   );

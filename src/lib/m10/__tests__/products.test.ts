@@ -1,6 +1,6 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { upsertDerivedFromTap, type TapProductRow } from "../products";
+import { parsePriceCell, upsertDerivedFromTap, type TapProductRow } from "../products";
 
 // getConfig("segments.price_bounds") is the only external dependency of
 // upsertDerivedFromTap — stub it so tests don't touch the DB/config table.
@@ -211,5 +211,30 @@ describe("upsertDerivedFromTap (bulk, no N+1)", () => {
     expect(consoleErrorSpy).toHaveBeenCalledTimes(1);
     expect(consoleErrorSpy.mock.calls[0][0]).toContain("upsertDerivedFromTap");
     consoleErrorSpy.mockRestore();
+  });
+});
+
+/**
+ * Harga satuan dari export nyata: campaign product list menulis harga varian
+ * sebagai rentang ("Rp151.153-Rp376.184"), yang ditolak parseRupiah karena ada
+ * tanda "-". Tanpa penanganan ini setiap produk bundling masuk katalog tanpa
+ * harga → tanpa segmen → tidak pernah muncul di Product×Creator Matching.
+ */
+describe("parsePriceCell", () => {
+  it("membaca nominal tunggal dengan pemisah ribuan titik maupun koma", () => {
+    expect(parsePriceCell("Rp231.000")).toBe(231_000);
+    expect(parsePriceCell("Rp1,075,484")).toBe(1_075_484);
+    expect(parsePriceCell("231000")).toBe(231_000);
+  });
+
+  it("mengambil titik tengah untuk harga rentang varian", () => {
+    expect(parsePriceCell("Rp151.153-Rp376.184")).toBe((151_153 + 376_184) / 2);
+    expect(parsePriceCell("Rp113.490 - Rp273.224")).toBe((113_490 + 273_224) / 2);
+  });
+
+  it("mengembalikan null untuk sel kosong / teks bebas (caller flag review)", () => {
+    expect(parsePriceCell("")).toBeNull();
+    expect(parsePriceCell("not found")).toBeNull();
+    expect(parsePriceCell("-")).toBeNull();
   });
 });
