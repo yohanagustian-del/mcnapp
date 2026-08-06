@@ -101,6 +101,13 @@ export const PERMISSIONS: Record<string, Role[]> = {
   // yang sudah punya kontrak/report/komisi ditolak di server (lib/creators/delete.ts)
   // dengan saran memakai status "nonaktif". Dicermin RLS creators_delete (0028).
   "creators.delete": MANAGEMENT_ROLES,
+  // CPM tidak boleh assign kreator ke dirinya sendiri (m8.assign_creator = Director/
+  // Head/SPV/CM Lead), jadi jalurnya REQUEST: CM mengajukan, pemegang izin assign yang
+  // memutuskan. Mengajukan request tidak mengubah data apa pun — aman untuk semua CM.
+  "creators.request_cm": [...CM_ROLES],
+  // Memutuskan (terima/tolak) request penugasan CM. Sengaja sama persis dengan
+  // m8.assign_creator: yang boleh memutuskan = yang boleh assign.
+  "creators.decide_cm_request": [...MANAGEMENT_ROLES, "cm_lead"],
   "deals.register": [...MANAGEMENT_ROLES, "bizdev_lead", "bizdev"],
   "deals.import_legacy": [...MANAGEMENT_ROLES, "bizdev_lead", "bd_admin"],
   // Edit deal brand per-row: memperbaiki data master deal lama yang berantakan
@@ -126,6 +133,10 @@ export const PERMISSIONS: Record<string, Role[]> = {
   "m5.run": [...MANAGEMENT_ROLES, ...CM_ROLES],
   // Product×Creator Matching: upload master product list TAP — CM & BizDev (yang pegang data TAP).
   "products.upload_master": [...MANAGEMENT_ROLES, ...CM_ROLES, ...BIZDEV_ROLES],
+  // Edit satu baris katalog produk (nama/shop/kategori/harga/rate komisi/aktif).
+  // Sama dengan yang boleh mengunggah master: memperbaiki baris hasil upload kotor
+  // tidak lebih berisiko daripada mengunggah ulang seluruh file.
+  "products.edit": [...MANAGEMENT_ROLES, ...CM_ROLES, ...BIZDEV_ROLES],
   // M6 §2.5: alat milik BizDev (+ management). CPM tidak menjalankan.
   "m6.run": [...MANAGEMENT_ROLES, "bizdev_lead", "bizdev"],
   // M7 §2.7: buat/edit project & kelola peserta/man power = management + lead terkait + PM (campaign_ops)

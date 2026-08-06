@@ -64,6 +64,8 @@ export interface SortConfig<T> {
 
 /** Ukuran halaman standar untuk tabel padat di workspace. */
 export const PAGE_SIZES_10_20_50 = [10, 20, 50] as const;
+/** Tabel katalog/master yang sering ditelusuri banyak baris sekaligus. */
+export const PAGE_SIZES_10_20_50_100 = [10, 20, 50, 100] as const;
 /** Tabel yang cuma butuh "10 tampilan" (tanpa pemilih ukuran). */
 export const PAGE_SIZE_10 = [10] as const;
 
@@ -309,6 +311,157 @@ export function useTableControls<T>({
     reset,
     itemLabel,
   };
+}
+
+export interface ColumnPreference {
+  /** Label kolom yang sedang ditampilkan, urutannya mengikuti `allLabels`. */
+  shown: string[];
+  isShown: (label: string) => boolean;
+  toggle: (label: string) => void;
+  showCompact: () => void;
+  showAll: () => void;
+}
+
+/**
+ * Pilihan kolom yang ditampilkan sebuah tabel lebar, tersimpan per-browser.
+ *
+ * Tabel master di aplikasi ini punya belasan sampai puluhan kolom — tidak akan
+ * pernah muat di laptop. Daripada memaksa user menggeser tabel ke kanan-kiri,
+ * defaultnya preset "Ringkas" (kolom yang benar-benar dipakai harian) dan sisanya
+ * tinggal dicentang lewat menu Kolom.
+ *
+ * Nilai awal SELALU `compactLabels` supaya render server & klien identik (tidak
+ * hydration-mismatch); preferensi tersimpan baru dibaca setelah mount. Isi
+ * localStorage disaring terhadap `allLabels`, jadi kolom yang sudah dihapus atau
+ * diganti namanya di kode tidak bisa dihidupkan lagi oleh entri usang.
+ */
+export function useColumnPreference({
+  storageKey,
+  allLabels,
+  compactLabels,
+}: {
+  storageKey: string;
+  allLabels: string[];
+  compactLabels: string[];
+}): ColumnPreference {
+  const [shown, setShown] = useState<string[]>(compactLabels);
+
+  useEffect(() => {
+    try {
+      const saved = window.localStorage.getItem(storageKey);
+      if (!saved) return;
+      const parsed: unknown = JSON.parse(saved);
+      if (!Array.isArray(parsed)) return;
+      const valid = allLabels.filter((l) => parsed.includes(l));
+      if (valid.length > 0) setShown(valid);
+    } catch {
+      // localStorage diblokir / JSON rusak → tetap pakai preset bawaan.
+    }
+    // allLabels/compactLabels adalah konstanta modul di setiap pemanggil.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [storageKey]);
+
+  const persist = useCallback(
+    (next: string[]) => {
+      setShown(next);
+      try {
+        window.localStorage.setItem(storageKey, JSON.stringify(next));
+      } catch {
+        // Preferensi gagal disimpan bukan alasan membatalkan perubahan tampilan.
+      }
+    },
+    [storageKey]
+  );
+
+  return {
+    shown,
+    isShown: useCallback((label: string) => shown.includes(label), [shown]),
+    toggle: useCallback(
+      (label: string) => {
+        const next = shown.includes(label)
+          ? shown.filter((l) => l !== label)
+          : allLabels.filter((l) => l === label || shown.includes(l));
+        // Menyembunyikan kolom terakhir menyisakan tabel tanpa kolom sama sekali.
+        if (next.length === 0) return;
+        persist(next);
+      },
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+      [shown, persist]
+    ),
+    showCompact: useCallback(() => persist(compactLabels), [persist]), // eslint-disable-line react-hooks/exhaustive-deps
+    showAll: useCallback(() => persist(allLabels), [persist]), // eslint-disable-line react-hooks/exhaustive-deps
+  };
+}
+
+/** Menu centang "Kolom (n/N)" untuk tabel yang memakai useColumnPreference. */
+export function ColumnPicker({
+  pref,
+  allLabels,
+  className = "",
+}: {
+  pref: ColumnPreference;
+  allLabels: string[];
+  className?: string;
+}) {
+  const [open, setOpen] = useState(false);
+
+  return (
+    <div className={`relative ${className}`}>
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        className="rounded-md border border-slate-300 px-3 py-1.5 text-sm text-slate-700 hover:bg-slate-50"
+      >
+        Kolom ({pref.shown.length}/{allLabels.length}) ▾
+      </button>
+      {open && (
+        <>
+          {/* Klik di luar menutup menu tanpa perlu listener global. */}
+          <button
+            type="button"
+            aria-label="Tutup pilihan kolom"
+            onClick={() => setOpen(false)}
+            className="fixed inset-0 z-10 cursor-default"
+          />
+          <div className="absolute left-0 z-20 mt-1 max-h-80 w-64 overflow-y-auto rounded-md border border-slate-200 bg-white p-2 shadow-lg">
+            <div className="flex gap-2 border-b border-slate-100 pb-2">
+              <button
+                type="button"
+                onClick={pref.showCompact}
+                className="rounded px-2 py-1 text-xs text-slate-600 underline hover:bg-slate-50"
+              >
+                Ringkas
+              </button>
+              <button
+                type="button"
+                onClick={pref.showAll}
+                className="rounded px-2 py-1 text-xs text-slate-600 underline hover:bg-slate-50"
+              >
+                Semua kolom
+              </button>
+            </div>
+            <div className="mt-2 space-y-0.5">
+              {allLabels.map((label) => (
+                <label
+                  key={label}
+                  className="flex cursor-pointer items-center gap-2 rounded px-1 py-1 text-sm hover:bg-slate-50"
+                >
+                  <input
+                    type="checkbox"
+                    checked={pref.isShown(label)}
+                    onChange={() => pref.toggle(label)}
+                    className="h-4 w-4 rounded border-slate-300"
+                  />
+                  <span className="text-slate-700">{label}</span>
+                </label>
+              ))}
+            </div>
+          </div>
+        </>
+      )}
+    </div>
+  );
 }
 
 /** Dropdown multi-select generik (dipakai filter CM dan semua facet). */

@@ -2,6 +2,7 @@ import { requireMember, hasPermission } from "@/lib/rbac";
 import { createClient } from "@/lib/supabase/server";
 import { fetchAll } from "@/lib/supabase/fetch-all";
 import { loadCreatorsWithoutCm } from "@/lib/creators/without-cm";
+import { loadCmRequests } from "@/lib/creators/cm-requests";
 import { CsvUploadForm } from "@/components/csv-upload-form";
 import { CreatorFilterProvider, CreatorFilterBar, type CmOption } from "@/components/creator-filter";
 import { CreatorsWithoutCmAlert } from "@/components/creators-without-cm-alert";
@@ -9,6 +10,7 @@ import { uploadCreators } from "./actions";
 import { CreatorsTable, type CreatorTableRow } from "./creators-table";
 import { CreatorImportPanel } from "./creator-import-panel";
 import { CreatorCreateDialog } from "./creator-create-dialog";
+import { CmRequestsPanel } from "./cm-requests-panel";
 
 export const dynamic = "force-dynamic";
 
@@ -26,6 +28,10 @@ export default async function CreatorsPage() {
   const canEdit = hasPermission("creators.edit", member.role);
   const canDelete = hasPermission("creators.delete", member.role);
   const canAssignCm = hasPermission("m8.assign_creator", member.role);
+  const canDecideCmRequest = hasPermission("creators.decide_cm_request", member.role);
+  // CPM: boleh mengajukan request, tidak boleh assign. Yang sudah boleh assign
+  // memakai dropdown CM di modal Edit — tidak perlu (dan tidak boleh) dua jalur.
+  const canRequestCm = hasPermission("creators.request_cm", member.role) && !canAssignCm;
 
   const supabase = await createClient();
   // Tabel dipaginasi di klien (10/20/50/100 per halaman), jadi daftar penuh
@@ -72,6 +78,12 @@ export default async function CreatorsPage() {
 
   // Kreator tanpa CM (mis. dibuat otomatis dari upload data platform mingguan).
   const withoutCm = await loadCreatorsWithoutCm();
+
+  // Antrean request penugasan CM — approver melihat semuanya, CM melihat miliknya.
+  const cmRequests =
+    canDecideCmRequest || canRequestCm
+      ? await loadCmRequests(member.id)
+      : { pending: [], recent: [], myPendingCreatorIds: [] };
 
   // Pilihan CM untuk form "Tambah Kreator" DAN dropdown CM di modal Edit: SELURUH
   // CM aktif dari tabel Tim — bukan cmOptions di bawah (yang hanya berisi CM yang
@@ -135,6 +147,14 @@ export default async function CreatorsPage() {
               <strong>nonaktif</strong> untuk kasus itu.
             </>
           )}
+          {canRequestCm && (
+            <>
+              {" "}
+              Anda tidak bisa menugaskan kreator ke diri sendiri — pakai tombol{" "}
+              <strong>Request</strong> di baris kreator. Pemindahan baru berlaku setelah disetujui CM
+              Lead / Head, dan statusnya terlihat di panel <strong>Request penugasan CM</strong>.
+            </>
+          )}
         </p>
 
         <div className="mt-6">
@@ -145,6 +165,17 @@ export default async function CreatorsPage() {
             canAssign={canAssignCm}
           />
         </div>
+
+        {(canDecideCmRequest || canRequestCm) && (
+          <div className="mt-6">
+            <CmRequestsPanel
+              pending={cmRequests.pending}
+              recent={cmRequests.recent}
+              canDecide={canDecideCmRequest}
+              viewerId={member.id}
+            />
+          </div>
+        )}
 
         {canUpload && (
           <div className="mt-6">
@@ -181,6 +212,9 @@ export default async function CreatorsPage() {
             canDelete={canDelete}
             canAssignCm={canAssignCm}
             cmOptions={(activeCms ?? []).map((m) => ({ id: m.id, name: m.name }))}
+            canRequestCm={canRequestCm}
+            viewerId={member.id}
+            requestedCreatorIds={cmRequests.myPendingCreatorIds}
           />
         </div>
       </div>

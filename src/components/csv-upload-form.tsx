@@ -7,6 +7,10 @@ export interface UploadReport {
   skipped: { row: number; reason: string }[];
   /** Alasan kegagalan yang dikembalikan action (bukan di-throw — lihat tim/actions.ts). */
   error?: string;
+  /** Rincian hasil ("Produk baru: 120", …) — opsional, ditampilkan sebagai grid kecil. */
+  summary?: { label: string; value: string }[];
+  /** Peringatan non-fatal: upload berhasil tapi ada yang perlu ditindaklanjuti. */
+  warning?: string;
 }
 
 /**
@@ -66,28 +70,47 @@ export function CsvUploadForm({
       </form>
       <p className="mt-2 text-xs text-slate-500">{helpText}</p>
 
-      {error && <p className="mt-3 rounded-md bg-red-50 p-3 text-sm text-red-700">{error}</p>}
-
-      {report && (
-        <div className="mt-3 text-sm">
-          {(report.inserted > 0 || !report.error) && (
-            <p className="font-medium text-green-700">{report.inserted} baris berhasil diproses.</p>
-          )}
-          {report.skipped.length > 0 && (
-            <details className="mt-2">
-              <summary className="cursor-pointer text-amber-700">
-                {report.skipped.length} baris dilewati / perlu review
-              </summary>
-              <ul className="mt-1 list-inside list-disc text-xs text-slate-600">
-                {report.skipped.map((s, i) => (
-                  <li key={i}>
-                    {s.row > 0 ? `Baris ${s.row}: ` : ""}{s.reason}
-                  </li>
-                ))}
-              </ul>
-            </details>
-          )}
+      {/* Status upload selalu eksplisit: satu banner GAGAL atau BERHASIL, bukan
+          hanya angka baris — supaya user tidak perlu menebak apakah file masuk. */}
+      {error && (
+        <div className="mt-3 rounded-md border border-red-200 bg-red-50 p-3" role="alert">
+          <p className="text-sm font-semibold text-red-800">✕ Upload gagal</p>
+          <p className="mt-1 text-sm text-red-700">{error}</p>
         </div>
+      )}
+
+      {report && !error && (
+        <div className="mt-3 rounded-md border border-green-200 bg-green-50 p-3" role="status">
+          <p className="text-sm font-semibold text-green-800">
+            ✓ Upload berhasil — {report.inserted.toLocaleString("id-ID")} baris tersimpan
+          </p>
+          {report.summary && report.summary.length > 0 && (
+            <dl className="mt-2 grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-green-900 sm:grid-cols-3">
+              {report.summary.map((s) => (
+                <div key={s.label} className="flex justify-between gap-2">
+                  <dt className="text-green-800">{s.label}</dt>
+                  <dd className="font-medium">{s.value}</dd>
+                </div>
+              ))}
+            </dl>
+          )}
+          {report.warning && <p className="mt-2 text-xs text-amber-800">⚠ {report.warning}</p>}
+        </div>
+      )}
+
+      {report && report.skipped.length > 0 && (
+        <details className="mt-2 text-sm">
+          <summary className="cursor-pointer text-amber-700">
+            {report.skipped.length} baris dilewati / perlu review
+          </summary>
+          <ul className="mt-1 max-h-56 list-inside list-disc overflow-y-auto text-xs text-slate-600">
+            {report.skipped.map((s, i) => (
+              <li key={i}>
+                {s.row > 0 ? `Baris ${s.row}: ` : ""}{s.reason}
+              </li>
+            ))}
+          </ul>
+        </details>
       )}
     </div>
   );
