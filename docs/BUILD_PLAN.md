@@ -64,3 +64,21 @@ Ikut urutan ini. Fase 0 blocking semua. Centang `[x]` saat selesai. Tiap task: t
 ## Bisa paralel
 Fase 1 (M4 ∥ M2 setelah ingestion) · Fase 2 (M5/M6 ∥ M7).
 Blocking keras: Fase 0→semua; projectGmv→M5+M6; M3 terakhir.
+
+## M14 — Finance: Transaksi & Mekanisme Ubah Transaksi (2026-08-04)
+Dipicu QA `/finance/transactions/TRX-YYYYMM-NNNN`: klien bisa mengganti metode/rekening
+pembayaran setelah transaksi tercatat, tapi belum ada jalur legal untuk mengubahnya.
+Keputusan aturan (mengubah house rule CLAUDE.md #3, lihat CLAUDE.md #9): transaksi finance =
+catatan internal atas kesepakatan, BUKAN data platform → boleh berubah lewat approval, bukan
+lewat UPDATE langsung.
+- [x] Role `finance_lead` (Senior/Lead Finance) — pengaju perubahan; staff `finance` catat & baca saja. Migration 0031 (enum sendiri: label enum baru tak boleh dipakai di transaksi yang sama).
+- [x] `finance_transactions` (id `TRX-YYYYMM-NNNN`, nomor urut per bulan via `next_finance_trx_id` + advisory lock) & `finance_transaction_changes`. Migration 0032.
+- [x] Field terkunci dari `app_config finance.guarded_fields` (bukan hardcode) → butuh approval Director; sisanya (keterangan) berlaku langsung + audit `auto`.
+- [x] Penegakan di DB: trigger `guard_finance_txn_update` menolak UPDATE field terkunci walau dipanggil service-role; satu-satunya jalur sah `apply_finance_change()` (atomic: patch transaksi + tandai pengajuan approved).
+- [x] Unique index satu pengajuan `menunggu` per transaksi (cegah dua pengajuan bertentangan di-approve berurutan).
+- [x] Logika pure + teruji: `src/lib/finance/{transaction,change-request}.ts` (diff, partisi approval vs langsung, validasi Rupiah/tanggal/enum) — 0 LLM, deterministik.
+- [x] UI: `/finance/transactions` (daftar + catat baru + banner pengajuan menunggu) & `/finance/transactions/[id]` (detail, panel approval Director dengan tabel sekarang→diusulkan, form pengajuan, riwayat pengajuan, audit trail).
+- [x] RBAC: `finance.transaction_create` (finance+lead+management) · `finance.request_change` (finance_lead+management) · `finance.approve_change` (**director only**). od_viewer nol izin (dijaga `od-viewer.test.ts`).
+- [x] **Pengaju ≠ pemutus** ditegakkan di `apply_finance_change()` (bukan cuma server action): izin "ajukan" mencakup management termasuk Director, jadi tanpa itu Director bisa approve pengajuannya sendiri. Cek di server action bisa dilewati siapa pun yang bisa memanggil RPC dengan service-role.
+- [x] Alasan perubahan wajib HANYA bila ada field terkunci — kalau tak ada yang memutuskan, alasan itu tak punya pembaca.
+- [x] **Fallback beda-repo**: `docs/port/finance-transaction-approval/` — mekanisme ini dalam bentuk lepas (migration standalone, logika pure, orkestrasi + tes, harness uji-diri 12 skenario, panduan port) untuk ditempel ke `MEAgrup/AgencyAPP` yang tak bisa dilampirkan ke sesi ini (beda owner). `vitest.config.ts` include diperluas ke `docs/port/**`.

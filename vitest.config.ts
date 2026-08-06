@@ -10,6 +10,8 @@ export default defineConfig({
   },
   test: {
     environment: "node",
-    include: ["src/**/*.test.ts"],
+    // docs/port/** ikut diuji: port kit di sana adalah fallback yang harus TETAP
+    // jalan saat nanti ditempel ke repo lain, jadi ia tidak boleh membusuk diam-diam.
+    include: ["src/**/*.test.ts", "docs/port/**/*.test.ts"],
   },
 });
