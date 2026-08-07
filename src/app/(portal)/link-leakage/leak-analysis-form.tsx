@@ -140,12 +140,28 @@ export function LeakAnalysisForm() {
         </button>
       </form>
 
+      <p className="mt-2 rounded-md bg-slate-50 p-2 text-xs text-slate-600">
+        <strong>Periode file di sini tidak harus per minggu.</strong> Khusus analisa kebocoran,
+        periode boleh salah satu window mingguan (W1=1-7, W2=8-14, W3=15-21, W4=22-28,
+        W5=29-akhir bulan) <strong>atau</strong> rentang yang dimulai tanggal 1 dalam bulan yang
+        sama — termasuk <strong>tanggal 1 s/d akhir bulan</strong> (sebulan penuh) dan 1 s/d
+        pertengahan bulan. Yang tetap ditolak: periode menyebrang bulan, dan rentang yang mulai di
+        tengah bulan (mis. 3-19) karena akan tersimpan dengan kunci minggu yang menyesatkan.
+        Upload mingguan di{" "}
+        <a href="/ingest" className="underline">
+          /ingest
+        </a>{" "}
+        tetap wajib W1-W5 karena agregat performanya memang disusun per minggu.
+      </p>
+
       <p className="mt-2 text-xs text-slate-500">
-        Deterministik, 0 token AI: parse file platform → validasi periode W1-W5 → join per
-        (product_id, shop_id) → hitung bocor / peluang BD / status link pakai ambang app_config →
-        simpan ROLLUP per kreator per minggu + lead BizDev + alert. Detail produk tidak disimpan di
-        database, tapi diekspor sebagai backup CSV. Upload ulang minggu yang sama akan menimpa
-        rollup kreator di file tersebut (kreator CM lain di minggu yang sama tidak tersentuh).
+        Deterministik, 0 token AI: parse file platform → validasi periode → join per (product_id,
+        shop_id) → hitung bocor / peluang BD / status link pakai ambang app_config → simpan ROLLUP
+        per kreator per periode + lead BizDev + alert. Detail produk tidak disimpan di database,
+        tapi diekspor sebagai backup CSV. Rollup disimpan dengan kunci = tanggal mulai periode, jadi
+        upload ulang periode yang sama akan menimpa rollup kreator di file tersebut (kreator CM lain
+        di periode yang sama tidak tersentuh). Periode sebulan penuh memakai kunci tanggal 1, yaitu
+        kunci yang sama dengan W1 — hasilnya menggantikan rollup W1 untuk kreator di file itu.
       </p>
 
       {error && <p className="mt-3 rounded-md bg-red-50 p-3 text-sm text-red-700">{error}</p>}

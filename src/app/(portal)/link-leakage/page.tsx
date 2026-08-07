@@ -2,11 +2,15 @@ import Link from "next/link";
 import { requireMember, hasPermission } from "@/lib/rbac";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { fetchAll } from "@/lib/supabase/fetch-all";
 import { CsvUploadForm } from "@/components/csv-upload-form";
 import { listLeakExports } from "@/lib/m4/leak-export";
 import { uploadCooperatingShops } from "./actions";
 import { DownloadCsvButton } from "./download-csv-button";
 import { LeakAnalysisForm } from "./leak-analysis-form";
+import { CreatorStatusTable, type CreatorStatusRow } from "./creator-status-table";
+import { BdLeadsTable, type BdLeadRow } from "./bd-leads-table";
+import { OpenAlertsTable, type OpenAlertRow } from "./open-alerts-table";
 
 const STATUS_LABELS: Record<string, string> = {
   via_agency: "Via Link Agency",
@@ -20,11 +24,6 @@ const STATUS_STYLES: Record<string, string> = {
   bocor_total: "bg-red-100 text-red-800",
   belum_ada_link: "bg-slate-100 text-slate-600",
 };
-/** Label + style untuk link_status = NULL (artifak format v2 — "Ringkasan Creator"
- * tidak punya breakdown bocor/TAP per kreator, jadi status memang tidak diketahui,
- * BUKAN via_agency/0 — lihat leak-artifact.ts writeUnknownLeakRollups). */
-const UNKNOWN_STATUS_LABEL = "Belum diketahui (artifak v2)";
-const UNKNOWN_STATUS_STYLE = "bg-slate-100 text-slate-500";
 
 /** leak_week_summary.source_format → label UI. */
 const SOURCE_FORMAT_LABELS: Record<string, string> = {
@@ -32,12 +31,26 @@ const SOURCE_FORMAT_LABELS: Record<string, string> = {
   artifact_v2: "artifak v2",
   platform: "dihitung platform",
 };
-/** creator_link_status.source → pill kecil di kolom kreator. */
-const ROW_SOURCE_PILLS: Record<string, { label: string; style: string }> = {
-  artifact: { label: "artifak", style: "bg-indigo-100 text-indigo-700" },
-  platform: { label: "platform", style: "bg-emerald-100 text-emerald-700" },
-  engine: { label: "engine (lama)", style: "bg-slate-100 text-slate-600" },
-};
+
+/** Batas baris lead/alert yang ditarik ke klien (dipaginasi 10/20/50 di tabelnya). */
+const LIST_LIMIT = 1000;
+
+/** Baris rollup mentah + join kreator (nama, kelas, CM pemilik). */
+interface RollupRow {
+  creator_id: string;
+  gmv_deal_total: number | null;
+  gmv_bocor: number | null;
+  gmv_bocor_shop_basis: number | null;
+  leak_ratio: number | null;
+  link_status: string | null;
+  source: string | null;
+  creators: {
+    name: string;
+    creator_class: string | null;
+    owner_cpm_id: string | null;
+    team_members: { name?: string } | null;
+  } | null;
+}
 
 const rupiah = (n: number | null) =>
   n === null ? "—" : `Rp${Math.round(n).toLocaleString("id-ID")}`;
@@ -106,27 +119,30 @@ export default async function LinkLeakagePage({
   if (creatorIdFilter?.trim()) detailQuery = detailQuery.eq("creator_id", creatorIdFilter.trim());
   if (weekFilter?.trim()) detailQuery = detailQuery.eq("week", weekFilter.trim());
 
-  const [{ data: rollup }, { data: leads }, { data: alerts }, { data: leakDetail }, { data: weekSummary }] =
+  // Tabel di bawah dipaginasi di KLIEN (10/20/50), jadi daftarnya dimuat penuh di
+  // sini — bukan dipotong 50/200 baris seperti sebelumnya, karena baris ke-51 tidak
+  // akan pernah bisa dibuka lewat paginasi kalau server sudah memotongnya.
+  const [rollup, { data: leads }, { data: alerts }, { data: leakDetail }, { data: weekSummary }] =
     await Promise.all([
       latestWeek
-        ? supabase
-            .from("creator_link_status")
-            .select("creator_id, week, gmv_deal_total, gmv_bocor, gmv_bocor_shop_basis, leak_ratio, link_status, source, creators(name)")
-            .eq("week", latestWeek)
-            .order("leak_ratio", { ascending: false, nullsFirst: false })
-            .limit(200)
-        : Promise.resolve({ data: [] as never[] }),
+        ? fetchAll<RollupRow>(
+            supabase,
+            "creator_link_status",
+            "creator_id, gmv_deal_total, gmv_bocor, gmv_bocor_shop_basis, leak_ratio, link_status, source, creators(name, creator_class, owner_cpm_id, team_members(name))",
+            (q) => q.eq("week", latestWeek).order("leak_ratio", { ascending: false, nullsFirst: false })
+          )
+        : Promise.resolve([] as RollupRow[]),
       supabase
         .from("bd_leads")
         .select("shop_id, shop_name, frequency, total_gmv, priority_score, first_seen_week, status")
         .order("priority_score", { ascending: false })
-        .limit(50),
+        .limit(LIST_LIMIT),
       supabase
         .from("platform_alerts")
         .select("id, alert_type, entity_id, message, week, created_at")
         .eq("resolved", false)
         .order("created_at", { ascending: false })
-        .limit(50),
+        .limit(LIST_LIMIT),
       detailQuery,
       // Totals level-CM per minggu dari artifak (leak-artifact.ts writeLeakWeekSummary).
       supabase
@@ -136,6 +152,40 @@ export default async function LinkLeakagePage({
         .limit(1)
         .maybeSingle(),
     ]);
+
+  // Bentuk baris untuk tabel klien (murni pemetaan — tidak ada hitung ulang di sini).
+  const statusRows: CreatorStatusRow[] = rollup.map((r) => ({
+    creatorId: r.creator_id,
+    name: r.creators?.name ?? r.creator_id,
+    creatorClass: r.creators?.creator_class ?? null,
+    ownerCpmId: r.creators?.owner_cpm_id ?? null,
+    cmName: r.creators?.team_members?.name ?? null,
+    gmvDealTotal: r.gmv_deal_total,
+    gmvBocor: r.gmv_bocor,
+    gmvBocorShopBasis: r.gmv_bocor_shop_basis ?? null,
+    leakRatio: r.leak_ratio,
+    linkStatus: r.link_status,
+    source: r.source,
+  }));
+
+  const leadRows: BdLeadRow[] = (leads ?? []).map((l) => ({
+    shopId: l.shop_id,
+    shopName: l.shop_name,
+    frequency: l.frequency,
+    totalGmv: l.total_gmv,
+    priorityScore: l.priority_score,
+    firstSeenWeek: l.first_seen_week,
+    status: l.status,
+  }));
+
+  const alertRows: OpenAlertRow[] = (alerts ?? []).map((a) => ({
+    id: a.id,
+    alertType: a.alert_type,
+    entityId: a.entity_id,
+    message: a.message,
+    week: a.week,
+    createdAt: a.created_at,
+  }));
 
   return (
     <div>
@@ -153,7 +203,11 @@ export default async function LinkLeakagePage({
       </p>
       {weekSummary && (
         <p className="mt-2 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
-          Total minggu {weekSummary.week} ({SOURCE_FORMAT_LABELS[weekSummary.source_format] ?? weekSummary.source_format}):
+          Total periode {weekSummary.week}
+          {weekSummary.period_end && weekSummary.period_end !== weekSummary.week && (
+            <> s/d {weekSummary.period_end}</>
+          )}{" "}
+          ({SOURCE_FORMAT_LABELS[weekSummary.source_format] ?? weekSummary.source_format}):
           Affiliate {rupiah(weekSummary.gmv_affiliate_total)} · TAP {rupiah(weekSummary.gmv_tap)} · Potensi bocor{" "}
           {rupiah(weekSummary.gmv_leak_potential)}
           {weekSummary.gmv_leak_potential_shop_basis !== null && (
@@ -235,65 +289,7 @@ export default async function LinkLeakagePage({
       )}
 
       <h2 className="mt-8 text-lg font-medium">Status Creator{latestWeek ? ` — minggu ${latestWeek}` : ""}</h2>
-      <div className="mt-2 overflow-x-auto rounded-lg border border-slate-200 bg-white">
-        <table className="min-w-full text-sm">
-          <thead className="bg-slate-50 text-left text-xs uppercase text-slate-500">
-            <tr>
-              <th className="px-4 py-3">Creator</th>
-              <th className="px-4 py-3">GMV Shop Ber-deal</th>
-              <th className="px-4 py-3">GMV Bocor</th>
-              <th className="px-4 py-3">Rasio</th>
-              <th className="px-4 py-3">Status</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-slate-100">
-            {(rollup ?? []).map((r) => (
-              <tr key={r.creator_id}>
-                <td className="px-4 py-2 font-medium">
-                  {(r.creators as unknown as { name: string } | null)?.name ?? r.creator_id}
-                  <span className="ml-1 text-xs text-slate-400">{r.creator_id}</span>
-                  {r.source && ROW_SOURCE_PILLS[r.source] && (
-                    <span className={`ml-1 rounded px-1 text-[10px] ${ROW_SOURCE_PILLS[r.source].style}`}>
-                      {ROW_SOURCE_PILLS[r.source].label}
-                    </span>
-                  )}
-                </td>
-                <td className="px-4 py-2">{rupiah(r.gmv_deal_total)}</td>
-                <td className="px-4 py-2">
-                  {rupiah(r.gmv_bocor)}
-                  {r.gmv_bocor_shop_basis !== null && r.gmv_bocor_shop_basis !== undefined && (
-                    <span className="block text-[10px] text-slate-400">
-                      basis shop: {rupiah(r.gmv_bocor_shop_basis)}
-                    </span>
-                  )}
-                </td>
-                <td className="px-4 py-2">{r.leak_ratio === null ? "—" : `${(r.leak_ratio * 100).toFixed(1)}%`}</td>
-                <td className="px-4 py-2">
-                  {r.link_status === null ? (
-                    <span
-                      className={`rounded-full px-2 py-0.5 text-xs font-medium ${UNKNOWN_STATUS_STYLE}`}
-                      title="Artifak format ringkas (v2) tidak punya breakdown bocor per kreator"
-                    >
-                      {UNKNOWN_STATUS_LABEL}
-                    </span>
-                  ) : (
-                    <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${STATUS_STYLES[r.link_status] ?? ""}`}>
-                      {STATUS_LABELS[r.link_status] ?? r.link_status}
-                    </span>
-                  )}
-                </td>
-              </tr>
-            ))}
-            {(rollup ?? []).length === 0 && (
-              <tr>
-                <td colSpan={5} className="px-4 py-6 text-center text-slate-400">
-                  Belum ada rollup. Upload artifak mingguan lewat menu Upload Mingguan (Ingest).
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-      </div>
+      <CreatorStatusTable rows={statusRows} />
 
       <h2 className="mt-8 text-lg font-medium">Detail Produk Bocor</h2>
       <p className="mt-1 text-sm text-slate-500">
@@ -379,71 +375,11 @@ export default async function LinkLeakagePage({
         </>
       )}
 
-      <div className="mt-8 grid gap-6 lg:grid-cols-2">
-        <div>
-          <h2 className="text-lg font-medium">Lead BizDev (shop non-deal)</h2>
-          <div className="mt-2 overflow-x-auto rounded-lg border border-slate-200 bg-white">
-            <table className="min-w-full text-sm">
-              <thead className="bg-slate-50 text-left text-xs uppercase text-slate-500">
-                <tr>
-                  <th className="px-4 py-3">Shop / ID</th>
-                  <th className="px-4 py-3">Frekuensi</th>
-                  <th className="px-4 py-3">Total GMV</th>
-                  <th className="px-4 py-3">Prioritas</th>
-                  <th className="px-4 py-3">Status</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100">
-                {(leads ?? []).map((l) => (
-                  <tr key={l.shop_id}>
-                    <td className="px-4 py-2">
-                      {l.shop_name ? (
-                        <>
-                          {l.shop_name}
-                          <span className="block font-mono text-xs text-slate-400">{l.shop_id}</span>
-                        </>
-                      ) : (
-                        <span className="font-mono text-xs">{l.shop_id}</span>
-                      )}
-                    </td>
-                    <td className="px-4 py-2">{l.frequency}</td>
-                    <td className="px-4 py-2">{rupiah(l.total_gmv)}</td>
-                    <td className="px-4 py-2">{Number(l.priority_score).toLocaleString("id-ID")}</td>
-                    <td className="px-4 py-2">{l.status}</td>
-                  </tr>
-                ))}
-                {(leads ?? []).length === 0 && (
-                  <tr>
-                    <td colSpan={5} className="px-4 py-6 text-center text-slate-400">Belum ada lead.</td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
-        </div>
+      <h2 className="mt-8 text-lg font-medium">Lead BizDev (shop non-deal)</h2>
+      <BdLeadsTable rows={leadRows} />
 
-        <div>
-          <h2 className="text-lg font-medium">Alert Terbuka</h2>
-          <div className="mt-2 space-y-2">
-            {(alerts ?? []).map((a) => (
-              <div key={a.id} className="rounded-lg border border-slate-200 bg-white p-3 text-sm">
-                <span className={`mr-2 rounded-full px-2 py-0.5 text-xs font-medium ${
-                  a.alert_type === "link_bocor" ? "bg-red-100 text-red-800" : "bg-amber-100 text-amber-800"
-                }`}>
-                  {a.alert_type}
-                </span>
-                {a.message}
-                <span className="ml-2 text-xs text-slate-400">{a.week ?? ""}</span>
-              </div>
-            ))}
-            {(alerts ?? []).length === 0 && (
-              <p className="rounded-lg border border-slate-200 bg-white p-4 text-sm text-slate-400">
-                Tidak ada alert terbuka.
-              </p>
-            )}
-          </div>
-        </div>
-      </div>
+      <h2 className="mt-8 text-lg font-medium">Alert Terbuka</h2>
+      <OpenAlertsTable rows={alertRows} />
     </div>
   );
 }

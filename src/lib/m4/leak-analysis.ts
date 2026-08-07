@@ -4,7 +4,7 @@ import { writeAudit } from "@/lib/audit";
 import { getConfig } from "@/lib/config";
 import { resolveCreatorNames } from "@/lib/platform-csv";
 import { fetchAll } from "@/lib/supabase/fetch-all";
-import { validateW1W5Period } from "@/lib/utils/date";
+import { validateLeakPeriod, validateW1W5Period } from "@/lib/utils/date";
 import { derivePeriod, parseMcnFile, parseTapFile, type SkippedRow } from "@/lib/ingest/parse";
 import type { McnRow, TapRow } from "@/lib/ingest/schema";
 import { enforceLeakRetention } from "@/lib/ingest/leak-retention";
@@ -424,6 +424,8 @@ export async function runLeakAnalysis(input: RunLeakAnalysisInput): Promise<Leak
   const { mcnRows, tapRows, masterFile, periodStart, periodEnd, actorId, origin } = input;
   const admin = createAdminClient();
   const skipped: SkippedRow[] = [...(input.skipped ?? [])];
+  /** Catatan soal periode (mis. periode sebulan penuh) — digabung ke `warnings`. */
+  const periodNotices: string[] = [];
 
   if (mcnRows.length === 0) {
     throw new Error("File MCN tidak berisi baris data yang valid — analisa bocor dibatalkan.");
@@ -435,13 +437,35 @@ export async function runLeakAnalysis(input: RunLeakAnalysisInput): Promise<Leak
     );
   }
 
-  // W1-W5 gate (reject before any write) — sama seperti jalur artifak.
-  const scheme = validateW1W5Period(periodStart, periodEnd);
-  if (!scheme.valid) {
-    throw new Error(
-      `${scheme.reason ?? "Periode file tidak sesuai skema W1-W5."} ` +
-        "Export ulang file MCN & TAP per minggu (W1=1-7, W2=8-14, W3=15-21, W4=22-28, W5=29-akhir bulan)."
-    );
+  // Gerbang periode (tolak SEBELUM ada tulisan apa pun ke DB).
+  //
+  // /ingest tetap ketat W1-W5: agregat performa mingguan disusun per window itu.
+  // /link-leakage memakai gerbang longgar (validateLeakPeriod): selain W1-W5, boleh
+  // periode yang mulai tanggal 1 — termasuk sebulan penuh — supaya CM tidak perlu
+  // mengekspor file 4-5 kali sebulan hanya untuk melihat kebocoran.
+  if (origin === "ingest") {
+    const scheme = validateW1W5Period(periodStart, periodEnd);
+    if (!scheme.valid) {
+      throw new Error(
+        `${scheme.reason ?? "Periode file tidak sesuai skema W1-W5."} ` +
+          "Export ulang file MCN & TAP per minggu (W1=1-7, W2=8-14, W3=15-21, W4=22-28, W5=29-akhir bulan)."
+      );
+    }
+  } else {
+    const scheme = validateLeakPeriod(periodStart, periodEnd);
+    if (!scheme.valid) {
+      throw new Error(scheme.reason ?? "Periode file tidak diterima analisa kebocoran.");
+    }
+    // Periode yang lebih panjang dari satu window tersimpan dengan kunci = tanggal
+    // mulai (tanggal 1), jadi ia MENGGANTIKAN rollup W1 bulan itu untuk kreator yang
+    // sama. Itu konsekuensi nyata, bukan detail teknis — dikatakan di hasil analisa.
+    if (scheme.scheme === "sejak_tanggal_1" && periodEnd > `${periodStart.slice(0, 8)}07`) {
+      periodNotices.push(
+        `Periode ${periodStart} s/d ${periodEnd} lebih panjang dari satu window mingguan. Rollup ` +
+          `disimpan dengan kunci minggu ${periodStart} — untuk kreator di file ini, rollup W1 bulan ` +
+          `tersebut (bila ada) digantikan hasil analisa periode panjang ini.`
+      );
+    }
   }
   const week = periodStart;
 
@@ -460,7 +484,7 @@ export async function runLeakAnalysis(input: RunLeakAnalysisInput): Promise<Leak
     week,
     thresholds: { sebagian, total },
   });
-  const warnings = [...masterInfo.warnings, ...result.warnings];
+  const warnings = [...periodNotices, ...masterInfo.warnings, ...result.warnings];
 
   // Resolve usernames → creators.id (auto-create as 'aktif': a creator in a CM's
   // weekly leak report is by definition already joined with MEA).

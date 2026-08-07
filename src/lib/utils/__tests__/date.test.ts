@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { validateW1W5Period, weekOfMonth } from "../date";
+import { validateLeakPeriod, validateW1W5Period, weekOfMonth } from "../date";
 
 describe("weekOfMonth (skema upload W1-W5)", () => {
   it("maps day-of-month to the correct week window", () => {
@@ -69,6 +69,56 @@ describe("validateW1W5Period (skema upload W1-W5, CLAUDE.md)", () => {
 
   it("rejects malformed date strings without throwing", () => {
     const result = validateW1W5Period("29 Februari 2026", "2026-02-29");
+    expect(result.valid).toBe(false);
+    expect(result.reason).toBeTruthy();
+  });
+});
+
+describe("validateLeakPeriod (gerbang longgar khusus /link-leakage)", () => {
+  it("still accepts every W1-W5 window", () => {
+    expect(validateLeakPeriod("2026-01-01", "2026-01-07")).toEqual({ valid: true, scheme: "w1w5" });
+    expect(validateLeakPeriod("2026-01-08", "2026-01-14")).toEqual({ valid: true, scheme: "w1w5" });
+    expect(validateLeakPeriod("2026-01-15", "2026-01-21")).toEqual({ valid: true, scheme: "w1w5" });
+    expect(validateLeakPeriod("2026-01-22", "2026-01-28")).toEqual({ valid: true, scheme: "w1w5" });
+    expect(validateLeakPeriod("2026-01-29", "2026-01-31")).toEqual({ valid: true, scheme: "w1w5" });
+  });
+
+  it("accepts a full month (day 1 to end of month) — the point of this gate", () => {
+    expect(validateLeakPeriod("2026-01-01", "2026-01-31")).toEqual({
+      valid: true,
+      scheme: "sejak_tanggal_1",
+    });
+    // 30-day month, and February in a leap / non-leap year.
+    expect(validateLeakPeriod("2026-04-01", "2026-04-30").valid).toBe(true);
+    expect(validateLeakPeriod("2026-02-01", "2026-02-28").valid).toBe(true);
+    expect(validateLeakPeriod("2028-02-01", "2028-02-29").valid).toBe(true);
+  });
+
+  it("accepts month-to-date (day 1 to any day in the same month)", () => {
+    expect(validateLeakPeriod("2026-01-01", "2026-01-14").valid).toBe(true);
+    expect(validateLeakPeriod("2026-01-01", "2026-01-20").valid).toBe(true);
+    expect(validateLeakPeriod("2026-01-01", "2026-01-01").valid).toBe(true);
+  });
+
+  it("rejects a period that starts mid-month and is not a W1-W5 window", () => {
+    // Kunci rollup = tanggal mulai, jadi 3-19 akan tersimpan sebagai "minggu 3" yang menyesatkan.
+    const result = validateLeakPeriod("2026-01-03", "2026-01-19");
+    expect(result.valid).toBe(false);
+    expect(result.reason).toContain("2026-01-03");
+  });
+
+  it("rejects a period spanning two months", () => {
+    const result = validateLeakPeriod("2026-01-01", "2026-02-15");
+    expect(result.valid).toBe(false);
+    expect(result.reason).toContain("menyebrang bulan");
+  });
+
+  it("rejects an end date past the end of the month", () => {
+    expect(validateLeakPeriod("2026-02-01", "2026-02-30").valid).toBe(false);
+  });
+
+  it("rejects malformed date strings without throwing", () => {
+    const result = validateLeakPeriod("1 Januari 2026", "2026-01-31");
     expect(result.valid).toBe(false);
     expect(result.reason).toBeTruthy();
   });

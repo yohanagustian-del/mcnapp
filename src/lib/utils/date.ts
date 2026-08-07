@@ -165,3 +165,67 @@ export function validateW1W5Period(
 
   return { valid: true };
 }
+
+/** Bentuk periode yang diterima analisa kebocoran. */
+export type LeakPeriodScheme = "w1w5" | "sejak_tanggal_1";
+
+/**
+ * Gerbang periode KHUSUS analisa kebocoran (/link-leakage).
+ *
+ * Skema W1-W5 tetap berlaku untuk seluruh upload mingguan (/ingest MCN & Shopee),
+ * karena agregat performa mingguan memang disusun per window itu. Analisa kebocoran
+ * berbeda: hasilnya rollup rasio bocor per kreator untuk satu periode, bukan deret
+ * mingguan — jadi mengekspor sebulan sekaligus tidak merusak apa pun, sementara
+ * memaksa export 4-5 kali per bulan hanya untuk melihat kebocoran itu kerja sia-sia
+ * (keputusan user). Yang diterima di sini:
+ *
+ *   1. Window W1-W5 mana pun (perilaku lama, tidak berubah).
+ *   2. Periode yang MULAI tanggal 1 dan berakhir kapan pun di bulan yang sama —
+ *      termasuk 1 s/d akhir bulan (sebulan penuh) maupun 1 s/d pertengahan
+ *      (month-to-date, bentuk export yang lazim).
+ *
+ * Yang TETAP ditolak: periode menyebrang bulan (kunci rollup = tanggal mulai, dan
+ * angka dua bulan yang tercampur tidak bisa dipisah lagi), serta rentang mid-month
+ * acak seperti 3-19 yang akan tersimpan dengan kunci minggu menyesatkan.
+ */
+export function validateLeakPeriod(
+  start: string,
+  end: string
+): { valid: boolean; reason?: string; scheme?: LeakPeriodScheme } {
+  const w1w5 = validateW1W5Period(start, end);
+  if (w1w5.valid) return { valid: true, scheme: "w1w5" };
+
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/;
+  const s = start.match(m);
+  const e = end.match(m);
+  if (!s || !e) {
+    return {
+      valid: false,
+      reason: `Format tanggal periode tidak valid (start="${start}", end="${end}"). Gunakan format YYYY-MM-DD.`,
+    };
+  }
+
+  const [, sy, smo, sd] = s;
+  const [, ey, emo, ed] = e;
+  if (sy !== ey || smo !== emo) {
+    return {
+      valid: false,
+      reason: `Periode analisa (${start} s/d ${end}) tidak boleh menyebrang bulan.`,
+    };
+  }
+
+  const startDay = Number(sd);
+  const endDay = Number(ed);
+  const lastDay = daysInMonth(Number(sy), Number(smo));
+  if (startDay === 1 && endDay >= 1 && endDay <= lastDay) {
+    return { valid: true, scheme: "sejak_tanggal_1" };
+  }
+
+  return {
+    valid: false,
+    reason:
+      `Periode analisa (${start} s/d ${end}) tidak diterima. Untuk analisa kebocoran, periode boleh ` +
+      `salah satu window mingguan (W1=1-7, W2=8-14, W3=15-21, W4=22-28, W5=29-${lastDay}) ATAU rentang ` +
+      `yang dimulai tanggal 1 dalam bulan yang sama (mis. 1-${lastDay} untuk sebulan penuh).`,
+  };
+}
