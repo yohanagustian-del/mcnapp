@@ -2,6 +2,7 @@ import Link from "next/link";
 import { requireMember, hasPermission } from "@/lib/rbac";
 import { createClient } from "@/lib/supabase/server";
 import { loadCreatorsWithoutCm } from "@/lib/creators/without-cm";
+import { loadCmRequests } from "@/lib/creators/cm-requests";
 import { CreatorsWithoutCmAlert } from "@/components/creators-without-cm-alert";
 import { daysInMonth, weekOfMonth } from "@/lib/utils/date";
 import { IngestForm } from "./ingest-form";
@@ -91,10 +92,16 @@ export default async function IngestPage() {
   const canRun = hasPermission("ingest.run", member.role);
   const canUploadLeak = hasPermission("leak.upload_artifact", member.role);
   const canAssignCm = hasPermission("m8.assign_creator", member.role);
+  // CPM: boleh mencentang lalu MENGAJUKAN diri sebagai CM (bukan assign langsung).
+  const canRequestCm = hasPermission("creators.request_cm", member.role) && !canAssignCm;
 
   // Kreator yang dibuat otomatis oleh upload mingguan sengaja tidak punya CM —
   // ditampilkan di sini supaya langsung terlihat setelah upload.
   const withoutCm = await loadCreatorsWithoutCm();
+  const cmRequests =
+    canAssignCm || canRequestCm
+      ? await loadCmRequests(member.id)
+      : { myPendingCreatorIds: [] as string[], pendingCountByCreator: {} as Record<string, number> };
 
   const supabase = await createClient();
   // Riwayat Batch: ambil halaman pertama (10 baris) + total count untuk pagination.
@@ -195,6 +202,9 @@ export default async function IngestPage() {
           rows={withoutCm.rows}
           cmOptions={withoutCm.cmOptions}
           canAssign={canAssignCm}
+          canRequest={canRequestCm}
+          requestedCreatorIds={cmRequests.myPendingCreatorIds}
+          pendingRequestCountByCreator={cmRequests.pendingCountByCreator}
         />
       </div>
 

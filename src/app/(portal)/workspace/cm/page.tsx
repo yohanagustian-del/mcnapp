@@ -123,7 +123,9 @@ export default async function CmWorkspacePage({
   // Scope: CPM lihat creator sendiri; CM Lead/management lintas (§2F).
   let creatorsQuery = supabase
     .from("creators")
-    .select("id, name, username, level, segment, status, gmv, owner_cpm_id, ads_budget_cap, team_members(name)")
+    // creator_class + niche/top_niches ikut diambil: dipakai filter "Kelas" &
+    // "Kategori" di tabel Pertumbuhan GMV Mingguan dan Creator & Growth Mingguan.
+    .select("id, name, username, level, segment, status, gmv, owner_cpm_id, ads_budget_cap, creator_class, niche, top_niches, team_members(name)")
     .order("gmv", { ascending: false })
     .limit(100);
   if (isCpm) creatorsQuery = creatorsQuery.eq("owner_cpm_id", member.id);
@@ -132,6 +134,12 @@ export default async function CmWorkspacePage({
   const creators = (creatorRows ?? []).map((c) => ({
     ...c,
     cmName: (c.team_members as { name?: string } | null)?.name ?? null,
+    // Kategori tampil = niche utama; kalau kolom niche kosong, pakai top_niches[0]
+    // (diisi otomatis dari upload mingguan). null = belum ada kategori.
+    kategori:
+      (c.niche as string | null) ||
+      ((c.top_niches as string[] | null) ?? [])[0] ||
+      null,
   }));
   const creatorIds = creators.map((c) => c.id);
 
@@ -273,6 +281,8 @@ export default async function CmWorkspacePage({
         username: c.username ?? null,
         ownerCpmId: c.owner_cpm_id ?? null,
         cmName: c.cmName,
+        creatorClass: c.creator_class ?? null,
+        kategori: c.kategori,
         weeks: g.weeks,
         deltas: g.deltas,
         monthTotal: g.monthTotal,
@@ -387,6 +397,8 @@ export default async function CmWorkspacePage({
       username: c.username ?? null,
       ownerCpmId: c.owner_cpm_id ?? null,
       cmName: c.cmName,
+      creatorClass: c.creator_class ?? null,
+      kategori: c.kategori,
       level: c.level,
       segment: c.segment,
       current: g ? g.current : null,
@@ -537,7 +549,9 @@ export default async function CmWorkspacePage({
         </div>
         <p className="mt-1 text-xs text-slate-500">
           GMV affiliate per minggu (W1-W5) dari creator_period_summary. Panah dibanding minggu
-          terisi sebelumnya. Minggu tanpa upload: “—”. 0 token AI (murni agregasi deterministik).
+          terisi sebelumnya. Minggu tanpa upload: “—”. Bisa difilter per CM, kelas kreator, dan
+          kategori; klik judul kolom untuk mengurutkan naik/turun. 0 token AI (murni agregasi
+          deterministik).
         </p>
         {!selectedMonth ? (
           <p className="mt-4 rounded-lg border border-slate-200 bg-white p-6 text-center text-sm text-slate-400">

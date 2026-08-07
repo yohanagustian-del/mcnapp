@@ -66,6 +66,10 @@ export interface SortConfig<T> {
 export const PAGE_SIZES_10_20_50 = [10, 20, 50] as const;
 /** Tabel katalog/master yang sering ditelusuri banyak baris sekaligus. */
 export const PAGE_SIZES_10_20_50_100 = [10, 20, 50, 100] as const;
+/** Metrik harian project: satu bulan project ≈ 30 baris, jadi 10/20/30. */
+export const PAGE_SIZES_10_20_30 = [10, 20, 30] as const;
+/** Daftar peserta project: lompat langsung ke 50/100 saat pesertanya banyak. */
+export const PAGE_SIZES_10_50_100 = [10, 50, 100] as const;
 /** Tabel yang cuma butuh "10 tampilan" (tanpa pemilih ukuran). */
 export const PAGE_SIZE_10 = [10] as const;
 

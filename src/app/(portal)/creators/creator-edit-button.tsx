@@ -2,7 +2,11 @@
 
 import { useEffect, useState, type ReactNode } from "react";
 import { useActionState } from "react";
-import { CREATOR_CLASS_OPTIONS, DEFAULT_CREATOR_CLASS } from "@/lib/creators/creator-class";
+import {
+  CREATOR_CLASS_HINT,
+  CREATOR_CLASS_OPTIONS,
+  DEFAULT_CREATOR_CLASS,
+} from "@/lib/creators/creator-class";
 import { updateCreatorProfile, type CreatorEditState } from "./actions";
 
 /**
@@ -104,18 +108,21 @@ function Field({
   );
 }
 
-/** Satu <select> berlabel. */
+/** Satu <select> berlabel, dengan keterangan opsional di bawahnya. */
 function SelectField({
   creatorId,
   name,
   title,
   defaultValue,
+  hint,
   children,
 }: {
   creatorId: string;
   name: string;
   title: string;
   defaultValue: string;
+  /** Keterangan arti pilihan (mis. arti tiap kelas kreator). */
+  hint?: string;
   children: ReactNode;
 }) {
   const id = `${name}-${creatorId}`;
@@ -127,6 +134,7 @@ function SelectField({
       <select id={id} name={name} defaultValue={defaultValue} className={inputCls}>
         {children}
       </select>
+      {hint && <p className="mt-1 text-[11px] leading-snug text-slate-500">{hint}</p>}
     </div>
   );
 }
@@ -280,6 +288,7 @@ export function CreatorEditButton({
                 creatorId={creator.id}
                 name="creator_class"
                 title="Kelas Kreator"
+                hint={CREATOR_CLASS_HINT}
                 defaultValue={
                   CREATOR_CLASS_OPTIONS.some((o) => o.value === creator.creator_class)
                     ? (creator.creator_class as string)

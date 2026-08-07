@@ -2,7 +2,15 @@
 
 import { useActionState, useEffect, useState } from "react";
 import { rupiah, pct } from "@/lib/utils/format";
-import { TableFilterBar, TablePagination, useTableControls } from "@/components/table-controls";
+import {
+  SortableTh,
+  TableFilterBar,
+  TablePagination,
+  useTableControls,
+  type FacetDef,
+  type SortConfig,
+} from "@/components/table-controls";
+import { creatorClassLabel } from "@/lib/creators/creator-class";
 import { assignCreator } from "./actions";
 
 const btnSmall = "rounded-md px-2 py-1 text-xs font-medium";
@@ -84,6 +92,10 @@ export interface CreatorGrowthRow {
   username: string | null;
   ownerCpmId: string | null;
   cmName: string | null;
+  /** creators.creator_class (reguler|top_creator|influencer|eksternal); null = reguler. */
+  creatorClass: string | null;
+  /** Kategori/niche utama kreator; null = belum ada. */
+  kategori: string | null;
   level: number | null;
   segment: string | null;
   /** GMV periode terakhir; null = belum ada periode. */
@@ -108,10 +120,44 @@ export interface CpmOption {
 const searchCreator = (r: CreatorGrowthRow) => `${r.name} ${r.username ?? ""}`;
 const rowCm = (r: CreatorGrowthRow) => ({ id: r.ownerCpmId, name: r.cmName });
 
+/** Filter kelas kreator (selalu ada nilai — null = Reguler) & kategori/niche utama. */
+const FACETS: FacetDef<CreatorGrowthRow>[] = [
+  {
+    key: "kelas",
+    label: "Kelas",
+    value: (r) => {
+      const label = creatorClassLabel(r.creatorClass);
+      return { value: label, label };
+    },
+  },
+  {
+    key: "kategori",
+    label: "Kategori",
+    value: (r) => (r.kategori ? { value: r.kategori, label: r.kategori } : null),
+    emptyLabel: "Belum ada kategori/niche pada data ini.",
+  },
+];
+
+/** Kolom yang bisa diurutkan lewat klik header; GMV & delta default turun. */
+const SORT: SortConfig<CreatorGrowthRow> = {
+  columns: {
+    creator: { value: (r) => r.username || r.name },
+    cm: { value: (r) => r.cmName },
+    kelas: { value: (r) => creatorClassLabel(r.creatorClass) },
+    kategori: { value: (r) => r.kategori },
+    level: { value: (r) => r.level, firstDir: "desc" },
+    segment: { value: (r) => r.segment },
+    gmv: { value: (r) => r.current, firstDir: "desc" },
+    delta: { value: (r) => r.delta, firstDir: "desc" },
+  },
+  initial: { key: "gmv", dir: "desc" },
+};
+
 /**
  * Creator & Growth Mingguan: alert performa sebagai card yang bisa di-minimize
  * (default terbuka supaya alert tetap terlihat), lalu tabel dengan search kreator,
- * filter CM, dan paginasi 10/20/50. Read-only kecuali re-assign CPM (server action).
+ * filter CM / kelas kreator / kategori, urut lewat klik header, dan paginasi
+ * 10/20/50. Read-only kecuali re-assign CPM (server action).
  */
 export function CreatorGrowthPanel({
   rows,
@@ -128,6 +174,8 @@ export function CreatorGrowthPanel({
     rows,
     searchText: searchCreator,
     cm: rowCm,
+    facets: FACETS,
+    sort: SORT,
     itemLabel: "kreator",
   });
 
@@ -153,12 +201,14 @@ export function CreatorGrowthPanel({
           <table className="min-w-full text-sm">
             <thead className="bg-slate-50 text-left text-xs uppercase text-slate-500">
               <tr>
-                <th className="px-4 py-3">Creator</th>
-                <th className="px-4 py-3">CM</th>
-                <th className="px-4 py-3">Level</th>
-                <th className="px-4 py-3">Segmen</th>
-                <th className="px-4 py-3">GMV periode terakhir</th>
-                <th className="px-4 py-3">vs periode lalu</th>
+                <SortableTh controls={controls} sortKey="creator">Creator</SortableTh>
+                <SortableTh controls={controls} sortKey="cm">CM</SortableTh>
+                <SortableTh controls={controls} sortKey="kelas">Kelas</SortableTh>
+                <SortableTh controls={controls} sortKey="kategori">Kategori</SortableTh>
+                <SortableTh controls={controls} sortKey="level">Level</SortableTh>
+                <SortableTh controls={controls} sortKey="segment">Segmen</SortableTh>
+                <SortableTh controls={controls} sortKey="gmv">GMV periode terakhir</SortableTh>
+                <SortableTh controls={controls} sortKey="delta">vs periode lalu</SortableTh>
                 {canAssign && <th className="px-4 py-3">Re-assign CPM</th>}
               </tr>
             </thead>
@@ -171,6 +221,8 @@ export function CreatorGrowthPanel({
                     <span className="text-xs text-slate-400">{c.creatorId}</span>
                   </td>
                   <td className="px-4 py-2 text-slate-500">{c.cmName ?? "—"}</td>
+                  <td className="px-4 py-2 text-slate-600">{creatorClassLabel(c.creatorClass)}</td>
+                  <td className="px-4 py-2 text-slate-600">{c.kategori ?? "—"}</td>
                   <td className="px-4 py-2">
                     {c.level ? `L${c.level}` : "—"}{" "}
                     {c.level && c.level < 6 && <span className="text-xs text-slate-400">→ L{c.level + 1}</span>}
@@ -195,9 +247,9 @@ export function CreatorGrowthPanel({
               ))}
               {controls.visibleRows.length === 0 && (
                 <tr>
-                  <td colSpan={canAssign ? 7 : 6} className="px-4 py-6 text-center text-slate-400">
+                  <td colSpan={canAssign ? 9 : 8} className="px-4 py-6 text-center text-slate-400">
                     {controls.filterActive
-                      ? "Tidak ada kreator yang cocok dengan pencarian / filter CM."
+                      ? "Tidak ada kreator yang cocok dengan pencarian / filter CM, kelas, atau kategori."
                       : "Belum ada creator di scope ini."}
                   </td>
                 </tr>

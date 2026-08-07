@@ -83,7 +83,7 @@ export default async function CreatorsPage() {
   const cmRequests =
     canDecideCmRequest || canRequestCm
       ? await loadCmRequests(member.id)
-      : { pending: [], recent: [], myPendingCreatorIds: [] };
+      : { pending: [], recent: [], myPendingCreatorIds: [], pendingCountByCreator: {} };
 
   // Pilihan CM untuk form "Tambah Kreator" DAN dropdown CM di modal Edit: SELURUH
   // CM aktif dari tabel Tim — bukan cmOptions di bawah (yang hanya berisi CM yang
@@ -151,8 +151,10 @@ export default async function CreatorsPage() {
             <>
               {" "}
               Anda tidak bisa menugaskan kreator ke diri sendiri — pakai tombol{" "}
-              <strong>Request</strong> di baris kreator. Pemindahan baru berlaku setelah disetujui CM
-              Lead / Head, dan statusnya terlihat di panel <strong>Request penugasan CM</strong>.
+              <strong>Request</strong> di baris kreator, atau <strong>centang beberapa sekaligus</strong>{" "}
+              di kartu <strong>Kreator belum punya CM</strong> lalu klik Request. Pemindahan baru
+              berlaku setelah disetujui CM Lead / Head, dan statusnya terlihat di panel{" "}
+              <strong>Request penugasan CM</strong>.
             </>
           )}
         </p>
@@ -163,6 +165,9 @@ export default async function CreatorsPage() {
             rows={withoutCm.rows}
             cmOptions={withoutCm.cmOptions}
             canAssign={canAssignCm}
+            canRequest={canRequestCm}
+            requestedCreatorIds={cmRequests.myPendingCreatorIds}
+            pendingRequestCountByCreator={cmRequests.pendingCountByCreator}
           />
         </div>
 

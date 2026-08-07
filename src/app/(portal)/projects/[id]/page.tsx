@@ -6,6 +6,8 @@ import { filterLiveActive, trackDaily, type CurveShape, type LiveActivityRow } f
 import { canManageProjectParticipants } from "@/lib/m7/access";
 import { assignManpower, setProjectStatus, upsertCreatorMetric, upsertDailyMetric } from "../actions";
 import { ParticipantForm, type CreatorUsernameOption } from "./participant-form";
+import { DailyMetricsTable, type DailyMetricRow } from "./daily-metrics-table";
+import { CreatorPerformanceTable, type CreatorPerformanceRow } from "./creator-performance-table";
 
 const STATUS_LABELS: Record<string, string> = {
   on_track: "On-track", behind: "Behind", ahead: "Ahead",
@@ -120,6 +122,40 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
     creatorGmv.set(r.creator_id, cur);
   }
 
+  // Baris kedua tabel di bawah dihitung di SERVER (kumulatif/gap dari trackDaily,
+  // % target & kontribusi dari agregat di atas); komponen klien hanya mengurutkan
+  // dan memaginasi — CLAUDE.md #4, tidak ada perhitungan ulang di UI.
+  const adsByDate = new Map(
+    (metrics ?? []).map((m) => [m.date, { ads: m.ads_spend, mea: m.mea_revenue }])
+  );
+  const dailyMetricRows: DailyMetricRow[] = tracking.points.map((pt) => {
+    const m = adsByDate.get(pt.date);
+    return {
+      date: pt.date,
+      dayIndex: pt.dayIndex,
+      gmvActual: pt.gmvActual,
+      cumActual: pt.cumActual,
+      cumTarget: pt.cumTarget,
+      gap: pt.gap,
+      adsSpend: m?.ads === null || m?.ads === undefined ? null : Number(m.ads),
+      meaRevenue: m?.mea === null || m?.mea === undefined ? null : Number(m.mea),
+    };
+  });
+
+  const creatorPerformanceRows: CreatorPerformanceRow[] = (participants ?? []).map((p) => {
+    const perf = creatorGmv.get(p.creator_id) ?? { gmv: 0, items: 0 };
+    const target = p.target_gmv === null ? null : Number(p.target_gmv);
+    return {
+      creatorId: p.creator_id,
+      creatorName: (p.creators as unknown as { name: string } | null)?.name ?? p.creator_id,
+      targetGmv: target,
+      gmv: perf.gmv,
+      items: perf.items,
+      pctTarget: target ? perf.gmv / target : null,
+      contribution: tracking.cumActual > 0 ? perf.gmv / tracking.cumActual : 0,
+    };
+  });
+
   return (
     <div>
       <div className="flex flex-wrap items-center gap-3">
@@ -193,6 +229,9 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
 
       {/* ===== Daily metrics ===== */}
       <h2 className="mt-8 text-lg font-medium">Metrik Harian</h2>
+      <p className="mt-1 text-xs text-slate-500">
+        Klik judul kolom untuk mengurutkan naik/turun. Baris per halaman bisa diatur 10/20/30.
+      </p>
       {canMetrics && project.status !== "selesai" && (
         <form action={upsertDailyMetric}
           className="mt-2 grid gap-3 rounded-lg border border-slate-200 bg-white p-4 sm:grid-cols-3 lg:grid-cols-6">
@@ -213,45 +252,13 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
           </button>
         </form>
       )}
-      <div className="mt-2 overflow-x-auto rounded-lg border border-slate-200 bg-white">
-        <table className="min-w-full text-sm">
-          <thead className="bg-slate-50 text-left text-xs uppercase text-slate-500">
-            <tr>
-              <th className="px-4 py-3">Tanggal</th>
-              <th className="px-4 py-3">GMV</th>
-              <th className="px-4 py-3">Kumulatif</th>
-              <th className="px-4 py-3">Target Kumulatif</th>
-              <th className="px-4 py-3">Gap</th>
-              <th className="px-4 py-3">Ads</th>
-              <th className="px-4 py-3">Revenue MEA</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-slate-100">
-            {tracking.points.map((pt) => {
-              const m = (metrics ?? []).find((x) => x.date === pt.date);
-              return (
-                <tr key={pt.date}>
-                  <td className="px-4 py-2">{pt.date} <span className="text-xs text-slate-400">H{pt.dayIndex}</span></td>
-                  <td className="px-4 py-2">{rupiah(pt.gmvActual)}</td>
-                  <td className="px-4 py-2">{rupiah(pt.cumActual)}</td>
-                  <td className="px-4 py-2">{rupiah(pt.cumTarget)}</td>
-                  <td className={`px-4 py-2 ${pt.gap < 0 ? "text-red-700" : "text-green-700"}`}>{rupiah(pt.gap)}</td>
-                  <td className="px-4 py-2">{rupiah(m?.ads_spend)}</td>
-                  <td className="px-4 py-2">{rupiah(m?.mea_revenue)}</td>
-                </tr>
-              );
-            })}
-            {tracking.points.length === 0 && (
-              <tr><td colSpan={7} className="px-4 py-6 text-center text-slate-400">Belum ada metrik harian.</td></tr>
-            )}
-          </tbody>
-        </table>
-      </div>
+      <DailyMetricsTable rows={dailyMetricRows} />
 
       {/* ===== Performa per kreator (QA feedback) ===== */}
       <h2 className="mt-8 text-lg font-medium">Performa per Kreator</h2>
       <p className="mt-1 text-xs text-slate-500">
         Kontribusi GMV tiap kreator peserta vs target masing-masing. Input harian per kreator.
+        Klik judul kolom untuk mengurutkan naik/turun; baris per halaman 10/50/100.
       </p>
       {canMetrics && project.status !== "selesai" && (
         <form action={upsertCreatorMetric}
@@ -277,50 +284,7 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
           </button>
         </form>
       )}
-      <div className="mt-2 overflow-x-auto rounded-lg border border-slate-200 bg-white">
-        <table className="min-w-full text-sm">
-          <thead className="bg-slate-50 text-left text-xs uppercase text-slate-500">
-            <tr>
-              <th className="px-4 py-3">Creator</th>
-              <th className="px-4 py-3">Target GMV</th>
-              <th className="px-4 py-3">GMV Aktual</th>
-              <th className="px-4 py-3">Item Terjual</th>
-              <th className="px-4 py-3">% Target</th>
-              <th className="px-4 py-3">Kontribusi Project</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-slate-100">
-            {(participants ?? []).map((p) => {
-              const perf = creatorGmv.get(p.creator_id) ?? { gmv: 0, items: 0 };
-              const target = p.target_gmv === null ? null : Number(p.target_gmv);
-              const pct = target ? perf.gmv / target : null;
-              const contribution = tracking.cumActual > 0 ? perf.gmv / tracking.cumActual : 0;
-              return (
-                <tr key={p.creator_id}>
-                  <td className="px-4 py-2 font-medium">
-                    {(p.creators as unknown as { name: string } | null)?.name ?? p.creator_id}
-                    <span className="ml-1 text-xs text-slate-400">{p.creator_id}</span>
-                  </td>
-                  <td className="px-4 py-2">{rupiah(target)}</td>
-                  <td className="px-4 py-2">{rupiah(perf.gmv)}</td>
-                  <td className="px-4 py-2">{perf.items || "—"}</td>
-                  <td className="px-4 py-2">
-                    {pct === null ? "—" : (
-                      <span className={pct >= 1 ? "font-medium text-green-700" : pct < 0.5 ? "text-red-700" : "text-amber-700"}>
-                        {(pct * 100).toFixed(0)}%
-                      </span>
-                    )}
-                  </td>
-                  <td className="px-4 py-2">{(contribution * 100).toFixed(0)}%</td>
-                </tr>
-              );
-            })}
-            {(participants ?? []).length === 0 && (
-              <tr><td colSpan={6} className="px-4 py-6 text-center text-slate-400">Belum ada peserta.</td></tr>
-            )}
-          </tbody>
-        </table>
-      </div>
+      <CreatorPerformanceTable rows={creatorPerformanceRows} />
 
       <div className="mt-8 grid gap-6 lg:grid-cols-2">
         {/* ===== Participants ===== */}

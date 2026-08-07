@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useActionState, useEffect, useRef, useState } from "react";
-import { CREATOR_CLASS_OPTIONS } from "@/lib/creators/creator-class";
+import { CREATOR_CLASS_HINT, CREATOR_CLASS_OPTIONS } from "@/lib/creators/creator-class";
 import { createCreatorManual, type CreateCreatorResult } from "./create-actions";
 
 export interface CmOption {
@@ -249,6 +249,11 @@ export function CreatorCreateDialog({ cms }: { cms: CmOption[] }) {
                     <option key={o.value} value={o.label}>{o.label}</option>
                   ))}
                 </select>
+                {/* Arti tiap kelas ditulis di bawah dropdown — terutama "Eksternal"
+                    yang baru, supaya tidak ditebak-tebak saat mendaftar kreator. */}
+                <span className="mt-1 block text-[11px] leading-snug text-slate-500">
+                  {CREATOR_CLASS_HINT}
+                </span>
               </label>
               <label className="block">
                 <span className={label}>Status</span>

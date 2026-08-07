@@ -42,6 +42,16 @@ describe("buildCreatorTemplate", () => {
     expect(guide).toContain("Netta");
   });
 
+  /** Kelas "Eksternal" harus dijelaskan DI DALAM file — pengisi sheet tak lihat UI. */
+  it("sheet Petunjuk menerangkan keempat kelas kreator termasuk Eksternal", () => {
+    const guide = XLSX.utils.sheet_to_csv(templateWorkbook().Sheets.Petunjuk);
+    for (const label of ["Reguler", "Kreator Prioritas", "Influencer", "Eksternal"]) {
+      expect(guide).toContain(label);
+    }
+    expect(guide).toContain("Arti tiap Kelas Kreator");
+    expect(guide).toContain("LUAR agency");
+  });
+
   /**
    * Regresi paling penting: template yang diunduh, diisi, lalu diunggah lagi
    * harus terbaca. Header memakai penanda "*" sehingga hanya lolos kalau

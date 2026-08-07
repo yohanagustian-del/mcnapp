@@ -85,6 +85,98 @@ export async function requestCmAssignment(
   }
 }
 
+/** Batas satu kali request massal — mencegah satu klik membuat ribuan baris antrean. */
+const MAX_BULK_REQUEST = 100;
+
+export interface BulkCmRequestResult {
+  created: number;
+  /** Sudah pernah diajukan (masih pending) atau sudah dipegang sendiri. */
+  skipped: number;
+  message: string;
+}
+
+/**
+ * CM mencentang beberapa kreator "belum punya CM" sekaligus lalu mengajukannya.
+ *
+ * Sama seperti requestCmAssignment (satu baris), hanya jalur massal: TIDAK ada
+ * kepemilikan yang berubah di sini — hanya antrean — dan keputusannya tetap milik
+ * pemegang izin m8.assign_creator lewat decideCmRequest (CLAUDE.md #2).
+ *
+ * Melempar (bukan return) hanya untuk pelanggaran izin / input tidak masuk akal;
+ * kegagalan per-baris dilaporkan sebagai `skipped` supaya satu kreator bermasalah
+ * tidak menggagalkan seluruh centangan.
+ */
+export async function requestCmAssignmentBulk(
+  creatorIds: string[],
+  reason: string | null
+): Promise<BulkCmRequestResult> {
+  const actor = await requirePermission("creators.request_cm");
+  const ids = [...new Set(creatorIds.map((s) => String(s).trim()).filter(Boolean))];
+  if (ids.length === 0) throw new Error("Belum ada kreator yang dicentang");
+  if (ids.length > MAX_BULK_REQUEST) {
+    throw new Error(`Maksimal ${MAX_BULK_REQUEST} kreator per pengajuan (dicentang ${ids.length})`);
+  }
+
+  const admin = createAdminClient();
+  const [{ data: creators }, { data: existing }] = await Promise.all([
+    admin.from("creators").select("id, owner_cpm_id").in("id", ids),
+    admin
+      .from("creator_cm_requests")
+      .select("creator_id")
+      .eq("requested_by", actor.id)
+      .eq("status", "pending")
+      .in("creator_id", ids),
+  ]);
+
+  const alreadyPending = new Set((existing ?? []).map((r) => r.creator_id));
+  const ownerById = new Map((creators ?? []).map((c) => [c.id, c.owner_cpm_id as string | null]));
+
+  const toInsert = ids.filter(
+    (id) => ownerById.has(id) && ownerById.get(id) !== actor.id && !alreadyPending.has(id)
+  );
+  const skipped = ids.length - toInsert.length;
+  if (toInsert.length === 0) {
+    return {
+      created: 0,
+      skipped,
+      message: "Tidak ada request baru — semua kreator terpilih sudah diajukan atau sudah Anda pegang.",
+    };
+  }
+
+  const rows = toInsert.map((creatorId) => ({
+    id: genId("REQ"),
+    creator_id: creatorId,
+    requested_by: actor.id,
+    current_owner_id: ownerById.get(creatorId) ?? null,
+    reason,
+    status: "pending" as const,
+  }));
+  const { error } = await admin.from("creator_cm_requests").insert(rows);
+  if (error) throw new Error(`Gagal mengirim request: ${error.message}`);
+
+  // Satu audit per request supaya entity_id-nya tetap menunjuk baris antrean
+  // (konsisten dengan jalur satu-baris, dan keputusannya nanti bisa dilacak).
+  for (const row of rows) {
+    await writeAudit({
+      actorId: actor.id,
+      action: "creators.request_cm",
+      entityType: "creator_cm_requests",
+      entityId: row.id,
+      after: { creator_id: row.creator_id, requested_by: actor.id, reason, bulk: true },
+      type: "auto",
+    });
+  }
+
+  revalidatePath("/creators");
+  return {
+    created: rows.length,
+    skipped,
+    message:
+      `${rows.length} request terkirim — menunggu keputusan CM Lead / Head` +
+      (skipped > 0 ? ` (${skipped} dilewati: sudah diajukan / sudah Anda pegang).` : "."),
+  };
+}
+
 /**
  * Terima / tolak request penugasan CM (Director/Head/SPV/CM Lead).
  *

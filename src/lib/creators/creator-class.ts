@@ -1,5 +1,6 @@
 /**
- * Kelas kreator (`creators.creator_class`) — Reguler / Kreator Prioritas / Influencer.
+ * Kelas kreator (`creators.creator_class`) — Reguler / Kreator Prioritas /
+ * Influencer / Eksternal.
  *
  * CATATAN soal duplikasi: ini BUKAN `creators.segment`
  * (enum creator_segment_t: tc | incubation | celeb = Top Creator / Incubation /
@@ -15,7 +16,7 @@
  * label memang lapisan tampilan (lihat CREATOR_CLASS_LABEL).
  */
 
-export const CREATOR_CLASSES = ["reguler", "top_creator", "influencer"] as const;
+export const CREATOR_CLASSES = ["reguler", "top_creator", "influencer", "eksternal"] as const;
 export type CreatorClass = (typeof CREATOR_CLASSES)[number];
 
 /** Kelas yang berlaku saat kolom dikosongkan (juga default kolom di DB). */
@@ -26,7 +27,26 @@ export const CREATOR_CLASS_LABEL: Record<CreatorClass, string> = {
   reguler: "Reguler",
   top_creator: "Kreator Prioritas",
   influencer: "Influencer",
+  eksternal: "Eksternal",
 };
+
+/**
+ * Keterangan singkat tiap kelas — dipakai di form Tambah/Edit Kreator dan di
+ * sheet "Petunjuk" template import, supaya artinya tidak ditebak-tebak orang
+ * yang mengisi (terutama kelas baru "Eksternal").
+ */
+export const CREATOR_CLASS_DESCRIPTION: Record<CreatorClass, string> = {
+  reguler: "kreator agency reguler (default kalau dikosongkan)",
+  top_creator: "kreator yang diprioritaskan penanganannya",
+  influencer: "akun influencer / KOL",
+  eksternal:
+    "kreator LUAR agency — tidak dikelola CM MEA (mis. ikut campaign / special project saja), tetap didata untuk keperluan campaign & pelaporan",
+};
+
+/** Satu baris keterangan semua kelas, mis. untuk hint di bawah dropdown. */
+export const CREATOR_CLASS_HINT = CREATOR_CLASSES.map(
+  (c) => `${CREATOR_CLASS_LABEL[c]} = ${CREATOR_CLASS_DESCRIPTION[c]}`
+).join("; ");
 
 /** Urutan pilihan seperti yang diminta bisnis (Reguler dulu, karena default). */
 export const CREATOR_CLASS_OPTIONS = CREATOR_CLASSES.map((value) => ({
@@ -52,6 +72,10 @@ export function parseCreatorClass(raw: string): CreatorClass | null {
   if (key === "kreatorprioritas" || key === "prioritas") return "top_creator";
   if (key === "topcreator" || key === "top") return "top_creator";
   if (key === "influencer") return "influencer";
+  // Ejaan Inggris "external"/"externalcreator" ikut diterima: sheet lama & tim
+  // campaign menulis keduanya.
+  if (key === "eksternal" || key === "external") return "eksternal";
+  if (key === "kreatoreksternal" || key === "externalcreator") return "eksternal";
   return null;
 }
 

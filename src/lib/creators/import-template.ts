@@ -1,6 +1,8 @@
 import * as XLSX from "xlsx";
 import { IMPORT_COLUMNS } from "./import-spec";
 import {
+  CREATOR_CLASSES,
+  CREATOR_CLASS_DESCRIPTION,
   CREATOR_CLASS_LABEL,
   CREATOR_CLASS_OPTIONS,
   DEFAULT_CREATOR_CLASS,
@@ -50,6 +52,14 @@ export function buildCreatorTemplate(cmNames: string[] = []): ArrayBuffer {
       `Istilah lama "Top Creator" sekarang bernama "${CREATOR_CLASS_LABEL.top_creator}" — ` +
         "sheet lama yang masih menulis Top Creator tetap terbaca.",
     ],
+    // Keterangan tiap kelas (termasuk kelas baru "Eksternal") ditulis eksplisit:
+    // orang yang mengisi sheet tidak melihat dropdown UI, jadi arti kelas harus ada
+    // di file template itu sendiri.
+    ["Arti tiap Kelas Kreator:"],
+    ...CREATOR_CLASSES.map((c) => [
+      `  - ${CREATOR_CLASS_LABEL[c]}: ${CREATOR_CLASS_DESCRIPTION[c]}`,
+    ]),
+    [`  ("External" dalam bahasa Inggris juga terbaca sebagai ${CREATOR_CLASS_LABEL.eksternal}.)`],
     ["Sharing Komisi hanya MENGISI yang masih kosong. Nilai yang sudah ada tidak ditimpa dari file"],
     ["(read-only, sync platform) dan selisihnya dicatat sebagai alert, bukan diterapkan."],
     [],

@@ -28,6 +28,25 @@ export interface CmRequestsData {
   recent: CmRequestRow[];
   /** creator_id yang sudah punya request pending dari CM yang sedang login. */
   myPendingCreatorIds: string[];
+  /**
+   * Jumlah request pending per creator_id — penanda antrean di daftar "Kreator
+   * belum punya CM" supaya approver melihat siapa yang sudah diminta CM.
+   */
+  pendingCountByCreator: Record<string, number>;
+}
+
+/**
+ * Jumlah request penugasan CM yang masih menunggu keputusan — dipakai badge
+ * notifikasi di menu "Kreator" untuk role yang boleh memutuskan
+ * (creators.decide_cm_request). Head-only count, tidak menarik baris.
+ */
+export async function countPendingCmRequests(): Promise<number> {
+  const admin = createAdminClient();
+  const { count } = await admin
+    .from("creator_cm_requests")
+    .select("id", { count: "exact", head: true })
+    .eq("status", "pending");
+  return count ?? 0;
 }
 
 interface RawRequest {
@@ -74,7 +93,9 @@ export async function loadCmRequests(viewerId: string): Promise<CmRequestsData> 
   ]);
 
   const all = [...((pendingRaw ?? []) as RawRequest[]), ...((recentRaw ?? []) as RawRequest[])];
-  if (all.length === 0) return { pending: [], recent: [], myPendingCreatorIds: [] };
+  if (all.length === 0) {
+    return { pending: [], recent: [], myPendingCreatorIds: [], pendingCountByCreator: {} };
+  }
 
   const creatorIds = [...new Set(all.map((r) => r.creator_id))];
   const memberIds = [
@@ -127,9 +148,14 @@ export async function loadCmRequests(viewerId: string): Promise<CmRequestsData> 
   };
 
   const pending = ((pendingRaw ?? []) as RawRequest[]).map(toRow);
+  const pendingCountByCreator: Record<string, number> = {};
+  for (const r of pending) {
+    pendingCountByCreator[r.creator_id] = (pendingCountByCreator[r.creator_id] ?? 0) + 1;
+  }
   return {
     pending,
     recent: ((recentRaw ?? []) as RawRequest[]).map(toRow),
     myPendingCreatorIds: pending.filter((r) => r.requested_by === viewerId).map((r) => r.creator_id),
+    pendingCountByCreator,
   };
 }

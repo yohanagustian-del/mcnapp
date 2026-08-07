@@ -2,6 +2,7 @@ import { parseRupiah } from "@/lib/utils/rupiah";
 import { parseFlexibleDate } from "@/lib/utils/date";
 import { DEFAULT_IMPORT_STATUS } from "./master-upload";
 import {
+  CREATOR_CLASS_DESCRIPTION,
   CREATOR_CLASS_LABEL,
   CREATOR_CLASS_OPTIONS,
   DEFAULT_CREATOR_CLASS,
@@ -70,7 +71,7 @@ export const IMPORT_COLUMNS: ImportColumn[] = [
     label: "Kelas Kreator",
     aliases: ["kelaskreator", "kelas", "creatorclass", "kelascreator"],
     required: false,
-    note: `Opsional. Salah satu: ${CREATOR_CLASS_OPTIONS.map((o) => o.label).join(" / ")} (istilah lama "Top Creator" = ${CREATOR_CLASS_LABEL.top_creator}, tetap terbaca). Kosong atau tidak dikenali → ${CREATOR_CLASS_LABEL[DEFAULT_CREATOR_CLASS]} untuk kreator baru; kreator yang sudah ada tetap memakai kelas lamanya.`,
+    note: `Opsional. Salah satu: ${CREATOR_CLASS_OPTIONS.map((o) => o.label).join(" / ")} (istilah lama "Top Creator" = ${CREATOR_CLASS_LABEL.top_creator}, tetap terbaca; "External" terbaca sebagai ${CREATOR_CLASS_LABEL.eksternal}). ${CREATOR_CLASS_LABEL.eksternal} = ${CREATOR_CLASS_DESCRIPTION.eksternal}. Kosong atau tidak dikenali → ${CREATOR_CLASS_LABEL[DEFAULT_CREATOR_CLASS]} untuk kreator baru; kreator yang sudah ada tetap memakai kelas lamanya.`,
   },
   {
     label: "Platform",

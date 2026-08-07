@@ -114,11 +114,14 @@ function followersValue(raw: string | null): number | null {
 // kolom yang benar-benar dipakai sehari-hari muat tanpa scroll horizontal.
 const td = "px-2 py-2 whitespace-nowrap";
 
-/** Badge per kelas kreator — Reguler netral, dua kelas lain diberi warna supaya menonjol. */
+/** Badge per kelas kreator — Reguler netral, kelas lain diberi warna supaya menonjol. */
 const CREATOR_CLASS_BADGE: Record<string, string> = {
   reguler: "rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-700",
   top_creator: "rounded-full bg-indigo-100 px-2 py-0.5 text-xs font-medium text-indigo-800",
   influencer: "rounded-full bg-fuchsia-100 px-2 py-0.5 text-xs font-medium text-fuchsia-800",
+  // Eksternal = kreator luar agency; warna amber (sama seperti penanda "perlu
+  // perhatian" lain di app) supaya mudah dibedakan dari kreator kelolaan sendiri.
+  eksternal: "rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800",
 };
 
 /** null / "" / nilai asing → gaya Reguler, sejalan dengan creatorClassLabel(). */

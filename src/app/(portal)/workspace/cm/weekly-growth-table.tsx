@@ -2,7 +2,15 @@
 
 import { useMemo } from "react";
 import { rupiah, pct, rupiahRingkas } from "@/lib/utils/format";
-import { TableFilterBar, TablePagination, useTableControls } from "@/components/table-controls";
+import {
+  SortableTh,
+  TableFilterBar,
+  TablePagination,
+  useTableControls,
+  type FacetDef,
+  type SortConfig,
+} from "@/components/table-controls";
+import { creatorClassLabel } from "@/lib/creators/creator-class";
 
 const WEEK_LABELS = ["W1", "W2", "W3", "W4", "W5"] as const;
 
@@ -13,6 +21,10 @@ export interface WeeklyGrowthRow {
   username: string | null;
   ownerCpmId: string | null;
   cmName: string | null;
+  /** creators.creator_class (reguler|top_creator|influencer|eksternal); null = reguler. */
+  creatorClass: string | null;
+  /** Kategori/niche utama kreator; null = belum ada. */
+  kategori: string | null;
   /** GMV per minggu W1..W5, null = tidak ada upload. */
   weeks: (number | null)[];
   /** % perubahan vs minggu terisi sebelumnya, index-aligned dengan `weeks`. */
@@ -38,15 +50,57 @@ const searchUsername = (r: WeeklyGrowthRow) => r.username;
 const rowCm = (r: WeeklyGrowthRow) => ({ id: r.ownerCpmId, name: r.cmName });
 
 /**
- * Pertumbuhan GMV Mingguan (W1-W5) — search username kreator, filter CM, paginasi
- * 10/20/50. Baris TOTAL dihitung dari SELURUH baris yang lolos filter (bukan cuma
- * halaman aktif), jadi angkanya tetap konsisten dengan apa yang sedang difilter.
+ * Filter kelas & kategori kreator. Kelas selalu punya nilai (null = Reguler, sesuai
+ * default kolom DB), jadi opsinya tidak pernah kosong; kategori bisa null untuk
+ * kreator yang niche-nya belum terisi dari upload mingguan.
+ */
+const FACETS: FacetDef<WeeklyGrowthRow>[] = [
+  {
+    key: "kelas",
+    label: "Kelas",
+    value: (r) => {
+      const label = creatorClassLabel(r.creatorClass);
+      return { value: label, label };
+    },
+  },
+  {
+    key: "kategori",
+    label: "Kategori",
+    value: (r) => (r.kategori ? { value: r.kategori, label: r.kategori } : null),
+    emptyLabel: "Belum ada kategori/niche pada data ini.",
+  },
+];
+
+/** Kolom yang bisa diurutkan lewat klik header. Angka & % default turun (terbesar dulu). */
+const SORT: SortConfig<WeeklyGrowthRow> = {
+  columns: {
+    kreator: { value: (r) => r.username || r.name },
+    kelas: { value: (r) => creatorClassLabel(r.creatorClass) },
+    kategori: { value: (r) => r.kategori },
+    w1: { value: (r) => r.weeks[0], firstDir: "desc" },
+    w2: { value: (r) => r.weeks[1], firstDir: "desc" },
+    w3: { value: (r) => r.weeks[2], firstDir: "desc" },
+    w4: { value: (r) => r.weeks[3], firstDir: "desc" },
+    w5: { value: (r) => r.weeks[4], firstDir: "desc" },
+    total: { value: (r) => r.monthTotal, firstDir: "desc" },
+    growth: { value: (r) => r.monthGrowthPct, firstDir: "desc" },
+  },
+  initial: { key: "total", dir: "desc" },
+};
+
+/**
+ * Pertumbuhan GMV Mingguan (W1-W5) — search username kreator, filter CM / kelas /
+ * kategori, urut lewat klik header (naik ⇄ turun), paginasi 10/20/50. Baris TOTAL
+ * dihitung dari SELURUH baris yang lolos filter (bukan cuma halaman aktif), jadi
+ * angkanya tetap konsisten dengan apa yang sedang difilter.
  */
 export function WeeklyGrowthTable({ rows }: { rows: WeeklyGrowthRow[] }) {
   const controls = useTableControls<WeeklyGrowthRow>({
     rows,
     searchText: searchUsername,
     cm: rowCm,
+    facets: FACETS,
+    sort: SORT,
     itemLabel: "kreator",
   });
 
@@ -82,12 +136,14 @@ export function WeeklyGrowthTable({ rows }: { rows: WeeklyGrowthRow[] }) {
           <table className="min-w-full text-sm">
             <thead className="bg-slate-50 text-left text-xs uppercase text-slate-500">
               <tr>
-                <th className="px-4 py-3">Kreator</th>
-                {WEEK_LABELS.map((w) => (
-                  <th key={w} className="px-4 py-3">{w}</th>
+                <SortableTh controls={controls} sortKey="kreator">Kreator</SortableTh>
+                <SortableTh controls={controls} sortKey="kelas">Kelas</SortableTh>
+                <SortableTh controls={controls} sortKey="kategori">Kategori</SortableTh>
+                {WEEK_LABELS.map((w, i) => (
+                  <SortableTh key={w} controls={controls} sortKey={`w${i + 1}`}>{w}</SortableTh>
                 ))}
-                <th className="px-4 py-3">Total Bulan</th>
-                <th className="px-4 py-3">Growth</th>
+                <SortableTh controls={controls} sortKey="total">Total Bulan</SortableTh>
+                <SortableTh controls={controls} sortKey="growth">Growth</SortableTh>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
@@ -98,6 +154,8 @@ export function WeeklyGrowthTable({ rows }: { rows: WeeklyGrowthRow[] }) {
                     {r.username && <span className="text-xs text-slate-500">@{r.username}</span>}{" "}
                     <span className="text-xs text-slate-400">{r.creatorId}</span>
                   </td>
+                  <td className="px-4 py-2 text-slate-600">{creatorClassLabel(r.creatorClass)}</td>
+                  <td className="px-4 py-2 text-slate-600">{r.kategori ?? "—"}</td>
                   {WEEK_LABELS.map((_, i) => (
                     <td key={i} className="px-4 py-2">
                       <TrendCell value={r.weeks[i]} delta={r.deltas[i]} />
@@ -111,9 +169,9 @@ export function WeeklyGrowthTable({ rows }: { rows: WeeklyGrowthRow[] }) {
               ))}
               {controls.visibleRows.length === 0 && (
                 <tr>
-                  <td colSpan={8} className="px-4 py-6 text-center text-slate-400">
+                  <td colSpan={10} className="px-4 py-6 text-center text-slate-400">
                     {controls.filterActive
-                      ? "Tidak ada kreator yang cocok dengan pencarian username / filter CM."
+                      ? "Tidak ada kreator yang cocok dengan pencarian username / filter CM, kelas, atau kategori."
                       : "Belum ada data GMV mingguan untuk bulan ini di scope Anda."}
                   </td>
                 </tr>
@@ -123,6 +181,8 @@ export function WeeklyGrowthTable({ rows }: { rows: WeeklyGrowthRow[] }) {
               <tfoot className="border-t border-slate-200 bg-slate-50 font-semibold">
                 <tr>
                   <td className="px-4 py-2">TOTAL{controls.filterActive ? " (terfilter)" : ""}</td>
+                  <td className="px-4 py-2" />
+                  <td className="px-4 py-2" />
                   {WEEK_LABELS.map((_, i) => (
                     <td key={i} className="px-4 py-2">
                       <TrendCell value={weeklyTotals[i]} delta={weeklyTotalDeltas[i]} />
