@@ -39,47 +39,73 @@ export interface TeamMember {
   active: boolean;
 }
 
+/**
+ * Grup menu sidebar — item dikelompokkan per DIVISI/ROLE, bukan per modul.
+ *
+ * Menu penuh (management melihat semuanya) lebih dari 20 baris; tanpa grup, mencari
+ * "Jadwal Live" berarti memindai seluruh daftar. Urutan array ini = urutan grup di
+ * sidebar; grup yang seluruh itemnya tersaring RBAC tidak dirender sama sekali.
+ */
+export const NAV_GROUPS = [
+  "Umum",
+  "Creator Management",
+  "BizDev & Deal",
+  "Project & Campaign",
+  "Akuisisi",
+  "Data Platform",
+  "Management & Admin",
+] as const;
+export type NavGroup = (typeof NAV_GROUPS)[number];
+
 /** Nav items per PRD Module 01 §3.1 — sidebar filters by role (UI labels Bahasa Indonesia). */
 export interface NavItem {
   href: string;
   label: string;
   roles: Role[] | "all";
+  /** Grup sidebar tempat item ini tampil (wajib — item baru harus punya rumah). */
+  group: NavGroup;
 }
 
 export const NAV_ITEMS: NavItem[] = [
-  { href: "/dashboard", label: "Dasbor", roles: "all" },
-  { href: "/creators", label: "Kreator", roles: "all" },
-  { href: "/deals", label: "Deal Brand", roles: [...MANAGEMENT_ROLES, ...BIZDEV_ROLES, "finance"] },
-  { href: "/deals/baru", label: "Registrasi Deal", roles: [...MANAGEMENT_ROLES, "bizdev_lead", "bizdev"] },
-  { href: "/deals/import", label: "Import Master Deal", roles: [...MANAGEMENT_ROLES, "bizdev_lead", "bd_admin"] },
-  // Module 0.5: shared ingest (MCN + TAP) — process-on-ingest, drop-raw (matrix §2.8).
-  { href: "/ingest", label: "Upload Data Platform Mingguan", roles: [...MANAGEMENT_ROLES, ...CM_ROLES, "campaign_external"] },
-  { href: "/link-leakage", label: "Link Leakage", roles: [...MANAGEMENT_ROLES, ...CM_ROLES, ...BIZDEV_ROLES, "campaign_external"] },
-  { href: "/reports", label: "Report Kreator", roles: [...MANAGEMENT_ROLES, ...CM_ROLES] },
-  { href: "/matching", label: "Matching (M5)", roles: [...MANAGEMENT_ROLES, ...CM_ROLES, "bizdev_lead", "bizdev"] },
+  { href: "/dashboard", label: "Dasbor", roles: "all", group: "Umum" },
+  // M3 OKR: semua anggota bisa lihat KR sendiri; Director punya dashboard konfigurasi.
+  { href: "/okr", label: "OKR & Kinerja", roles: "all", group: "Umum" },
+
+  { href: "/creators", label: "Kreator", roles: "all", group: "Creator Management" },
+  { href: "/workspace/cm", label: "CM Workspace", roles: [...MANAGEMENT_ROLES, ...CM_ROLES], group: "Creator Management" },
+  { href: "/reports", label: "Report Kreator", roles: [...MANAGEMENT_ROLES, ...CM_ROLES], group: "Creator Management" },
+  // M13 Penjadwalan Live: CM + BizDev input slots; Creator Support verifies outside CM hours.
+  { href: "/schedule", label: "Jadwal Live", roles: [...MANAGEMENT_ROLES, ...CM_ROLES, ...BIZDEV_ROLES, "creator_support"], group: "Creator Management" },
+
+  { href: "/deals", label: "Deal Brand", roles: [...MANAGEMENT_ROLES, ...BIZDEV_ROLES, "finance"], group: "BizDev & Deal" },
+  { href: "/deals/baru", label: "Registrasi Deal", roles: [...MANAGEMENT_ROLES, "bizdev_lead", "bizdev"], group: "BizDev & Deal" },
+  { href: "/deals/import", label: "Import Master Deal", roles: [...MANAGEMENT_ROLES, "bizdev_lead", "bd_admin"], group: "BizDev & Deal" },
+  { href: "/workspace/bizdev", label: "BizDev Workspace", roles: [...MANAGEMENT_ROLES, ...BIZDEV_ROLES], group: "BizDev & Deal" },
+  { href: "/matching", label: "Matching (M5)", roles: [...MANAGEMENT_ROLES, ...CM_ROLES, "bizdev_lead", "bizdev"], group: "BizDev & Deal" },
   // Product×Creator Matching: catalog TAP (master upload + derive dari TAP) + rekomendasi.
-  { href: "/products", label: "Produk TAP", roles: [...MANAGEMENT_ROLES, ...CM_ROLES, ...BIZDEV_ROLES] },
+  { href: "/products", label: "Produk TAP", roles: [...MANAGEMENT_ROLES, ...CM_ROLES, ...BIZDEV_ROLES], group: "BizDev & Deal" },
   // Hidden from nav: postponed until production data is complete (user decision 2026-07-08).
   // Route & /predictor code left intact — only the menu entry is disabled.
-  // { href: "/predictor", label: "Prediksi Deal (M6)", roles: [...MANAGEMENT_ROLES, "bizdev_lead", "bizdev"] },
-  { href: "/projects", label: "Special Project (M7)", roles: [...MANAGEMENT_ROLES, "cm_lead", "bizdev_lead", "acquisition_lead", "campaign_ops", "finance"] },
-  { href: "/workspace/cm", label: "CM Workspace", roles: [...MANAGEMENT_ROLES, ...CM_ROLES] },
-  { href: "/workspace/bizdev", label: "BizDev Workspace", roles: [...MANAGEMENT_ROLES, ...BIZDEV_ROLES] },
-  { href: "/workspace/acquisition", label: "Acquisition Workspace", roles: [...MANAGEMENT_ROLES, ...ACQUISITION_ROLES] },
-  // M8 §2F: metrik approach external — External ✔, BizDev view, Management ✔.
-  { href: "/workspace/external", label: "External Workspace", roles: [...MANAGEMENT_ROLES, "bizdev_lead", "bizdev", "campaign_external"] },
+  // { href: "/predictor", label: "Prediksi Deal (M6)", roles: [...MANAGEMENT_ROLES, "bizdev_lead", "bizdev"], group: "BizDev & Deal" },
+
+  { href: "/projects", label: "Special Project (M7)", roles: [...MANAGEMENT_ROLES, "cm_lead", "bizdev_lead", "acquisition_lead", "campaign_ops", "finance"], group: "Project & Campaign" },
   // M10: Campaign & Ads Support portal — Management + Campaign Ops (lead) + ads_support (execute).
-  { href: "/workspace/ads", label: "Ads Support (M10)", roles: [...MANAGEMENT_ROLES, ...ADS_ROLES] },
-  { href: "/tim", label: "Tim", roles: MANAGEMENT_ROLES },
-  // M3 OKR: semua anggota bisa lihat KR sendiri; Director punya dashboard konfigurasi.
-  { href: "/okr", label: "OKR & Kinerja", roles: "all" },
-  { href: "/okr/director", label: "Config OKR (Director)", roles: ["director"] as Role[] },
+  { href: "/workspace/ads", label: "Ads Support (M10)", roles: [...MANAGEMENT_ROLES, ...ADS_ROLES], group: "Project & Campaign" },
+  // M8 §2F: metrik approach external — External ✔, BizDev view, Management ✔.
+  { href: "/workspace/external", label: "External Workspace", roles: [...MANAGEMENT_ROLES, "bizdev_lead", "bizdev", "campaign_external"], group: "Project & Campaign" },
+
+  { href: "/workspace/acquisition", label: "Acquisition Workspace", roles: [...MANAGEMENT_ROLES, ...ACQUISITION_ROLES], group: "Akuisisi" },
+
+  // Module 0.5: shared ingest (MCN + TAP) — process-on-ingest, drop-raw (matrix §2.8).
+  { href: "/ingest", label: "Upload Data Platform Mingguan", roles: [...MANAGEMENT_ROLES, ...CM_ROLES, "campaign_external"], group: "Data Platform" },
+  { href: "/link-leakage", label: "Link Leakage", roles: [...MANAGEMENT_ROLES, ...CM_ROLES, ...BIZDEV_ROLES, "campaign_external"], group: "Data Platform" },
+
+  { href: "/tim", label: "Tim", roles: MANAGEMENT_ROLES, group: "Management & Admin" },
+  { href: "/okr/director", label: "Config OKR (Director)", roles: ["director"] as Role[], group: "Management & Admin" },
   // M11: OD oversight portal — read-only cross-team (od_viewer + Director export).
-  { href: "/od", label: "OD Oversight (M11)", roles: ["od_viewer", "director"] as Role[] },
+  { href: "/od", label: "OD Oversight (M11)", roles: ["od_viewer", "director"] as Role[], group: "Management & Admin" },
   // M12: data retention & DB health dashboard — Director sets policy; Head/SPV + OD view.
-  { href: "/admin/retention", label: "Retensi Data (M12)", roles: [...MANAGEMENT_ROLES, "od_viewer"] },
-  // M13 Penjadwalan Live: CM + BizDev input slots; Creator Support verifies outside CM hours.
-  { href: "/schedule", label: "Jadwal Live", roles: [...MANAGEMENT_ROLES, ...CM_ROLES, ...BIZDEV_ROLES, "creator_support"] },
+  { href: "/admin/retention", label: "Retensi Data (M12)", roles: [...MANAGEMENT_ROLES, "od_viewer"], group: "Management & Admin" },
 ];
 
 /** Server-side write permissions per action (enforced in server actions + RLS, not just UI). */

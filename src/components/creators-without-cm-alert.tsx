@@ -5,8 +5,57 @@ import { useMemo, useState, useTransition } from "react";
 import { assignCmToCreators } from "@/app/(portal)/workspace/cm/actions";
 import { requestCmAssignmentBulk } from "@/app/(portal)/creators/cm-request-actions";
 import type { CmOption, CreatorWithoutCm } from "@/lib/creators/without-cm";
+import { nextSortState, sortRows, type SortDir, type SortState, type SortValue } from "@/lib/utils/table-sort";
 
 const PAGE_SIZE = 15;
+
+/** Kolom yang bisa diurutkan lewat header + arah klik pertamanya. */
+const SORT_FIRST_DIR: Record<string, SortDir> = {
+  username: "asc",
+  name: "asc",
+  platform: "asc",
+  status: "asc",
+  // Kolom angka: klik pertama menampilkan antrean terbanyak lebih dulu.
+  request: "desc",
+};
+
+/** Header kolom yang bisa diklik untuk mengurutkan (naik ⇄ turun ⇄ bawaan). */
+function SortTh({
+  label,
+  sortKey,
+  sort,
+  onSort,
+  className = "px-3 py-2",
+}: {
+  label: string;
+  sortKey: string;
+  sort: SortState | null;
+  onSort: (key: string) => void;
+  className?: string;
+}) {
+  const dir = sort?.key === sortKey ? sort.dir : null;
+
+  return (
+    <th
+      className={className}
+      aria-sort={dir === "asc" ? "ascending" : dir === "desc" ? "descending" : "none"}
+    >
+      <button
+        type="button"
+        onClick={() => onSort(sortKey)}
+        className="inline-flex items-center gap-1 whitespace-nowrap uppercase hover:text-amber-950"
+        title={`Urutkan berdasarkan ${label} (${
+          dir === "asc" ? "sekarang naik" : dir === "desc" ? "sekarang turun" : "belum diurutkan"
+        })`}
+      >
+        {label}
+        <span aria-hidden="true" className={dir ? "text-amber-900" : "text-amber-400"}>
+          {dir === "asc" ? "▲" : dir === "desc" ? "▼" : "↕"}
+        </span>
+      </button>
+    </th>
+  );
+}
 
 const btnPrimary =
   "rounded-md bg-amber-700 px-4 py-2 text-sm font-medium text-white hover:bg-amber-800 disabled:opacity-50";
@@ -59,6 +108,8 @@ export function CreatorsWithoutCmAlert({
   const [reason, setReason] = useState("");
   const [query, setQuery] = useState("");
   const [shown, setShown] = useState(PAGE_SIZE);
+  // null = urutan bawaan server (kreator terbaru dulu).
+  const [sort, setSort] = useState<SortState | null>(null);
   const [done, setDone] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
@@ -73,7 +124,7 @@ export function CreatorsWithoutCmAlert({
   /** Centang aktif untuk approver (assign) MAUPUN CM (request). */
   const canPick = canAssign || canRequest;
 
-  const filtered = useMemo(() => {
+  const searched = useMemo(() => {
     const q = query.trim().toLowerCase();
     if (!q) return rows;
     return rows.filter(
@@ -81,6 +132,29 @@ export function CreatorsWithoutCmAlert({
         r.name.toLowerCase().includes(q) || (r.username ?? "").toLowerCase().includes(q)
     );
   }, [rows, query]);
+
+  // Sorting client-side: daftar lengkapnya sudah ada di klien, jadi mengurutkan
+  // tidak memicu query baru. Nilai kosong selalu turun ke bawah (compareSortValues).
+  const filtered = useMemo(() => {
+    if (!sort) return searched;
+    const accessors: Record<string, (r: CreatorWithoutCm) => SortValue> = {
+      username: (r) => r.username,
+      name: (r) => r.name,
+      platform: (r) => r.platform ?? "tiktok",
+      status: (r) => r.status,
+      request: (r) => pendingRequestCountByCreator[r.id] ?? 0,
+    };
+    const accessor = accessors[sort.key];
+    return accessor ? sortRows(searched, accessor, sort.dir) : searched;
+  }, [searched, sort, pendingRequestCountByCreator]);
+
+  /** Klik header: naik → turun → kembali ke urutan bawaan server. */
+  function toggleSort(key: string) {
+    setSort((prev) =>
+      nextSortState(prev, key, SORT_FIRST_DIR[key] ?? "asc", { resettable: true, fallback: null })
+    );
+    setShown(PAGE_SIZE);
+  }
 
   const visible = filtered.slice(0, shown);
 
@@ -260,11 +334,11 @@ export function CreatorsWithoutCmAlert({
           <thead className="sticky top-0 bg-amber-100 text-left text-xs uppercase text-amber-900">
             <tr>
               {canPick && <th className="w-10 px-3 py-2" />}
-              <th className="px-3 py-2">Username</th>
-              <th className="px-3 py-2">Nama</th>
-              <th className="px-3 py-2">Platform</th>
-              <th className="px-3 py-2">Status</th>
-              <th className="px-3 py-2">Request CM</th>
+              <SortTh label="Username" sortKey="username" sort={sort} onSort={toggleSort} />
+              <SortTh label="Nama" sortKey="name" sort={sort} onSort={toggleSort} />
+              <SortTh label="Platform" sortKey="platform" sort={sort} onSort={toggleSort} />
+              <SortTh label="Status" sortKey="status" sort={sort} onSort={toggleSort} />
+              <SortTh label="Request CM" sortKey="request" sort={sort} onSort={toggleSort} />
             </tr>
           </thead>
           <tbody className="divide-y divide-amber-100">

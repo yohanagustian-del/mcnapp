@@ -1,8 +1,8 @@
 "use client";
 
-import { useActionState, useState } from "react";
+import { useActionState, useMemo, useState, useTransition } from "react";
 import type { CmRequestRow } from "@/lib/creators/cm-requests";
-import { decideCmRequest, type CmRequestState } from "./cm-request-actions";
+import { decideCmRequest, decideCmRequestsBulk, type CmRequestState } from "./cm-request-actions";
 
 function formatWhen(iso: string | null): string {
   if (!iso) return "—";
@@ -25,12 +25,32 @@ const STATUS_LABEL: Record<string, string> = {
 };
 
 /** Satu baris antrean + tombol Terima/Tolak (masing-masing punya state aksinya sendiri). */
-function PendingRow({ req }: { req: CmRequestRow }) {
+function PendingRow({
+  req,
+  selected,
+  onToggle,
+  disabled,
+}: {
+  req: CmRequestRow;
+  selected: boolean;
+  onToggle: (id: string) => void;
+  /** Aksi massal sedang berjalan — centang dikunci supaya pilihan tidak bergeser. */
+  disabled: boolean;
+}) {
   const [state, formAction, pending] = useActionState<CmRequestState, FormData>(decideCmRequest, null);
   const [note, setNote] = useState("");
 
   return (
-    <tr className="align-top">
+    <tr className={`align-top ${selected ? "bg-sky-50" : ""}`}>
+      <td className="px-3 py-2">
+        <input
+          type="checkbox"
+          checked={selected}
+          disabled={disabled}
+          onChange={() => onToggle(req.id)}
+          aria-label={`Pilih request ${req.creatorLabel} dari ${req.requesterName}`}
+        />
+      </td>
       <td className="px-3 py-2">
         <div className="font-medium text-slate-800">{req.creatorLabel}</div>
         <div className="text-xs text-slate-400">{formatWhen(req.created_at)}</div>
@@ -110,6 +130,45 @@ export function CmRequestsPanel({
   const visiblePending = canDecide ? pending : pending.filter((r) => r.requested_by === viewerId);
   const visibleRecent = canDecide ? recent : recent.filter((r) => r.requested_by === viewerId);
 
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [bulkNote, setBulkNote] = useState("");
+  const [bulkResult, setBulkResult] = useState<{ ok: boolean; message: string } | null>(null);
+  const [bulkPending, startBulk] = useTransition();
+
+  // Baris yang sudah hilang dari antrean (sudah diputuskan) tidak boleh tetap
+  // tercentang — kalau tidak, klik massal berikutnya mengirim id yang sudah mati.
+  const pendingIds = useMemo(() => new Set(visiblePending.map((r) => r.id)), [visiblePending]);
+  const selectedIds = useMemo(() => [...selected].filter((id) => pendingIds.has(id)), [selected, pendingIds]);
+  const allPicked = visiblePending.length > 0 && selectedIds.length === visiblePending.length;
+
+  function toggle(id: string) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  function toggleAll() {
+    setSelected(allPicked ? new Set() : new Set(visiblePending.map((r) => r.id)));
+  }
+
+  function runBulk(decision: "accepted" | "rejected") {
+    setBulkResult(null);
+    const ids = selectedIds;
+    startBulk(async () => {
+      try {
+        const res = await decideCmRequestsBulk(ids, decision, bulkNote.trim() || null);
+        setBulkResult({ ok: res.errors.length === 0, message: res.message });
+        setSelected(new Set());
+        setBulkNote("");
+      } catch (e) {
+        setBulkResult({ ok: false, message: e instanceof Error ? e.message : "Gagal memproses request" });
+      }
+    });
+  }
+
   if (visiblePending.length === 0 && visibleRecent.length === 0) return null;
 
   return (
@@ -125,6 +184,9 @@ export function CmRequestsPanel({
             CPM tidak bisa menugaskan kreator ke dirinya sendiri, jadi mereka mengajukan request di
             sini. <strong>Terima</strong> memindahkan kepemilikan kreator ke CM pengaju dan tercatat
             di audit log sebagai approval; request lain untuk kreator yang sama otomatis ditutup.
+            Antrean panjang tidak perlu diklik satu per satu — <strong>centang</strong> beberapa baris
+            (atau <strong>Pilih semua</strong>) lalu <strong>Terima/Tolak terpilih</strong>; tiap
+            keputusan tetap punya baris audit log sendiri.
           </>
         ) : (
           <>
@@ -134,11 +196,67 @@ export function CmRequestsPanel({
         )}
       </p>
 
+      {canDecide && visiblePending.length > 0 && (
+        <div className="mt-3 flex flex-wrap items-center gap-2 rounded-md border border-sky-200 bg-white p-2">
+          <button
+            type="button"
+            onClick={toggleAll}
+            disabled={bulkPending}
+            className="rounded-md border border-sky-300 px-3 py-1.5 text-xs font-medium text-sky-900 hover:bg-sky-50 disabled:opacity-50"
+          >
+            {allPicked ? "Batal pilih" : `Pilih semua (${visiblePending.length})`}
+          </button>
+          <input
+            type="text"
+            value={bulkNote}
+            onChange={(e) => setBulkNote(e.target.value)}
+            placeholder="Catatan keputusan massal (opsional)"
+            aria-label="Catatan keputusan massal"
+            className="w-64 rounded-md border border-slate-300 px-2 py-1.5 text-xs"
+          />
+          <button
+            type="button"
+            onClick={() => runBulk("accepted")}
+            disabled={bulkPending || selectedIds.length === 0}
+            className="rounded-md bg-green-700 px-3 py-1.5 text-xs font-medium text-white hover:bg-green-800 disabled:opacity-50"
+          >
+            {bulkPending ? "Memproses…" : `Terima ${selectedIds.length} terpilih`}
+          </button>
+          <button
+            type="button"
+            onClick={() => runBulk("rejected")}
+            disabled={bulkPending || selectedIds.length === 0}
+            className="rounded-md border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+          >
+            Tolak {selectedIds.length} terpilih
+          </button>
+          {bulkResult && (
+            <p
+              role="status"
+              className={`text-xs ${bulkResult.ok ? "text-green-700" : "text-red-700"}`}
+            >
+              {bulkResult.message}
+            </p>
+          )}
+        </div>
+      )}
+
       {visiblePending.length > 0 && (
         <div className="mt-3 overflow-x-auto rounded-md border border-sky-200 bg-white">
           <table className="min-w-full text-sm">
             <thead className="bg-sky-100 text-left text-xs uppercase text-sky-900">
               <tr>
+                {canDecide && (
+                  <th className="w-10 px-3 py-2">
+                    <input
+                      type="checkbox"
+                      checked={allPicked}
+                      disabled={bulkPending}
+                      onChange={toggleAll}
+                      aria-label="Pilih semua request menunggu"
+                    />
+                  </th>
+                )}
                 <th className="px-3 py-2">Kreator</th>
                 <th className="px-3 py-2">Pengaju</th>
                 <th className="px-3 py-2">CM sekarang</th>
@@ -149,7 +267,13 @@ export function CmRequestsPanel({
             <tbody className="divide-y divide-sky-100">
               {visiblePending.map((req) =>
                 canDecide ? (
-                  <PendingRow key={req.id} req={req} />
+                  <PendingRow
+                    key={req.id}
+                    req={req}
+                    selected={selected.has(req.id)}
+                    onToggle={toggle}
+                    disabled={bulkPending}
+                  />
                 ) : (
                   <tr key={req.id}>
                     <td className="px-3 py-2 font-medium text-slate-800">{req.creatorLabel}</td>

@@ -186,6 +186,92 @@ export async function requestCmAssignmentBulk(
  * (CLAUDE.md #2). Kepemilikan tetap satu sumber di creators.owner_cpm_id —
  * tabel request tidak pernah dijadikan sumber kedua.
  */
+async function applyCmRequestDecision(
+  actorId: string,
+  requestId: string,
+  decision: "accepted" | "rejected",
+  note: string | null
+): Promise<{ ok: boolean; message: string }> {
+  const admin = createAdminClient();
+  const { data: req } = await admin
+    .from("creator_cm_requests")
+    .select("id, creator_id, requested_by, status")
+    .eq("id", requestId)
+    .maybeSingle();
+  if (!req) throw new Error(`Request ${requestId} tidak ditemukan`);
+  if (req.status !== "pending") {
+    return { ok: false, message: `Request ini sudah diputuskan (${req.status}).` };
+  }
+
+  const [{ data: creator }, { data: requester }] = await Promise.all([
+    admin.from("creators").select("id, name, username, owner_cpm_id").eq("id", req.creator_id).maybeSingle(),
+    admin.from("team_members").select("id, name, role, active").eq("id", req.requested_by).maybeSingle(),
+  ]);
+  if (!creator) throw new Error("Kreator pada request sudah tidak ada");
+  if (decision === "accepted") {
+    if (!requester?.active || !["cpm", "cm_lead"].includes(requester.role)) {
+      throw new Error("Pengaju bukan CPM/CM Lead aktif — request tidak bisa diterima");
+    }
+  }
+
+  const decidedAt = new Date().toISOString();
+  const { error: updateReqError } = await admin
+    .from("creator_cm_requests")
+    .update({ status: decision, decided_by: actorId, decided_at: decidedAt, decision_note: note })
+    .eq("id", requestId)
+    .eq("status", "pending"); // guard balapan: dua approver menekan tombol bersamaan
+  if (updateReqError) throw new Error(`Gagal menyimpan keputusan: ${updateReqError.message}`);
+
+  if (decision === "accepted") {
+    const { error } = await admin
+      .from("creators")
+      .update({ owner_cpm_id: req.requested_by })
+      .eq("id", req.creator_id);
+    if (error) throw new Error(`Keputusan tersimpan tapi gagal memindahkan kreator: ${error.message}`);
+
+    await writeAudit({
+      actorId,
+      action: "creators.cm_request_accepted",
+      entityType: "creators",
+      entityId: req.creator_id,
+      before: { owner_cpm_id: creator.owner_cpm_id },
+      after: { owner_cpm_id: req.requested_by, request_id: requestId, decision_note: note },
+      type: "approval",
+    });
+
+    // Request pending LAIN untuk kreator yang sama otomatis gugur — kepemilikan
+    // sudah ditentukan, menyisakannya di antrean hanya bikin approver salah klik.
+    await admin
+      .from("creator_cm_requests")
+      .update({
+        status: "rejected",
+        decided_by: actorId,
+        decided_at: decidedAt,
+        decision_note: `Otomatis ditutup: kreator diberikan ke ${requester?.name ?? "CM lain"} (request ${requestId}).`,
+      })
+      .eq("creator_id", req.creator_id)
+      .eq("status", "pending");
+
+    return {
+      ok: true,
+      message: `Request diterima — ${creator.username || creator.name} sekarang dipegang ${requester?.name ?? "pengaju"}.`,
+    };
+  }
+
+  await writeAudit({
+    actorId,
+    action: "creators.cm_request_rejected",
+    entityType: "creator_cm_requests",
+    entityId: requestId,
+    before: { status: "pending" },
+    after: { status: "rejected", decision_note: note },
+    type: "approval",
+  });
+
+  return { ok: true, message: "Request ditolak." };
+}
+
+/** Terima / tolak SATU request lewat tombol di barisnya (form action). */
 export async function decideCmRequest(
   _prev: CmRequestState,
   formData: FormData
@@ -200,87 +286,82 @@ export async function decideCmRequest(
       throw new Error("Keputusan harus 'accepted' atau 'rejected'");
     }
 
-    const admin = createAdminClient();
-    const { data: req } = await admin
-      .from("creator_cm_requests")
-      .select("id, creator_id, requested_by, status")
-      .eq("id", requestId)
-      .maybeSingle();
-    if (!req) throw new Error(`Request ${requestId} tidak ditemukan`);
-    if (req.status !== "pending") {
-      return { ok: false, message: `Request ini sudah diputuskan (${req.status}).` };
-    }
-
-    const [{ data: creator }, { data: requester }] = await Promise.all([
-      admin.from("creators").select("id, name, username, owner_cpm_id").eq("id", req.creator_id).maybeSingle(),
-      admin.from("team_members").select("id, name, role, active").eq("id", req.requested_by).maybeSingle(),
-    ]);
-    if (!creator) throw new Error("Kreator pada request sudah tidak ada");
-    if (decision === "accepted") {
-      if (!requester?.active || !["cpm", "cm_lead"].includes(requester.role)) {
-        throw new Error("Pengaju bukan CPM/CM Lead aktif — request tidak bisa diterima");
-      }
-    }
-
-    const decidedAt = new Date().toISOString();
-    const { error: updateReqError } = await admin
-      .from("creator_cm_requests")
-      .update({ status: decision, decided_by: actor.id, decided_at: decidedAt, decision_note: note })
-      .eq("id", requestId)
-      .eq("status", "pending"); // guard balapan: dua approver menekan tombol bersamaan
-    if (updateReqError) throw new Error(`Gagal menyimpan keputusan: ${updateReqError.message}`);
-
-    if (decision === "accepted") {
-      const { error } = await admin
-        .from("creators")
-        .update({ owner_cpm_id: req.requested_by })
-        .eq("id", req.creator_id);
-      if (error) throw new Error(`Keputusan tersimpan tapi gagal memindahkan kreator: ${error.message}`);
-
-      await writeAudit({
-        actorId: actor.id,
-        action: "creators.cm_request_accepted",
-        entityType: "creators",
-        entityId: req.creator_id,
-        before: { owner_cpm_id: creator.owner_cpm_id },
-        after: { owner_cpm_id: req.requested_by, request_id: requestId, decision_note: note },
-        type: "approval",
-      });
-
-      // Request pending LAIN untuk kreator yang sama otomatis gugur — kepemilikan
-      // sudah ditentukan, menyisakannya di antrean hanya bikin approver salah klik.
-      await admin
-        .from("creator_cm_requests")
-        .update({
-          status: "rejected",
-          decided_by: actor.id,
-          decided_at: decidedAt,
-          decision_note: `Otomatis ditutup: kreator diberikan ke ${requester?.name ?? "CM lain"} (request ${requestId}).`,
-        })
-        .eq("creator_id", req.creator_id)
-        .eq("status", "pending");
-
-      revalidatePath("/creators");
-      revalidatePath("/workspace/cm");
-      return {
-        ok: true,
-        message: `Request diterima — ${creator.username || creator.name} sekarang dipegang ${requester?.name ?? "pengaju"}.`,
-      };
-    }
-
-    await writeAudit({
-      actorId: actor.id,
-      action: "creators.cm_request_rejected",
-      entityType: "creator_cm_requests",
-      entityId: requestId,
-      before: { status: "pending" },
-      after: { status: "rejected", decision_note: note },
-      type: "approval",
-    });
+    const result = await applyCmRequestDecision(actor.id, requestId, decision, note);
 
     revalidatePath("/creators");
-    return { ok: true, message: "Request ditolak." };
+    if (decision === "accepted") revalidatePath("/workspace/cm");
+    return result;
   } catch (e) {
     return { ok: false, message: e instanceof Error ? e.message : "Gagal memproses request" };
   }
+}
+
+/** Batas satu kali keputusan massal — sejajar dengan MAX_BULK_REQUEST di sisi pengajuan. */
+const MAX_BULK_DECISION = 100;
+
+export interface BulkCmDecisionResult {
+  decided: number;
+  /** Sudah diputuskan approver lain / gugur otomatis karena kreatornya sudah diberikan. */
+  skipped: number;
+  /** Pesan kegagalan per request (mis. pengaju sudah nonaktif) — maksimal 5 ditampilkan. */
+  errors: string[];
+  message: string;
+}
+
+/**
+ * Terima / tolak BANYAK request penugasan CM sekaligus (centang di panel antrean).
+ *
+ * Approver bisa menghadapi puluhan request setelah satu upload mingguan; memutuskan
+ * satu per satu membuat antrean menumpuk berhari-hari. Aturannya sama persis dengan
+ * jalur satu-baris — setiap request tetap melewati applyCmRequestDecision, jadi tiap
+ * keputusan punya baris audit_logs sendiri (type='approval', CLAUDE.md #2) dan
+ * kepemilikan tetap satu sumber di creators.owner_cpm_id (CLAUDE.md #4).
+ *
+ * Diproses BERURUTAN, bukan paralel: kalau dua request terpilih menunjuk kreator yang
+ * sama, yang pertama menang dan sisanya otomatis gugur (dihitung sebagai `skipped`) —
+ * persis seperti saat approver mengklik satu per satu. Satu request bermasalah tidak
+ * menggagalkan sisa centangan; kegagalannya dilaporkan di `errors`.
+ */
+export async function decideCmRequestsBulk(
+  requestIds: string[],
+  decision: "accepted" | "rejected",
+  note: string | null
+): Promise<BulkCmDecisionResult> {
+  const actor = await requirePermission("creators.decide_cm_request");
+  if (decision !== "accepted" && decision !== "rejected") {
+    throw new Error("Keputusan harus 'accepted' atau 'rejected'");
+  }
+  const ids = [...new Set(requestIds.map((s) => String(s).trim()).filter(Boolean))];
+  if (ids.length === 0) throw new Error("Belum ada request yang dicentang");
+  if (ids.length > MAX_BULK_DECISION) {
+    throw new Error(`Maksimal ${MAX_BULK_DECISION} request per keputusan (dicentang ${ids.length})`);
+  }
+
+  let decided = 0;
+  let skipped = 0;
+  const errors: string[] = [];
+  for (const id of ids) {
+    try {
+      const result = await applyCmRequestDecision(actor.id, id, decision, note);
+      if (result.ok) decided += 1;
+      else skipped += 1;
+    } catch (e) {
+      errors.push(`${id}: ${e instanceof Error ? e.message : "gagal diproses"}`);
+    }
+  }
+
+  revalidatePath("/creators");
+  if (decision === "accepted") revalidatePath("/workspace/cm");
+
+  const verb = decision === "accepted" ? "diterima" : "ditolak";
+  return {
+    decided,
+    skipped,
+    errors,
+    message:
+      `${decided} request ${verb}` +
+      (skipped > 0 ? `, ${skipped} dilewati (sudah diputuskan / kreatornya sudah diberikan)` : "") +
+      (errors.length > 0 ? `, ${errors.length} gagal` : "") +
+      ".",
+  };
 }
