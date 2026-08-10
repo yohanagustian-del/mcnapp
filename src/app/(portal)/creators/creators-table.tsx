@@ -41,6 +41,9 @@ export interface CreatorTableRow {
   status: string;
   owner_cpm_id: string | null;
   cmName: string | null;
+  /** team_members.id anggota grup akuisisi yang membawa masuk kreator ini. */
+  acquisitor_id: string | null;
+  acquisitorName: string | null;
 }
 
 function formatRp(v: number | null | undefined): string {
@@ -292,6 +295,8 @@ const COLUMNS: TableColumn[] = [
       ),
   },
   { label: "CM", compact: true, value: (c) => c.cmName, cell: (c) => c.cmName ?? "—" },
+  // Akuisitor = anggota tim grup "acquisition" yang membawa kreator ini masuk.
+  { label: "Akuisitor", compact: true, value: (c) => c.acquisitorName, cell: (c) => c.acquisitorName ?? "—" },
   { label: "Level", compact: true, value: (c) => c.level, cell: (c) => (c.level ? `L${c.level}` : "—") },
   // Tanggal ISO ("2026-01-31") urut leksikografis = urut kronologis.
   { label: "Join", value: (c) => c.join_date, cell: (c) => c.join_date ?? "—" },
@@ -329,8 +334,14 @@ const COLUMNS: TableColumn[] = [
 /** Label kolom yang tampil pada preset "Ringkas". */
 const COMPACT_LABELS = COLUMNS.filter((c) => c.compact).map((c) => c.label);
 const ALL_LABELS = COLUMNS.map((c) => c.label);
-/** Pilihan kolom disimpan per-browser supaya tidak perlu diatur ulang tiap kunjungan. */
-const COLUMN_PREF_KEY = "mcn.creators.columns.v1";
+/**
+ * Pilihan kolom disimpan per-browser supaya tidak perlu diatur ulang tiap kunjungan.
+ *
+ * Versinya dinaikkan setiap ada kolom BARU yang harus terlihat: preferensi lama
+ * disaring terhadap ALL_LABELS, jadi tanpa dinaikkan kolom baru tidak akan pernah
+ * muncul untuk user yang pernah menyentuh menu Kolom (v2 = kolom "Akuisitor").
+ */
+const COLUMN_PREF_KEY = "mcn.creators.columns.v2";
 
 type SortDir = "asc" | "desc";
 
@@ -376,6 +387,7 @@ export function CreatorsTable({
   canDelete,
   canAssignCm = false,
   cmOptions = [],
+  acquisitorOptions = [],
   canRequestCm = false,
   viewerId = null,
   requestedCreatorIds,
@@ -389,6 +401,8 @@ export function CreatorsTable({
   canAssignCm?: boolean;
   /** Daftar CM aktif untuk dropdown CM di modal Edit. */
   cmOptions?: EditCmOption[];
+  /** Anggota grup akuisisi aktif untuk dropdown Akuisitor di modal Edit. */
+  acquisitorOptions?: EditCmOption[];
   /**
    * Izin creators.request_cm TANPA izin assign (CPM). Menampilkan tombol "Request"
    * per baris — satu-satunya jalur CPM mendapatkan kreator, karena assign mandiri
@@ -736,6 +750,7 @@ export function CreatorsTable({
                           <CreatorEditButton
                             creator={c}
                             cms={cmOptions}
+                            acquisitors={acquisitorOptions}
                             canAssignCm={canAssignCm}
                           />
                         )}

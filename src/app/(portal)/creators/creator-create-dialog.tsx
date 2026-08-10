@@ -55,7 +55,14 @@ function Field({
  * kreator lama, modal menampilkannya sebagai perbandingan, lalu user memilih
  * sendiri mau menimpa, membuka kreator itu, atau mengganti username.
  */
-export function CreatorCreateDialog({ cms }: { cms: CmOption[] }) {
+export function CreatorCreateDialog({
+  cms,
+  acquisitors = [],
+}: {
+  cms: CmOption[];
+  /** Anggota tim grup akuisisi (role acquisition_spec / acquisition_lead). */
+  acquisitors?: CmOption[];
+}) {
   const [open, setOpen] = useState(false);
   const [state, formAction, pending] = useActionState<CreateCreatorResult, FormData>(
     createCreatorManual,
@@ -229,6 +236,24 @@ export function CreatorCreateDialog({ cms }: { cms: CmOption[] }) {
                 </select>
               </label>
               <Field name="nama_creator" title="Nama Creator" placeholder="Kosong → pakai username" />
+
+              {/* Akuisitor = anggota tim grup akuisisi yang membawa kreator ini
+                  masuk. Dropdown, bukan teks bebas, supaya namanya persis sama
+                  dengan yang terdaftar di menu Tim. */}
+              <label className="block">
+                <span className={label}>Akuisitor</span>
+                <select name="acquisitor_id" defaultValue="" className={`${field} mt-1 w-full`}>
+                  <option value="">— belum ada akuisitor —</option>
+                  {acquisitors.map((m) => (
+                    <option key={m.id} value={m.id}>{m.name}</option>
+                  ))}
+                </select>
+                {acquisitors.length === 0 && (
+                  <span className="mt-1 block text-[11px] leading-snug text-slate-500">
+                    Belum ada anggota tim akuisisi aktif — daftarkan dulu di menu Tim.
+                  </span>
+                )}
+              </label>
 
               <Field name="no_hp" title="No HP" placeholder="628123456789" />
               <label className="block">

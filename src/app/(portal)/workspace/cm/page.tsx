@@ -125,7 +125,9 @@ export default async function CmWorkspacePage({
     .from("creators")
     // creator_class + niche/top_niches ikut diambil: dipakai filter "Kelas" &
     // "Kategori" di tabel Pertumbuhan GMV Mingguan dan Creator & Growth Mingguan.
-    .select("id, name, username, level, segment, status, gmv, owner_cpm_id, ads_budget_cap, creator_class, niche, top_niches, team_members(name)")
+    // creators punya dua FK ke team_members (CM + Akuisitor) → embed CM harus
+    // menyebut nama constraint-nya, kalau tidak PostgREST menolak sebagai ambigu.
+    .select("id, name, username, level, segment, status, gmv, owner_cpm_id, ads_budget_cap, creator_class, niche, top_niches, team_members!creators_owner_cpm_id_fkey(name)")
     .order("gmv", { ascending: false })
     .limit(100);
   if (isCpm) creatorsQuery = creatorsQuery.eq("owner_cpm_id", member.id);
@@ -156,7 +158,7 @@ export default async function CmWorkspacePage({
   };
   let rosterQuery = supabase
     .from("creators")
-    .select("id, name, username, owner_cpm_id, live_roster, team_members(name)")
+    .select("id, name, username, owner_cpm_id, live_roster, team_members!creators_owner_cpm_id_fkey(name)")
     .eq("live_roster", true)
     .limit(300);
   if (isCpm) rosterQuery = rosterQuery.eq("owner_cpm_id", member.id);
@@ -516,6 +518,7 @@ export default async function CmWorkspacePage({
             todayIso={todayIso}
             emptyLabel="Belum ada jadwal live untuk hari ini/besok di scope Anda."
             filterable
+            showAdsNote
           />
           {missingTomorrow.length > 0 && (
             <p className="-mt-4 rounded-md bg-red-50 p-2 text-xs text-red-700">

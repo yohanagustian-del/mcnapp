@@ -8,6 +8,7 @@ import { assignManpower, setProjectStatus, upsertCreatorMetric, upsertDailyMetri
 import { ParticipantForm, type CreatorUsernameOption } from "./participant-form";
 import { DailyMetricsTable, type DailyMetricRow } from "./daily-metrics-table";
 import { CreatorPerformanceTable, type CreatorPerformanceRow } from "./creator-performance-table";
+import { CmPerformanceTable, type CmPerformanceRow } from "./cm-performance-table";
 
 const STATUS_LABELS: Record<string, string> = {
   on_track: "On-track", behind: "Behind", ahead: "Ahead",
@@ -41,8 +42,13 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
       supabase.from("project_daily_metrics")
         .select("date, gmv_actual, ads_spend, creator_commission, mea_revenue")
         .eq("project_id", projectId).order("date"),
+      // creators(...) ikut membawa CM pemiliknya (owner_cpm_id → team_members).
+      // creators punya dua FK ke team_members (CM + Akuisitor), jadi embed-nya
+      // wajib menyebut nama constraint supaya tidak ditolak sebagai ambigu.
       supabase.from("project_participants")
-        .select("creator_id, is_external, tiktok_binding_status, live_type, target_gmv, creators(name, username)")
+        .select(
+          "creator_id, is_external, tiktok_binding_status, live_type, target_gmv, creators(name, username, owner_cpm_id, team_members!creators_owner_cpm_id_fkey(name))"
+        )
         .eq("project_id", projectId),
       supabase.from("project_manpower")
         .select("member_id, role, involvement, team_members(name)")
@@ -145,9 +151,18 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
   const creatorPerformanceRows: CreatorPerformanceRow[] = (participants ?? []).map((p) => {
     const perf = creatorGmv.get(p.creator_id) ?? { gmv: 0, items: 0 };
     const target = p.target_gmv === null ? null : Number(p.target_gmv);
+    const c = p.creators as unknown as {
+      name: string;
+      owner_cpm_id: string | null;
+      team_members: { name?: string } | null;
+    } | null;
     return {
       creatorId: p.creator_id,
-      creatorName: (p.creators as unknown as { name: string } | null)?.name ?? p.creator_id,
+      creatorName: c?.name ?? p.creator_id,
+      // CM = pemilik kreatornya (creators.owner_cpm_id), bukan man power project:
+      // satu kreator hanya punya satu CM, jadi rollup per CM di bawah deterministik.
+      cmId: c?.owner_cpm_id ?? null,
+      cmName: c?.team_members?.name ?? null,
       targetGmv: target,
       gmv: perf.gmv,
       items: perf.items,
@@ -155,6 +170,41 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
       contribution: tracking.cumActual > 0 ? perf.gmv / tracking.cumActual : 0,
     };
   });
+
+  // Performa per CM = ROLLUP dari baris performa kreator di atas (CLAUDE.md #4:
+  // agregasi sumber yang sama, bukan hitung ulang dari project_creator_metrics).
+  // Dihitung di server; komponen kliennya hanya mengurutkan + memaginasi.
+  const cmPerformanceRows: CmPerformanceRow[] = (() => {
+    const byCm = new Map<string, CmPerformanceRow>();
+    for (const r of creatorPerformanceRows) {
+      // Kreator tanpa CM tetap dihitung, dikelompokkan sebagai satu baris
+      // "Belum ada CM" — kalau dibuang, total kolomnya tidak lagi sama dengan
+      // tabel per kreator.
+      const key = r.cmId ?? "__tanpa_cm__";
+      const current = byCm.get(key) ?? {
+        cmId: r.cmId,
+        cmName: r.cmName ?? "Belum ada CM",
+        creatorCount: 0,
+        targetGmv: null,
+        gmv: 0,
+        items: 0,
+        pctTarget: null,
+        contribution: 0,
+      };
+      current.creatorCount += 1;
+      current.gmv += r.gmv;
+      current.items += r.items;
+      // Target CM = jumlah target kreatornya; tetap null kalau tidak satu pun
+      // kreator punya target (bukan 0, yang akan terbaca "target nol tercapai").
+      if (r.targetGmv !== null) current.targetGmv = (current.targetGmv ?? 0) + r.targetGmv;
+      current.contribution += r.contribution;
+      byCm.set(key, current);
+    }
+    for (const row of byCm.values()) {
+      row.pctTarget = row.targetGmv ? row.gmv / row.targetGmv : null;
+    }
+    return [...byCm.values()];
+  })();
 
   return (
     <div>
@@ -285,6 +335,15 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
         </form>
       )}
       <CreatorPerformanceTable rows={creatorPerformanceRows} />
+
+      {/* ===== Performa per CM — rollup dari tabel di atas ===== */}
+      <h2 className="mt-8 text-lg font-medium">Performa per CM</h2>
+      <p className="mt-1 text-xs text-slate-500">
+        Angka yang sama dengan tabel <strong>Performa per Kreator</strong>, dikelompokkan berdasarkan
+        CM pemilik kreator (bukan man power project). Klik judul kolom untuk mengurutkan naik/turun;
+        10 baris per halaman.
+      </p>
+      <CmPerformanceTable rows={cmPerformanceRows} />
 
       <div className="mt-8 grid gap-6 lg:grid-cols-2">
         {/* ===== Participants ===== */}

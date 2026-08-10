@@ -15,6 +15,7 @@ function ctx(overrides?: Partial<ImportContext>): ImportContext {
       ["netta", { id: "uuid-netta", name: "Netta" }],
       ["gabriel", { id: "uuid-gabriel", name: "Gabriel" }],
     ]),
+    acquisitorByName: new Map([["rani", { id: "uuid-rani", name: "Rani" }]]),
     existingByUsername: new Map([
       ["vikahere", { id: "CRT-AAAAA", cmName: "Gabriel", commissionShare: null }],
       // Kreator yang sharing komisinya SUDAH terisi — sheet tidak boleh menimpanya.
@@ -71,6 +72,28 @@ describe("buildImportRows", () => {
     const rows = buildImportRows([{ username: "uda.arbi", cm: "Siapa" }], ctx());
     expect(rows[0].status).toBe("error");
     expect(rows[0].errors[0]).toMatch(/tidak terdaftar/);
+  });
+
+  it("kolom Akuisitor di-resolve ke team_members.id", () => {
+    const rows = buildImportRows([{ username: "uda.arbi", cm: "Netta", akuisitor: "rani" }], ctx());
+    expect(rows[0].status).toBe("insert");
+    expect(rows[0].payload.acquisitor_id).toBe("uuid-rani");
+    expect(rows[0].warnings).toEqual([]);
+  });
+
+  it("Akuisitor tak terdaftar = peringatan, bukan error — baris tetap tersimpan", () => {
+    const rows = buildImportRows(
+      [{ username: "uda.arbi", cm: "Netta", akuisitor: "Siapa" }],
+      ctx()
+    );
+    expect(rows[0].status).toBe("insert");
+    expect(rows[0].payload).not.toHaveProperty("acquisitor_id");
+    expect(rows[0].warnings[0]).toMatch(/Akuisitor "Siapa" tidak terdaftar/);
+  });
+
+  it("Akuisitor kosong tidak masuk payload (akuisitor lama tidak terhapus)", () => {
+    const rows = buildImportRows([{ username: "vikahere", cm: "Netta", akuisitor: "" }], ctx());
+    expect(rows[0].payload).not.toHaveProperty("acquisitor_id");
   });
 
   it("menandai username duplikat di dalam file", () => {

@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { writeAudit } from "@/lib/audit";
-import { requirePermission, CM_ROLES, MANAGEMENT_ROLES } from "@/lib/rbac";
+import { requirePermission, ACQUISITION_ROLES, CM_ROLES, MANAGEMENT_ROLES } from "@/lib/rbac";
 import { genId } from "@/lib/utils/id";
 import { fetchAll } from "@/lib/supabase/fetch-all";
 import { parseSheet } from "@/lib/utils/sheet";
@@ -23,7 +23,9 @@ import { buildCreatorTemplate, TEMPLATE_FILENAME } from "@/lib/creators/import-t
 const CM_OWNER_ROLES = [...CM_ROLES, ...MANAGEMENT_ROLES];
 
 /** Muat konteks pencocokan: daftar CM + kreator yang sudah ada (by username). */
-async function loadContext(): Promise<ImportContext & { cmNames: string[] }> {
+async function loadContext(): Promise<
+  ImportContext & { cmNames: string[]; acquisitorNames: string[] }
+> {
   const admin = createAdminClient();
 
   const { data: members, error: memberError } = await admin
@@ -36,6 +38,21 @@ async function loadContext(): Promise<ImportContext & { cmNames: string[] }> {
   const cmByName = new Map<string, { id: string; name: string }>();
   for (const m of members ?? []) {
     if (m.name) cmByName.set(String(m.name).toLowerCase(), { id: m.id, name: m.name });
+  }
+
+  // Kolom "Akuisitor" di-resolve ke anggota grup akuisisi yang aktif — daftar
+  // terpisah dari CM supaya nama CM tidak bisa masuk ke kolom akuisitor (dan
+  // sebaliknya).
+  const { data: acqMembers, error: acqError } = await admin
+    .from("team_members")
+    .select("id, name, role, active")
+    .in("role", ACQUISITION_ROLES)
+    .eq("active", true);
+  if (acqError) throw new Error(`Gagal memuat daftar Akuisitor: ${acqError.message}`);
+
+  const acquisitorByName = new Map<string, { id: string; name: string }>();
+  for (const m of acqMembers ?? []) {
+    if (m.name) acquisitorByName.set(String(m.name).toLowerCase(), { id: m.id, name: m.name });
   }
 
   // Paginated: PostgREST caps one select at 1000 rows and ignores a larger
@@ -73,8 +90,12 @@ async function loadContext(): Promise<ImportContext & { cmNames: string[] }> {
 
   return {
     cmByName,
+    acquisitorByName,
     existingByUsername,
     cmNames: [...cmByName.values()].map((c) => c.name).sort((a, b) => a.localeCompare(b, "id")),
+    acquisitorNames: [...acquisitorByName.values()]
+      .map((a) => a.name)
+      .sort((a, b) => a.localeCompare(b, "id")),
   };
 }
 
@@ -85,8 +106,8 @@ async function loadContext(): Promise<ImportContext & { cmNames: string[] }> {
  */
 export async function downloadCreatorTemplate(): Promise<{ filename: string; base64: string }> {
   await requirePermission("creators.bulk_upload");
-  const { cmNames } = await loadContext();
-  const buffer = buildCreatorTemplate(cmNames);
+  const { cmNames, acquisitorNames } = await loadContext();
+  const buffer = buildCreatorTemplate(cmNames, acquisitorNames);
   return {
     filename: TEMPLATE_FILENAME,
     base64: Buffer.from(buffer).toString("base64"),

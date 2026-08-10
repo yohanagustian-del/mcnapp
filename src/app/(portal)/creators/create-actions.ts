@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { writeAudit } from "@/lib/audit";
-import { requirePermission, CM_ROLES, MANAGEMENT_ROLES } from "@/lib/rbac";
+import { requirePermission, ACQUISITION_ROLES, CM_ROLES, MANAGEMENT_ROLES } from "@/lib/rbac";
 import { genId } from "@/lib/utils/id";
 import { buildMasterCreatorRow, MANUAL_FIELDS } from "@/lib/creators/master-upload";
 
@@ -77,7 +77,29 @@ export async function createCreatorManual(
     }
     row.cm = cm.name;
 
-    const outcome = buildMasterCreatorRow(row, new Map([[cm.name.toLowerCase(), cm.id]]));
+    // Akuisitor OPSIONAL (beda dengan CM): kreator bisa masuk lewat jalur lain.
+    // Kalau diisi, id-nya divalidasi ke tabel Tim supaya form yang dirusak tidak
+    // bisa menautkan kreator ke anggota tim di luar grup akuisisi.
+    const acquisitorId = String(formData.get("acquisitor_id") ?? "").trim();
+    const acquisitorByName = new Map<string, string>();
+    if (acquisitorId) {
+      const { data: acq } = await admin
+        .from("team_members")
+        .select("id, name, role, active")
+        .eq("id", acquisitorId)
+        .maybeSingle();
+      if (!acq || !acq.active || !ACQUISITION_ROLES.includes(acq.role)) {
+        return { status: "error", message: "Akuisitor yang dipilih tidak aktif / bukan tim akuisisi." };
+      }
+      row.akuisitor = acq.name;
+      acquisitorByName.set(String(acq.name).toLowerCase(), acq.id);
+    }
+
+    const outcome = buildMasterCreatorRow(
+      row,
+      new Map([[cm.name.toLowerCase(), cm.id]]),
+      acquisitorByName
+    );
     if (outcome.kind !== "row") {
       return {
         status: "error",
@@ -94,7 +116,10 @@ export async function createCreatorManual(
     const likePattern = username.replace(/([\\%_])/g, "\\$1");
     const { data: existingRows, error: findError } = await admin
       .from("creators")
-      .select("id, name, username, status, platform, join_date, owner_cpm_id, team_members(name)")
+      // Dua FK ke team_members (CM + Akuisitor) → embed harus menyebut constraint.
+      .select(
+        "id, name, username, status, platform, join_date, owner_cpm_id, team_members!creators_owner_cpm_id_fkey(name)"
+      )
       .ilike("username", likePattern)
       .limit(5);
     if (findError) return { status: "error", message: `Gagal memeriksa username: ${findError.message}` };

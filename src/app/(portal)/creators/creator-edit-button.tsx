@@ -40,6 +40,7 @@ export interface EditableCreator {
   alamat: string | null;
   status: string;
   owner_cpm_id: string | null;
+  acquisitor_id: string | null;
 }
 
 /** Pilihan CM untuk dropdown "CM" (hanya tampil bila punya izin m8.assign_creator). */
@@ -155,11 +156,14 @@ function SectionTitle({ children }: { children: ReactNode }) {
 export function CreatorEditButton({
   creator,
   cms,
+  acquisitors,
   canAssignCm,
 }: {
   creator: EditableCreator;
   /** Daftar CM aktif — hanya dipakai kalau canAssignCm. */
   cms: EditCmOption[];
+  /** Anggota grup akuisisi aktif untuk dropdown Akuisitor. */
+  acquisitors: EditCmOption[];
   /** Izin m8.assign_creator: boleh memindah kreator antar CM. */
   canAssignCm: boolean;
 }) {
@@ -397,6 +401,22 @@ export function CreatorEditButton({
                   ))}
                 </SelectField>
               )}
+              {/* Akuisitor: anggota tim grup akuisisi yang membawa kreator ini
+                  masuk. Dropdown (bukan teks bebas) supaya namanya konsisten
+                  dengan menu Tim dan bisa dipakai rollup. */}
+              <SelectField
+                creatorId={creator.id}
+                name="acquisitor_id"
+                title="Akuisitor"
+                defaultValue={creator.acquisitor_id ?? ""}
+              >
+                <option value="">— belum ada akuisitor —</option>
+                {acquisitors.map((m) => (
+                  <option key={m.id} value={m.id}>
+                    {m.name}
+                  </option>
+                ))}
+              </SelectField>
 
               <SectionTitle>Lokasi</SectionTitle>
               <Field

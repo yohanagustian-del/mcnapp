@@ -38,6 +38,7 @@ const searchRowText = (r: CompactSlotRow) =>
     r.slot.status === "off" ? "" : r.slot.brand_name?.trim() || "Organik",
     r.slot.schedule_date,
     timeRange(r.slot),
+    r.slot.ads_note ?? "",
   ].join(" ");
 
 const rowCm = (r: CompactSlotRow) => ({ id: r.ownerCpmId ?? null, name: r.cmName ?? null });
@@ -52,6 +53,9 @@ const SORT: SortConfig<CompactSlotRow> = {
     kreator: { value: (r) => r.creatorName },
     brand: { value: (r) => (r.slot.status === "off" ? null : r.slot.brand_name?.trim() || "Organik") },
     jam: { value: (r) => r.slot.start_time },
+    // Catatan ads ditulis bebas ("Rp500rb", "invoicing MEA"); diurutkan sebagai
+    // teks, slot tanpa catatan (null) selalu jatuh ke bawah lewat sortRows.
+    catatan_ads: { value: (r) => r.slot.ads_note?.trim() || null },
     status: { value: (r) => r.slot.status },
   },
   // Default = urutan yang dipakai server (tanggal menaik).
@@ -93,6 +97,7 @@ export function CompactScheduleList({
   emptyLabel,
   filterable = false,
   searchable = false,
+  showAdsNote = false,
 }: {
   title: string;
   rows: CompactSlotRow[];
@@ -101,6 +106,12 @@ export function CompactScheduleList({
   filterable?: boolean;
   /** Search box tanpa filter multi-select. Implisit aktif kalau `filterable`. */
   searchable?: boolean;
+  /**
+   * Tampilkan kolom "Catatan Ads" (live_schedule_slots.ads_note — nominal /
+   * detail ads yang diisi di form slot). Dipakai CM Workspace; BizDev memakai
+   * daftar yang sama tanpa kolom ini supaya tabelnya tetap ringkas.
+   */
+  showAdsNote?: boolean;
 }) {
   // Opsi tanggal butuh todayIso untuk penanda "hari ini", jadi facet dibangun di sini
   // (dan di-memo — useTableControls memakai referensinya sebagai dependency).
@@ -143,7 +154,11 @@ export function CompactScheduleList({
 
       <TableFilterBar
         controls={controls}
-        searchPlaceholder="Cari kreator / brand / tanggal / jam…"
+        searchPlaceholder={
+          showAdsNote
+            ? "Cari kreator / brand / tanggal / jam / catatan ads…"
+            : "Cari kreator / brand / tanggal / jam…"
+        }
         className="mt-3"
       />
 
@@ -156,6 +171,11 @@ export function CompactScheduleList({
                 <SortableTh controls={controls} sortKey="kreator" className="px-3 py-2">Kreator</SortableTh>
                 <SortableTh controls={controls} sortKey="brand" className="px-3 py-2">Brand</SortableTh>
                 <SortableTh controls={controls} sortKey="jam" className="px-3 py-2">Jam</SortableTh>
+                {showAdsNote && (
+                  <SortableTh controls={controls} sortKey="catatan_ads" className="px-3 py-2">
+                    Catatan Ads
+                  </SortableTh>
+                )}
                 <SortableTh controls={controls} sortKey="status" className="px-3 py-2">Status</SortableTh>
               </tr>
             </thead>
@@ -173,6 +193,11 @@ export function CompactScheduleList({
                     </td>
                     <td className="px-3 py-2">{flags.isOff ? "—" : r.slot.brand_name?.trim() || "Organik"}</td>
                     <td className="px-3 py-2">{timeRange(r.slot)}</td>
+                    {showAdsNote && (
+                      <td className="max-w-[200px] truncate px-3 py-2" title={r.slot.ads_note ?? ""}>
+                        {r.slot.ads_note?.trim() || <span className="text-slate-300">—</span>}
+                      </td>
+                    )}
                     <td className="px-3 py-2">
                       <div className="flex flex-wrap gap-1">
                         {flags.isDone && <span className="text-green-600">✓ done</span>}
@@ -197,7 +222,7 @@ export function CompactScheduleList({
               })}
               {controls.visibleRows.length === 0 && (
                 <tr>
-                  <td colSpan={5} className="px-4 py-5 text-center text-slate-400">
+                  <td colSpan={showAdsNote ? 6 : 5} className="px-4 py-5 text-center text-slate-400">
                     {controls.filterActive
                       ? "Tidak ada jadwal yang cocok dengan pencarian kreator/brand/tanggal/jam atau filter yang aktif."
                       : emptyLabel}

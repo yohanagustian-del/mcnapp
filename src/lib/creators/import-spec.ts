@@ -56,6 +56,12 @@ export const IMPORT_COLUMNS: ImportColumn[] = [
     note: "WAJIB. Nama Creator Manager persis seperti terdaftar di menu Tim (contoh: Netta). Nama yang tidak terdaftar = baris ditolak.",
   },
   {
+    label: "Akuisitor",
+    aliases: ["akuisitor", "acquisitor", "namaakuisitor", "timakuisisi", "acquisitionspec"],
+    required: false,
+    note: "Opsional. Nama anggota tim AKUISISI (role Acquisition Specialist / Acquisition Lead) persis seperti terdaftar di menu Tim. Nama yang tidak terdaftar tidak menolak baris — kreator tetap tersimpan, kolom Akuisitor dibiarkan kosong dan dicatat sebagai catatan. Dikosongkan saat update = akuisitor lama TIDAK dihapus.",
+  },
+  {
     label: "Nama Creator",
     aliases: ["namacreator", "name", "nama"],
     required: false,
@@ -325,6 +331,12 @@ export interface ImportContext {
   /** nama CM (huruf kecil) → { id, name }. */
   cmByName: Map<string, { id: string; name: string }>;
   /**
+   * nama akuisitor (huruf kecil) → { id, name }, terbatas anggota grup akuisisi
+   * yang aktif. Kolom Akuisitor opsional, jadi nama asing = peringatan (baris
+   * tetap tersimpan), bukan error seperti kolom CM.
+   */
+  acquisitorByName: Map<string, { id: string; name: string }>;
+  /**
    * username (huruf kecil) → kreator yang sudah ada.
    * `commissionShare` (fraksi, null = belum terisi) dipakai kebijakan
    * "isi kalau kosong saja" di resolveCommissionShare.
@@ -452,12 +464,26 @@ export function buildImportRows(
 
     const payload = buildPayload(values, username, cm.id);
 
+    // Akuisitor: kolom opsional, jadi nama yang tidak terdaftar TIDAK menolak
+    // baris (beda dengan CM) — kreator tetap masuk, kolomnya dibiarkan apa
+    // adanya, dan salah ketiknya dilaporkan sebagai peringatan di preview.
+    const acquisitorRaw = (values["Akuisitor"] ?? "").trim();
+    const acquisitor = acquisitorRaw
+      ? ctx.acquisitorByName.get(acquisitorRaw.toLowerCase())
+      : undefined;
+    if (acquisitor) payload.acquisitor_id = acquisitor.id;
+
     // Sharing komisi diputuskan di sini (bukan di buildPayload) karena butuh
     // nilai yang sudah ada di DB: kebijakannya "isi kalau kosong saja".
     const share = resolveCommissionShare(values["Sharing Komisi"] ?? "", existing?.commissionShare);
     if (share.value !== null) payload.commission_share = share.value;
 
     const warnings: string[] = share.warning ? [share.warning] : [];
+    if (acquisitorRaw && !acquisitor) {
+      warnings.push(
+        `Akuisitor "${acquisitorRaw}" tidak terdaftar sebagai tim akuisisi — kolom Akuisitor diabaikan (daftarkan dulu di menu Tim)`
+      );
+    }
 
     // Kelas kreator: kosong → Reguler untuk kreator BARU. Kreator yang sudah ada
     // TIDAK diturunkan kelasnya hanya karena selnya kosong — itu aturan umum

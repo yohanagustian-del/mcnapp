@@ -128,7 +128,8 @@ export default async function LinkLeakagePage({
         ? fetchAll<RollupRow>(
             supabase,
             "creator_link_status",
-            "creator_id, gmv_deal_total, gmv_bocor, gmv_bocor_shop_basis, leak_ratio, link_status, source, creators(name, creator_class, owner_cpm_id, team_members(name))",
+            // Dua FK creators→team_members (CM + Akuisitor): embed CM harus eksplisit.
+            "creator_id, gmv_deal_total, gmv_bocor, gmv_bocor_shop_basis, leak_ratio, link_status, source, creators(name, creator_class, owner_cpm_id, team_members!creators_owner_cpm_id_fkey(name))",
             (q) => q.eq("week", latestWeek).order("leak_ratio", { ascending: false, nullsFirst: false })
           )
         : Promise.resolve([] as RollupRow[]),

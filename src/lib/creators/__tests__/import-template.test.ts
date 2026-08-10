@@ -11,11 +11,12 @@ import { parseSheet } from "@/lib/utils/sheet";
 
 const ctx: ImportContext = {
   cmByName: new Map([["netta", { id: "uuid-netta", name: "Netta" }]]),
+  acquisitorByName: new Map([["rani", { id: "uuid-rani", name: "Rani" }]]),
   existingByUsername: new Map(),
 };
 
 function templateWorkbook() {
-  return XLSX.read(buildCreatorTemplate(["Netta", "Gabriel"]), { type: "array" });
+  return XLSX.read(buildCreatorTemplate(["Netta", "Gabriel"], ["Rani"]), { type: "array" });
 }
 
 describe("buildCreatorTemplate", () => {
@@ -40,6 +41,14 @@ describe("buildCreatorTemplate", () => {
     expect(guide).toContain("CM*,WAJIB");
     expect(guide).toContain("Nama Creator,opsional");
     expect(guide).toContain("Netta");
+  });
+
+  /** Kolom Akuisitor opsional: aturan + daftar nama harus ada di dalam file. */
+  it("sheet Petunjuk menerangkan kolom Akuisitor dan daftar namanya", () => {
+    const guide = XLSX.utils.sheet_to_csv(templateWorkbook().Sheets.Petunjuk);
+    expect(guide).toContain("Akuisitor,opsional");
+    expect(guide).toContain("Nama Akuisitor yang terdaftar");
+    expect(guide).toContain("Rani");
   });
 
   /** Kelas "Eksternal" harus dijelaskan DI DALAM file — pengisi sheet tak lihat UI. */

@@ -108,7 +108,9 @@ export type MasterRowOutcome =
  */
 export function buildMasterCreatorRow(
   raw: Record<string, string>,
-  cmByName: Map<string, string>
+  cmByName: Map<string, string>,
+  /** nama akuisitor (huruf kecil) → team_members.id; kosong = kolom diabaikan. */
+  acquisitorByName: Map<string, string> = new Map()
 ): MasterRowOutcome {
   if (Object.values(raw).every((v) => String(v ?? "").trim() === "")) return { kind: "empty" };
 
@@ -120,10 +122,26 @@ export function buildMasterCreatorRow(
 
   const cmName = pick(raw, ["cm", "nama_cm", "creator_manager", "cpm"]);
   const cmId = cmName ? cmByName.get(cmName.toLowerCase()) : undefined;
-  const note =
-    cmName && !cmId
-      ? `CM "${cmName}" tidak terdaftar di Tim — kreator tetap disimpan, kolom CM dibiarkan kosong`
-      : null;
+
+  // Akuisitor = anggota tim grup akuisisi. Sama seperti CM: nama yang tidak
+  // terdaftar TIDAK menggagalkan baris, hanya dicatat sebagai catatan review.
+  const acquisitorName = pick(raw, ["akuisitor", "acquisitor", "nama_akuisitor"]);
+  const acquisitorId = acquisitorName
+    ? acquisitorByName.get(acquisitorName.toLowerCase())
+    : undefined;
+
+  const notes: string[] = [];
+  if (cmName && !cmId) {
+    notes.push(
+      `CM "${cmName}" tidak terdaftar di Tim — kreator tetap disimpan, kolom CM dibiarkan kosong`
+    );
+  }
+  if (acquisitorName && !acquisitorId) {
+    notes.push(
+      `Akuisitor "${acquisitorName}" tidak terdaftar sebagai tim akuisisi — kreator tetap disimpan, kolom Akuisitor dibiarkan kosong`
+    );
+  }
+  const note = notes.length ? notes.join(" · ") : null;
 
   const nicheRaw = pickPrefix(raw, ["niche_(", "niche"]) || pick(raw, ["niches", "top_niches"]);
   const topNiches = parseNiches(nicheRaw);
@@ -139,6 +157,7 @@ export function buildMasterCreatorRow(
     name,
     username,
     owner_cpm_id: cmId ?? null,
+    acquisitor_id: acquisitorId ?? null,
     profile_link: pick(raw, ["link_akun", "link_profile", "profile_link"]) || null,
     phone: pick(raw, ["no_hp", "phone"]) || null,
     tim_akuisisi: pick(raw, ["tim_akuisisi"]) || null,

@@ -3,7 +3,13 @@
 import { revalidatePath } from "next/cache";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { writeAudit } from "@/lib/audit";
-import { requirePermission, hasPermission, CM_ROLES, MANAGEMENT_ROLES } from "@/lib/rbac";
+import {
+  requirePermission,
+  hasPermission,
+  ACQUISITION_ROLES,
+  CM_ROLES,
+  MANAGEMENT_ROLES,
+} from "@/lib/rbac";
 import { genId } from "@/lib/utils/id";
 import { parseSheet } from "@/lib/utils/sheet";
 import { parseRupiah } from "@/lib/utils/rupiah";
@@ -53,6 +59,19 @@ export async function uploadCreators(formData: FormData): Promise<UploadReport> 
   const cmByName = new Map<string, string>();
   for (const m of members ?? []) if (m.name) cmByName.set(String(m.name).trim().toLowerCase(), m.id);
 
+  // Kolom "Akuisitor" juga berisi NAMA → di-resolve ke team_members.id
+  // (creators.acquisitor_id), terbatas pada anggota grup akuisisi yang aktif.
+  const { data: acquisitors, error: acquisitorError } = await admin
+    .from("team_members")
+    .select("id, name")
+    .in("role", ACQUISITION_ROLES)
+    .eq("active", true);
+  if (acquisitorError) throw new Error(`Gagal memuat daftar Akuisitor: ${acquisitorError.message}`);
+  const acquisitorByName = new Map<string, string>();
+  for (const m of acquisitors ?? []) {
+    if (m.name) acquisitorByName.set(String(m.name).trim().toLowerCase(), m.id);
+  }
+
   // Existing creators for upsert matching (username first, then display name).
   // Paginated: PostgREST caps one select at 1000 rows and ignores a larger
   // .limit(), so a bare select would hide every creator past row 1000 and turn
@@ -71,7 +90,7 @@ export async function uploadCreators(formData: FormData): Promise<UploadReport> 
   for (const [i, raw] of rows.entries()) {
     const rowNum = i + 2;
 
-    const outcome = buildMasterCreatorRow(raw, cmByName);
+    const outcome = buildMasterCreatorRow(raw, cmByName, acquisitorByName);
     // Baris kosong (baris contoh template / baris sela) dilewati diam-diam —
     // bukan kesalahan yang perlu diperbaiki user.
     if (outcome.kind === "empty") continue;
@@ -270,6 +289,26 @@ export async function updateCreatorProfile(
   };
 
   const admin = createAdminClient();
+
+  // Akuisitor (acquisitor_id) = anggota grup akuisisi. Divalidasi ke tabel Tim
+  // supaya kolomnya tidak bisa diisi id sembarangan lewat form yang dirusak;
+  // dikosongkan = kreator tanpa akuisitor.
+  if (formData.has("acquisitor_id")) {
+    const acqId = String(formData.get("acquisitor_id") ?? "").trim();
+    if (acqId) {
+      const { data: acq } = await admin
+        .from("team_members")
+        .select("id, role, active")
+        .eq("id", acqId)
+        .maybeSingle();
+      if (!acq || !acq.active || !ACQUISITION_ROLES.includes(acq.role)) {
+        return { ok: false, error: "Akuisitor yang dipilih tidak aktif / bukan tim akuisisi" };
+      }
+      payload.acquisitor_id = acqId;
+    } else {
+      payload.acquisitor_id = null;
+    }
+  }
 
   // CM (owner_cpm_id) punya izin sendiri — m8.assign_creator, bukan creators.edit
   // (staff yang boleh membetulkan no HP tidak otomatis boleh memindah kreator

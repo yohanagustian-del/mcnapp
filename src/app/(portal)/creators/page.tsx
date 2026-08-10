@@ -1,4 +1,4 @@
-import { requireMember, hasPermission } from "@/lib/rbac";
+import { requireMember, hasPermission, ACQUISITION_ROLES } from "@/lib/rbac";
 import { createClient } from "@/lib/supabase/server";
 import { fetchAll } from "@/lib/supabase/fetch-all";
 import { loadCreatorsWithoutCm } from "@/lib/creators/without-cm";
@@ -14,12 +14,19 @@ import { CmRequestsPanel } from "./cm-requests-panel";
 
 export const dynamic = "force-dynamic";
 
-/** Raw creators row as selected below (team_members join = CM name). */
-type CreatorRow = Omit<CreatorTableRow, "cmName"> & {
+/**
+ * Raw creators row as selected below.
+ *
+ * `creators` punya DUA foreign key ke `team_members` (owner_cpm_id = CM,
+ * acquisitor_id = Akuisitor), jadi setiap embed WAJIB menyebut nama constraint —
+ * `team_members(name)` polos akan ditolak PostgREST sebagai relasi ambigu.
+ */
+type CreatorRow = Omit<CreatorTableRow, "cmName" | "acquisitorName"> & {
   segment: string | null;
   tim_akuisisi: string | null;
   target_gmv_monthly: number | null;
   team_members: { name?: string } | null;
+  acquisitor: { name?: string } | null;
 };
 
 export default async function CreatorsPage() {
@@ -41,7 +48,7 @@ export default async function CreatorsPage() {
   const creators = await fetchAll<CreatorRow>(
     supabase,
     "creators",
-    "id, name, username, profile_link, phone, uid, followers, content_quality, join_date, domisili, alamat, jenis_creator, creator_class, niche, top_niches, level, segment, gmv, gmv_live, gmv_video, platform, rc_live, rc_video, rate_card, commission_share, contract_end_date, status, tim_akuisisi, target_gmv_monthly, owner_cpm_id, team_members(name)",
+    "id, name, username, profile_link, phone, uid, followers, content_quality, join_date, domisili, alamat, jenis_creator, creator_class, niche, top_niches, level, segment, gmv, gmv_live, gmv_video, platform, rc_live, rc_video, rate_card, commission_share, contract_end_date, status, tim_akuisisi, target_gmv_monthly, owner_cpm_id, acquisitor_id, team_members!creators_owner_cpm_id_fkey(name), acquisitor:team_members!creators_acquisitor_id_fkey(name)",
     (q) => q.order("created_at", { ascending: false })
   );
 
@@ -74,6 +81,8 @@ export default async function CreatorsPage() {
     status: c.status,
     owner_cpm_id: c.owner_cpm_id,
     cmName: c.team_members?.name ?? null,
+    acquisitor_id: c.acquisitor_id,
+    acquisitorName: c.acquisitor?.name ?? null,
   }));
 
   // Kreator tanpa CM (mis. dibuat otomatis dari upload data platform mingguan).
@@ -98,6 +107,19 @@ export default async function CreatorsPage() {
         .order("name")
     : { data: [] as { id: string; name: string }[] };
 
+  // Pilihan Akuisitor = anggota grup "acquisition" (role acquisition_spec /
+  // acquisition_lead). Daftarnya dari tabel Tim, bukan teks bebas, supaya nama
+  // akuisitor tidak lagi ditulis dengan ejaan berbeda-beda seperti di sheet lama.
+  const { data: activeAcquisitors } = canUpload || canEdit
+    ? await supabase
+        .from("team_members")
+        .select("id, name")
+        .in("role", ACQUISITION_ROLES)
+        .eq("active", true)
+        .order("name")
+    : { data: [] as { id: string; name: string }[] };
+  const acquisitorOptions = (activeAcquisitors ?? []).map((m) => ({ id: m.id, name: m.name }));
+
   // CM options for the multi-select — derived from the creators actually listed (the
   // team_members join already resolves owner_cpm_id → CM name), so the dropdown never
   // offers a CM with zero creators in view.
@@ -117,6 +139,7 @@ export default async function CreatorsPage() {
           {canUpload && (
             <CreatorCreateDialog
               cms={(activeCms ?? []).map((m) => ({ id: m.id, name: m.name }))}
+              acquisitors={acquisitorOptions}
             />
           )}
         </div>
@@ -131,7 +154,7 @@ export default async function CreatorsPage() {
               {" "}
               CM bisa mengedit SEMUA data master kreator (username, nama, no HP, link akun, UID,
               platform, jenis, kelas kreator, niche, followers, kualitas, level, RC live/video, rate
-              card, join date, end date, domisili, alamat, status
+              card, join date, end date, domisili, alamat, status, akuisitor
               {canAssignCm && ", CM pemilik"}) lewat tombol <strong>Edit</strong> di setiap baris —
               setiap perubahan tercatat di audit log. Yang tidak bisa diedit hanya sharing komisi
               (sync platform) dan GMV (hasil hitung upload mingguan).
@@ -198,7 +221,7 @@ export default async function CreatorsPage() {
               <CsvUploadForm
                 action={uploadCreators}
                 buttonLabel="Upload Master Data Creator"
-                helpText="Terima sheet 'data creator' asli (xlsx/csv, header Indonesia: Username, Nama Creator, No HP, UID, Followers, Join Date, End Date, Niche (kategori 2), RC Live, RC Video, dll) MAUPUN template Import Kreator hasil download (Username*, CM*, …) — kolom CM ikut terbaca. Username WAJIB (jadi kunci pencocokan): baris tanpa username dilewati, baris tanpa Nama Creator tetap masuk memakai username sebagai nama. Match by Username → update; belum ada → dibuat baru. GMV & sharing komisi TIDAK diambil dari sheet."
+                helpText="Terima sheet 'data creator' asli (xlsx/csv, header Indonesia: Username, Nama Creator, No HP, UID, Followers, Join Date, End Date, Niche (kategori 2), RC Live, RC Video, dll) MAUPUN template Import Kreator hasil download (Username*, CM*, Akuisitor, …) — kolom CM & Akuisitor ikut terbaca (isi nama persis seperti di menu Tim; nama asing hanya diabaikan, baris tetap masuk). Username WAJIB (jadi kunci pencocokan): baris tanpa username dilewati, baris tanpa Nama Creator tetap masuk memakai username sebagai nama. Match by Username → update; belum ada → dibuat baru. GMV & sharing komisi TIDAK diambil dari sheet."
               />
             </div>
           </div>
@@ -217,6 +240,7 @@ export default async function CreatorsPage() {
             canDelete={canDelete}
             canAssignCm={canAssignCm}
             cmOptions={(activeCms ?? []).map((m) => ({ id: m.id, name: m.name }))}
+            acquisitorOptions={acquisitorOptions}
             canRequestCm={canRequestCm}
             viewerId={member.id}
             requestedCreatorIds={cmRequests.myPendingCreatorIds}

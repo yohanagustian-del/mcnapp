@@ -1,7 +1,7 @@
 "use client";
 
 import {
-  PAGE_SIZES_10_50_100,
+  PAGE_SIZE_10,
   SortableTh,
   TablePagination,
   useTableControls,
@@ -9,33 +9,34 @@ import {
 } from "@/components/table-controls";
 
 /**
- * Satu baris Performa per Kreator — angkanya sudah dijumlahkan di server dari
- * project_creator_metrics (GMV & item per peserta) dan dibandingkan dengan target
- * peserta + total GMV project. Komponen ini hanya urut + paginasi.
+ * Satu baris Performa per CM — ROLLUP dari tabel Performa per Kreator (baris
+ * kreator dikelompokkan berdasarkan CM pemiliknya, `creators.owner_cpm_id`).
+ * Angkanya sudah dijumlahkan di server; komponen ini hanya urut + paginasi
+ * (CLAUDE.md #4: tidak ada perhitungan ulang di UI).
  */
-export interface CreatorPerformanceRow {
-  creatorId: string;
-  creatorName: string;
-  /** CM pemilik kreator (creators.owner_cpm_id) — dasar rollup Performa per CM. */
+export interface CmPerformanceRow {
+  /** team_members.id; null = kumpulan kreator yang belum punya CM. */
   cmId: string | null;
-  cmName: string | null;
+  cmName: string;
+  creatorCount: number;
+  /** Jumlah target kreator di bawah CM ini; null = tidak ada yang punya target. */
   targetGmv: number | null;
   gmv: number;
   items: number;
-  /** GMV / target; null = peserta tanpa target. */
+  /** GMV / target gabungan; null = tanpa target. */
   pctTarget: number | null;
-  /** GMV peserta / total GMV project. */
+  /** Jumlah kontribusi kreator-kreatornya terhadap total GMV project. */
   contribution: number;
 }
 
 const rupiah = (n: number | null | undefined) =>
   n === null || n === undefined ? "—" : `Rp${Math.round(Number(n)).toLocaleString("id-ID")}`;
 
-/** GMV aktual default turun: yang paling berkontribusi muncul lebih dulu. */
-const SORT: SortConfig<CreatorPerformanceRow> = {
+/** GMV aktual default turun: CM penyumbang terbesar muncul lebih dulu. */
+const SORT: SortConfig<CmPerformanceRow> = {
   columns: {
-    creator: { value: (r) => r.creatorName },
     cm: { value: (r) => r.cmName },
+    kreator: { value: (r) => r.creatorCount, firstDir: "desc" },
     target: { value: (r) => r.targetGmv, firstDir: "desc" },
     gmv: { value: (r) => r.gmv, firstDir: "desc" },
     items: { value: (r) => r.items, firstDir: "desc" },
@@ -45,13 +46,13 @@ const SORT: SortConfig<CreatorPerformanceRow> = {
   initial: { key: "gmv", dir: "desc" },
 };
 
-/** Performa per Kreator: klik header untuk urut naik/turun, paginasi 10/50/100. */
-export function CreatorPerformanceTable({ rows }: { rows: CreatorPerformanceRow[] }) {
-  const controls = useTableControls<CreatorPerformanceRow>({
+/** Performa per CM: klik header untuk urut naik/turun, 10 baris per halaman. */
+export function CmPerformanceTable({ rows }: { rows: CmPerformanceRow[] }) {
+  const controls = useTableControls<CmPerformanceRow>({
     rows,
     sort: SORT,
-    pageSizes: PAGE_SIZES_10_50_100,
-    itemLabel: "kreator",
+    pageSizes: PAGE_SIZE_10,
+    itemLabel: "CM",
   });
 
   return (
@@ -60,8 +61,8 @@ export function CreatorPerformanceTable({ rows }: { rows: CreatorPerformanceRow[
         <table className="min-w-full text-sm">
           <thead className="bg-slate-50 text-left text-xs uppercase text-slate-500">
             <tr>
-              <SortableTh controls={controls} sortKey="creator">Creator</SortableTh>
               <SortableTh controls={controls} sortKey="cm">CM</SortableTh>
+              <SortableTh controls={controls} sortKey="kreator">Jumlah Kreator</SortableTh>
               <SortableTh controls={controls} sortKey="target">Target GMV</SortableTh>
               <SortableTh controls={controls} sortKey="gmv">GMV Aktual</SortableTh>
               <SortableTh controls={controls} sortKey="items">Item Terjual</SortableTh>
@@ -71,14 +72,16 @@ export function CreatorPerformanceTable({ rows }: { rows: CreatorPerformanceRow[
           </thead>
           <tbody className="divide-y divide-slate-100">
             {controls.visibleRows.map((r) => (
-              <tr key={r.creatorId}>
+              <tr key={r.cmId ?? "__tanpa_cm__"}>
                 <td className="px-4 py-2 font-medium">
-                  {r.creatorName}
-                  <span className="ml-1 text-xs text-slate-400">{r.creatorId}</span>
+                  {r.cmName}
+                  {r.cmId === null && (
+                    <span className="ml-1 text-xs font-normal text-amber-700">
+                      (kreator belum punya CM)
+                    </span>
+                  )}
                 </td>
-                <td className="px-4 py-2">
-                  {r.cmName ?? <span className="text-amber-700">Belum ada CM</span>}
-                </td>
+                <td className="px-4 py-2">{r.creatorCount}</td>
                 <td className="px-4 py-2">{rupiah(r.targetGmv)}</td>
                 <td className="px-4 py-2">{rupiah(r.gmv)}</td>
                 <td className="px-4 py-2">{r.items || "—"}</td>

@@ -119,8 +119,10 @@ export function CreatorImportPanel() {
       <p className="mt-2 text-xs text-slate-500">
         Kolom wajib: <strong>Username</strong> dan <strong>CM</strong>. Username yang sudah ada di
         sistem akan <strong>diganti CM-nya</strong> dengan CM di file (replace, bukan tambah);
-        username baru dibuat sebagai kreator baru. Data ditampilkan sebagai preview dulu — tidak ada
-        yang tersimpan sebelum Anda menekan Simpan.
+        username baru dibuat sebagai kreator baru. Kolom <strong>Akuisitor</strong> opsional — isi
+        nama anggota tim akuisisi persis seperti di menu <strong>Tim</strong>; nama yang tidak
+        terdaftar tidak menolak baris, hanya diabaikan dan muncul sebagai catatan di preview. Data
+        ditampilkan sebagai preview dulu — tidak ada yang tersimpan sebelum Anda menekan Simpan.
       </p>
 
       {error && <p className="mt-3 rounded-md bg-red-50 p-3 text-sm text-red-700">{error}</p>}

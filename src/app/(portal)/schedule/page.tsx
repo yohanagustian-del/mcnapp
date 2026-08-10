@@ -62,7 +62,8 @@ async function fetchAllCreators(
   for (let from = 0; ; from += PAGE) {
     const { data, error } = await supabase
       .from("creators")
-      .select("id, name, username, owner_cpm_id, jenis_creator, live_roster, team_members(name)")
+      // Dua FK creators→team_members (CM + Akuisitor): embed CM harus eksplisit.
+      .select("id, name, username, owner_cpm_id, jenis_creator, live_roster, team_members!creators_owner_cpm_id_fkey(name)")
       .order("live_roster", { ascending: false })
       .order("name", { ascending: true })
       .order("id", { ascending: true })

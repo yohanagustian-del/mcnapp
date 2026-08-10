@@ -26,7 +26,10 @@ const EXAMPLE_ROWS = 2;
  * tersedia di build xlsx komunitas, dan parser menormalisasi header sehingga
  * "Username*" tetap terbaca sebagai kolom username.
  */
-export function buildCreatorTemplate(cmNames: string[] = []): ArrayBuffer {
+export function buildCreatorTemplate(
+  cmNames: string[] = [],
+  acquisitorNames: string[] = []
+): ArrayBuffer {
   const wb = XLSX.utils.book_new();
 
   const header = IMPORT_COLUMNS.map((c) => c.label);
@@ -62,6 +65,12 @@ export function buildCreatorTemplate(cmNames: string[] = []): ArrayBuffer {
     [`  ("External" dalam bahasa Inggris juga terbaca sebagai ${CREATOR_CLASS_LABEL.eksternal}.)`],
     ["Sharing Komisi hanya MENGISI yang masih kosong. Nilai yang sudah ada tidak ditimpa dari file"],
     ["(read-only, sync platform) dan selisihnya dicatat sebagai alert, bukan diterapkan."],
+    // Kolom Akuisitor: aturannya beda dengan CM* (opsional + nama asing tidak
+    // menolak baris), jadi ditulis eksplisit — pengisi sheet tidak melihat UI.
+    ["Kolom Akuisitor diisi NAMA anggota tim akuisisi (role Acquisition Specialist / Acquisition Lead),"],
+    ["persis seperti terdaftar di menu Tim. Kolomnya OPSIONAL: berbeda dengan CM*, nama yang tidak"],
+    ["terdaftar TIDAK menolak baris — kreator tetap tersimpan, kolom Akuisitor dibiarkan kosong dan"],
+    ["salah ketiknya muncul sebagai catatan di preview. Dikosongkan saat update = akuisitor lama tetap."],
     [],
     ["Kolom", "Wajib", "Keterangan"],
     ...IMPORT_COLUMNS.map((c) => [c.label, c.required ? "WAJIB" : "opsional", c.note]),
@@ -69,6 +78,16 @@ export function buildCreatorTemplate(cmNames: string[] = []): ArrayBuffer {
 
   if (cmNames.length > 0) {
     guide.push([], ["Nama CM yang terdaftar (salin persis ke kolom CM*)"], ...cmNames.map((n) => [n]));
+  }
+
+  if (acquisitorNames.length > 0) {
+    guide.push(
+      [],
+      ["Nama Akuisitor yang terdaftar (salin persis ke kolom Akuisitor)"],
+      ...acquisitorNames.map((n) => [n])
+    );
+  } else {
+    guide.push([], ["Belum ada anggota tim akuisisi aktif di menu Tim — kolom Akuisitor akan diabaikan."]);
   }
 
   const guideSheet = XLSX.utils.aoa_to_sheet(guide);
