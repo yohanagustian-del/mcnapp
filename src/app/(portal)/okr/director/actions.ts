@@ -26,6 +26,115 @@ export type TargetUnit = (typeof TARGET_UNITS)[number];
  * Mengembalikan {ok,error} (tidak melempar) — pesan error dilempar akan disensor
  * Next.js di production, sedangkan form ini butuh pesan yang bisa dibaca Director.
  */
+interface OkrSettingInput {
+  okrName: string;
+  objectiveIdRaw: string;
+  objectiveNew: string;
+  keyResult: string;
+  target: number;
+  targetUnit: TargetUnit;
+}
+
+/**
+ * Validasi field OKR Setting yang dipakai bersama form tambah & form edit.
+ * Mengembalikan pesan siap tampil (string) kalau ada yang salah.
+ */
+function readOkrSettingInput(formData: FormData): OkrSettingInput | string {
+  const okrName        = String(formData.get("okr_name") ?? "").trim();
+  const objectiveIdRaw = String(formData.get("objective_id") ?? "").trim();
+  const objectiveNew   = String(formData.get("objective_new") ?? "").trim();
+  const keyResult      = String(formData.get("key_result") ?? "").trim();
+  const targetRaw      = String(formData.get("target") ?? "").trim();
+  const unitRaw        = String(formData.get("target_unit") ?? "angka").trim();
+
+  if (!okrName) return "Nama OKR wajib diisi (mis. \"OKR divisi CM\").";
+  if (okrName.length > 120) return "Nama OKR maksimal 120 karakter.";
+  if (!objectiveIdRaw && !objectiveNew) return "Pilih Objective yang sudah ada, atau tulis Objective baru.";
+  if (!keyResult) return "Key Result wajib diisi.";
+  if (objectiveNew.length > 2000 || keyResult.length > 2000) {
+    return "Objective / Key Result maksimal 2000 karakter.";
+  }
+  if (!targetRaw) return "Target wajib diisi (mis. 85000000).";
+
+  // Toleran terhadap "Rp100.000.000" / "100.000.000" / "85000000,5" (CLAUDE.md #7).
+  const target = parseRupiah(targetRaw);
+  if (target === null) return `Target "${targetRaw}" bukan angka yang valid.`;
+  if (target < 0) return "Target tidak boleh negatif.";
+
+  const targetUnit: TargetUnit = (TARGET_UNITS as readonly string[]).includes(unitRaw)
+    ? (unitRaw as TargetUnit)
+    : "angka";
+  if (targetUnit === "persen" && target > 100) return "Target persen maksimal 100.";
+
+  return { okrName, objectiveIdRaw, objectiveNew, keyResult, target, targetUnit };
+}
+
+type AdminClient = ReturnType<typeof createAdminClient>;
+
+/**
+ * Nama OKR dikanonikalkan ke ejaan yang sudah tersimpan bila hanya beda huruf
+ * besar/kecil — supaya "OKR divisi CM" dan "okr divisi cm" tidak jadi dua grup
+ * terpisah di tabel (masalah varian ejaan, CLAUDE.md #6).
+ */
+async function canonicalOkrName(admin: AdminClient, okrName: string): Promise<string> {
+  const key = okrName.trim().toLowerCase();
+  const { data } = await admin.from("okr_objectives").select("okr_name");
+  return (data ?? []).find((r) => String(r.okr_name).trim().toLowerCase() === key)?.okr_name ?? okrName;
+}
+
+/**
+ * Cari (atau buat) Objective untuk pasangan nama OKR + paragraf Objective.
+ * Dipakai form tambah maupun form edit, jadi keduanya tidak bisa lahir aturan
+ * pencocokan yang berbeda. Mengembalikan id, atau string pesan error.
+ */
+async function resolveObjective(
+  admin: AdminClient,
+  input: OkrSettingInput,
+  okrNameFinal: string,
+  actorId: string
+): Promise<number | string> {
+  if (input.objectiveNew) {
+    // Objective baru: kalau paragraf yang sama sudah ada di nama OKR ini, pakai
+    // yang lama (unique index okr_objectives_uniq) — jangan bikin kembar.
+    const { data: existing } = await admin
+      .from("okr_objectives")
+      .select("id")
+      .eq("okr_name", okrNameFinal)
+      .eq("objective", input.objectiveNew)
+      .maybeSingle();
+    if (existing) return existing.id;
+
+    const { data, error } = await admin
+      .from("okr_objectives")
+      .insert({ okr_name: okrNameFinal, objective: input.objectiveNew, created_by: actorId })
+      .select("id")
+      .single();
+    if (error) return `Gagal simpan Objective: ${error.message}`;
+
+    await writeAudit({
+      actorId, action: "m3.create_okr_objective", entityType: "okr_objectives",
+      entityId: String(data.id),
+      after: { okr_name: okrNameFinal, objective: input.objectiveNew },
+      type: "approval",
+    });
+    return data.id;
+  }
+
+  // Objective pilihan dropdown harus benar-benar ada dan cocok dengan nama OKR
+  // yang tertulis — mencegah KR nempel ke OKR divisi lain karena nama diedit
+  // setelah dropdown dipilih.
+  const { data: obj } = await admin
+    .from("okr_objectives")
+    .select("id, okr_name")
+    .eq("id", Number(input.objectiveIdRaw))
+    .maybeSingle();
+  if (!obj) return "Objective yang dipilih tidak ditemukan.";
+  if (obj.okr_name !== okrNameFinal) {
+    return `Objective ini milik "${obj.okr_name}". Ganti nama OKR atau tulis Objective baru.`;
+  }
+  return obj.id;
+}
+
 export async function saveOkrSetting(formData: FormData): Promise<ActionResult> {
   let actorId: string;
   try {
@@ -35,103 +144,21 @@ export async function saveOkrSetting(formData: FormData): Promise<ActionResult> 
     return { ok: false, error: (e as Error).message };
   }
 
-  const okrName      = String(formData.get("okr_name") ?? "").trim();
-  const objectiveIdRaw = String(formData.get("objective_id") ?? "").trim();
-  const objectiveNew = String(formData.get("objective_new") ?? "").trim();
-  const keyResult    = String(formData.get("key_result") ?? "").trim();
-  const targetRaw    = String(formData.get("target") ?? "").trim();
-  const unitRaw      = String(formData.get("target_unit") ?? "angka").trim();
-
-  if (!okrName) return { ok: false, error: "Nama OKR wajib diisi (mis. \"OKR divisi CM\")." };
-  if (okrName.length > 120) return { ok: false, error: "Nama OKR maksimal 120 karakter." };
-  if (!objectiveIdRaw && !objectiveNew) {
-    return { ok: false, error: "Pilih Objective yang sudah ada, atau tulis Objective baru." };
-  }
-  if (!keyResult) return { ok: false, error: "Key Result wajib diisi." };
-  if (objectiveNew.length > 2000 || keyResult.length > 2000) {
-    return { ok: false, error: "Objective / Key Result maksimal 2000 karakter." };
-  }
-  if (!targetRaw) return { ok: false, error: "Target wajib diisi (mis. 85000000)." };
-
-  // Toleran terhadap "Rp100.000.000" / "100.000.000" / "85000000,5" (CLAUDE.md #7).
-  const target = parseRupiah(targetRaw);
-  if (target === null) return { ok: false, error: `Target "${targetRaw}" bukan angka yang valid.` };
-  if (target < 0) return { ok: false, error: "Target tidak boleh negatif." };
-
-  const targetUnit: TargetUnit = (TARGET_UNITS as readonly string[]).includes(unitRaw)
-    ? (unitRaw as TargetUnit)
-    : "angka";
-  if (targetUnit === "persen" && target > 100) {
-    return { ok: false, error: "Target persen maksimal 100." };
-  }
+  const input = readOkrSettingInput(formData);
+  if (typeof input === "string") return { ok: false, error: input };
 
   const admin = createAdminClient();
-
-  // Nama OKR dikanonikalkan ke ejaan yang sudah tersimpan bila hanya beda
-  // huruf besar/kecil — supaya "OKR divisi CM" dan "okr divisi cm" tidak jadi
-  // dua grup terpisah di tabel (masalah varian ejaan, CLAUDE.md #6).
-  const { data: existingNames } = await admin.from("okr_objectives").select("okr_name");
-  const okrNameKey = okrName.toLowerCase();
-  const okrNameFinal =
-    (existingNames ?? []).find((r) => String(r.okr_name).trim().toLowerCase() === okrNameKey)?.okr_name ??
-    okrName;
-
-  let objectiveId: number;
-
-  if (objectiveNew) {
-    // Objective baru: kalau paragraf yang sama sudah ada di nama OKR ini, pakai
-    // yang lama (unique index okr_objectives_uniq) — jangan bikin kembar.
-    const { data: existing } = await admin
-      .from("okr_objectives")
-      .select("id")
-      .eq("okr_name", okrNameFinal)
-      .eq("objective", objectiveNew)
-      .maybeSingle();
-
-    if (existing) {
-      objectiveId = existing.id;
-    } else {
-      const { data, error } = await admin
-        .from("okr_objectives")
-        .insert({ okr_name: okrNameFinal, objective: objectiveNew, created_by: actorId })
-        .select("id")
-        .single();
-      if (error) return { ok: false, error: `Gagal simpan Objective: ${error.message}` };
-      objectiveId = data.id;
-
-      await writeAudit({
-        actorId, action: "m3.create_okr_objective", entityType: "okr_objectives",
-        entityId: String(objectiveId),
-        after: { okr_name: okrNameFinal, objective: objectiveNew },
-        type: "approval",
-      });
-    }
-  } else {
-    // Objective pilihan dropdown harus benar-benar ada dan cocok dengan nama OKR
-    // yang tertulis — mencegah KR nempel ke OKR divisi lain karena nama diedit
-    // setelah dropdown dipilih.
-    const { data: obj } = await admin
-      .from("okr_objectives")
-      .select("id, okr_name")
-      .eq("id", Number(objectiveIdRaw))
-      .maybeSingle();
-    if (!obj) return { ok: false, error: "Objective yang dipilih tidak ditemukan." };
-    if (obj.okr_name !== okrNameFinal) {
-      return {
-        ok: false,
-        error: `Objective ini milik "${obj.okr_name}". Ganti nama OKR atau tulis Objective baru.`,
-      };
-    }
-    objectiveId = obj.id;
-  }
+  const okrNameFinal = await canonicalOkrName(admin, input.okrName);
+  const objectiveId = await resolveObjective(admin, input, okrNameFinal, actorId);
+  if (typeof objectiveId === "string") return { ok: false, error: objectiveId };
 
   const { data: krRow, error: krError } = await admin
     .from("okr_objective_key_results")
     .insert({
       objective_id: objectiveId,
-      key_result: keyResult,
-      target,
-      target_unit: targetUnit,
+      key_result: input.keyResult,
+      target: input.target,
+      target_unit: input.targetUnit,
       created_by: actorId,
     })
     .select("id")
@@ -141,7 +168,10 @@ export async function saveOkrSetting(formData: FormData): Promise<ActionResult> 
   await writeAudit({
     actorId, action: "m3.set_okr_setting", entityType: "okr_objective_key_results",
     entityId: String(krRow.id),
-    after: { okr_name: okrNameFinal, objective_id: objectiveId, key_result: keyResult, target, target_unit: targetUnit },
+    after: {
+      okr_name: okrNameFinal, objective_id: objectiveId,
+      key_result: input.keyResult, target: input.target, target_unit: input.targetUnit,
+    },
     type: "approval",
   });
 
@@ -149,29 +179,242 @@ export async function saveOkrSetting(formData: FormData): Promise<ActionResult> 
   return { ok: true };
 }
 
-/** Hapus satu baris Key Result naskah OKR (Objective-nya tetap ada di dropdown). */
-export async function deleteOkrSettingKr(formData: FormData): Promise<void> {
-  const actor = await requirePermission("m3.set_target");
-  const admin = createAdminClient();
+/**
+ * Edit satu baris OKR Setting.
+ *
+ * Perubahan nama OKR / Objective berlaku UNTUK BARIS INI SAJA: KR-nya dipindah
+ * ke Objective dengan pasangan (nama OKR, Objective) yang baru — dibuat kalau
+ * belum ada. Jadi mengedit satu baris tidak pernah ikut mengubah teks KR lain
+ * yang menumpang Objective yang sama, dan Objective lama tetap ada di dropdown.
+ */
+export async function updateOkrSetting(formData: FormData): Promise<ActionResult> {
+  let actorId: string;
+  try {
+    const actor = await requirePermission("m3.set_target");
+    actorId = actor.id;
+  } catch (e) {
+    return { ok: false, error: (e as Error).message };
+  }
 
   const krId = Number(formData.get("kr_id"));
-  if (!krId) throw new Error("kr_id wajib");
+  if (!krId) return { ok: false, error: "Baris yang diedit tidak dikenali." };
+
+  const input = readOkrSettingInput(formData);
+  if (typeof input === "string") return { ok: false, error: input };
+
+  const admin = createAdminClient();
 
   const { data: before } = await admin
     .from("okr_objective_key_results")
     .select("id, objective_id, key_result, target, target_unit")
     .eq("id", krId)
     .maybeSingle();
-  if (!before) throw new Error(`Key Result #${krId} tidak ditemukan`);
+  if (!before) return { ok: false, error: `Key Result #${krId} tidak ditemukan.` };
 
-  const { error } = await admin.from("okr_objective_key_results").delete().eq("id", krId);
-  if (error) throw new Error(`Gagal hapus Key Result: ${error.message}`);
+  const okrNameFinal = await canonicalOkrName(admin, input.okrName);
+  const objectiveId = await resolveObjective(admin, input, okrNameFinal, actorId);
+  if (typeof objectiveId === "string") return { ok: false, error: objectiveId };
+
+  const after = {
+    objective_id: objectiveId,
+    key_result: input.keyResult,
+    target: input.target,
+    target_unit: input.targetUnit,
+    updated_at: new Date().toISOString(),
+  };
+  const { error } = await admin.from("okr_objective_key_results").update(after).eq("id", krId);
+  if (error) return { ok: false, error: `Gagal simpan perubahan: ${error.message}` };
 
   await writeAudit({
-    actorId: actor.id, action: "m3.delete_okr_setting", entityType: "okr_objective_key_results",
+    actorId, action: "m3.update_okr_setting", entityType: "okr_objective_key_results",
+    entityId: String(krId), before, after: { ...after, okr_name: okrNameFinal }, type: "approval",
+  });
+
+  revalidatePath("/okr/director");
+  return { ok: true };
+}
+
+/** Hapus satu baris Key Result naskah OKR (Objective-nya tetap ada di dropdown). */
+export async function deleteOkrSettingKr(formData: FormData): Promise<ActionResult> {
+  let actorId: string;
+  try {
+    const actor = await requirePermission("m3.set_target");
+    actorId = actor.id;
+  } catch (e) {
+    return { ok: false, error: (e as Error).message };
+  }
+
+  const admin = createAdminClient();
+  const krId = Number(formData.get("kr_id"));
+  if (!krId) return { ok: false, error: "Baris yang dihapus tidak dikenali." };
+
+  const { data: before } = await admin
+    .from("okr_objective_key_results")
+    .select("id, objective_id, key_result, target, target_unit")
+    .eq("id", krId)
+    .maybeSingle();
+  if (!before) return { ok: false, error: `Key Result #${krId} tidak ditemukan.` };
+
+  const { error } = await admin.from("okr_objective_key_results").delete().eq("id", krId);
+  if (error) return { ok: false, error: `Gagal hapus Key Result: ${error.message}` };
+
+  await writeAudit({
+    actorId, action: "m3.delete_okr_setting", entityType: "okr_objective_key_results",
     entityId: String(krId), before, type: "approval",
   });
   revalidatePath("/okr/director");
+  return { ok: true };
+}
+
+/**
+ * Hapus Objective yang sudah tidak punya Key Result (membersihkan pilihan
+ * dropdown). Objective yang masih dipakai ditolak — hapus KR-nya dulu supaya
+ * tidak ada baris yang lenyap tanpa disadari lewat cascade.
+ */
+export async function deleteOkrObjective(formData: FormData): Promise<ActionResult> {
+  let actorId: string;
+  try {
+    const actor = await requirePermission("m3.set_target");
+    actorId = actor.id;
+  } catch (e) {
+    return { ok: false, error: (e as Error).message };
+  }
+
+  const admin = createAdminClient();
+  const objectiveId = Number(formData.get("objective_id"));
+  if (!objectiveId) return { ok: false, error: "Objective yang dihapus tidak dikenali." };
+
+  const { data: before } = await admin
+    .from("okr_objectives")
+    .select("id, okr_name, objective")
+    .eq("id", objectiveId)
+    .maybeSingle();
+  if (!before) return { ok: false, error: "Objective tidak ditemukan." };
+
+  const { count } = await admin
+    .from("okr_objective_key_results")
+    .select("id", { count: "exact", head: true })
+    .eq("objective_id", objectiveId);
+  if ((count ?? 0) > 0) {
+    return { ok: false, error: `Objective ini masih punya ${count} Key Result — hapus KR-nya dulu.` };
+  }
+
+  const { error } = await admin.from("okr_objectives").delete().eq("id", objectiveId);
+  if (error) return { ok: false, error: `Gagal hapus Objective: ${error.message}` };
+
+  await writeAudit({
+    actorId, action: "m3.delete_okr_objective", entityType: "okr_objectives",
+    entityId: String(objectiveId), before, type: "approval",
+  });
+  revalidatePath("/okr/director");
+  return { ok: true };
+}
+
+/**
+ * Assign OKR: tugaskan satu nama OKR ke beberapa anggota tim sekaligus (bulk
+ * lewat centang). Anggota yang sudah punya OKR ini dilewati — insert-nya
+ * idempoten (unique index okr_assignments_uniq), jadi mencentang ulang tidak
+ * menggandakan penugasan dan tidak menghasilkan error.
+ */
+export async function assignOkrToMembers(formData: FormData): Promise<ActionResult> {
+  let actorId: string;
+  try {
+    const actor = await requirePermission("m3.set_target");
+    actorId = actor.id;
+  } catch (e) {
+    return { ok: false, error: (e as Error).message };
+  }
+
+  const okrName = String(formData.get("okr_name") ?? "").trim();
+  const memberIds = [...new Set(formData.getAll("member_ids").map((v) => String(v).trim()).filter(Boolean))];
+
+  if (!okrName) return { ok: false, error: "Pilih nama OKR yang mau di-assign." };
+  if (memberIds.length === 0) return { ok: false, error: "Centang minimal satu anggota tim." };
+
+  const admin = createAdminClient();
+
+  // Nama OKR harus benar-benar ada di naskah OKR — assign ke nama yang salah
+  // ketik akan jadi penugasan tanpa Objective/KR apa pun.
+  const okrNameFinal = await canonicalOkrName(admin, okrName);
+  const { count: objectiveCount } = await admin
+    .from("okr_objectives")
+    .select("id", { count: "exact", head: true })
+    .eq("okr_name", okrNameFinal);
+  if ((objectiveCount ?? 0) === 0) {
+    return { ok: false, error: `"${okrName}" belum ada di OKR Setting — isi Objective-nya dulu.` };
+  }
+
+  const { data: members } = await admin
+    .from("team_members")
+    .select("id")
+    .in("id", memberIds);
+  const validIds = new Set((members ?? []).map((m) => m.id));
+  const unknown = memberIds.filter((id) => !validIds.has(id));
+  if (unknown.length > 0) {
+    return { ok: false, error: `${unknown.length} anggota tim tidak ditemukan — muat ulang halaman.` };
+  }
+
+  const { data: already } = await admin
+    .from("okr_assignments")
+    .select("member_id")
+    .eq("okr_name", okrNameFinal)
+    .in("member_id", memberIds);
+  const alreadySet = new Set((already ?? []).map((a) => a.member_id));
+  const toInsert = memberIds.filter((id) => !alreadySet.has(id));
+
+  if (toInsert.length === 0) {
+    return { ok: false, error: "Semua anggota terpilih sudah dapat OKR ini." };
+  }
+
+  const { error } = await admin.from("okr_assignments").insert(
+    toInsert.map((memberId) => ({ okr_name: okrNameFinal, member_id: memberId, assigned_by: actorId }))
+  );
+  if (error) return { ok: false, error: `Gagal assign OKR: ${error.message}` };
+
+  await writeAudit({
+    actorId, action: "m3.assign_okr", entityType: "okr_assignments",
+    entityId: okrNameFinal,
+    after: { okr_name: okrNameFinal, member_ids: toInsert, skipped_already_assigned: [...alreadySet] },
+    type: "approval",
+  });
+
+  revalidatePath("/okr/director");
+  revalidatePath("/okr");
+  return { ok: true };
+}
+
+/** Batalkan satu penugasan OKR (nama OKR ↔ anggota tim). */
+export async function unassignOkr(formData: FormData): Promise<ActionResult> {
+  let actorId: string;
+  try {
+    const actor = await requirePermission("m3.set_target");
+    actorId = actor.id;
+  } catch (e) {
+    return { ok: false, error: (e as Error).message };
+  }
+
+  const admin = createAdminClient();
+  const assignmentId = Number(formData.get("assignment_id"));
+  if (!assignmentId) return { ok: false, error: "Penugasan yang dihapus tidak dikenali." };
+
+  const { data: before } = await admin
+    .from("okr_assignments")
+    .select("id, okr_name, member_id")
+    .eq("id", assignmentId)
+    .maybeSingle();
+  if (!before) return { ok: false, error: "Penugasan tidak ditemukan." };
+
+  const { error } = await admin.from("okr_assignments").delete().eq("id", assignmentId);
+  if (error) return { ok: false, error: `Gagal batalkan penugasan: ${error.message}` };
+
+  await writeAudit({
+    actorId, action: "m3.unassign_okr", entityType: "okr_assignments",
+    entityId: String(assignmentId), before, type: "approval",
+  });
+
+  revalidatePath("/okr/director");
+  revalidatePath("/okr");
+  return { ok: true };
 }
 
 /** Simpan / update definisi KR (Director + Head propose). */
