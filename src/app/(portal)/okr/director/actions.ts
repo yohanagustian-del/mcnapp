@@ -7,6 +7,172 @@ import { requirePermission } from "@/lib/rbac";
 import { computePctProgress, isAchieved, isGatingTriggered } from "@/lib/m3/scoring";
 import { getActualForMetric } from "@/lib/m3/adapters";
 import { getConfig } from "@/lib/config";
+import { parseRupiah } from "@/lib/utils/rupiah";
+
+export type ActionResult = { ok: true } | { ok: false; error: string };
+
+const TARGET_UNITS = ["angka", "rupiah", "persen"] as const;
+export type TargetUnit = (typeof TARGET_UNITS)[number];
+
+/**
+ * OKR Setting (tab Config OKR): simpan satu baris naskah OKR —
+ * nama OKR + Objective + Key Result + Target (3 bulan).
+ *
+ * Objective boleh dipilih dari yang sudah ada (`objective_id`) ATAU ditulis baru
+ * (`objective_new`); yang baru langsung tersimpan sehingga muncul di dropdown
+ * pengisian berikutnya. Satu Objective bisa diisi berkali-kali dengan KR berbeda,
+ * dan KR selalu menempel ke Objective yang dipilih.
+ *
+ * Mengembalikan {ok,error} (tidak melempar) — pesan error dilempar akan disensor
+ * Next.js di production, sedangkan form ini butuh pesan yang bisa dibaca Director.
+ */
+export async function saveOkrSetting(formData: FormData): Promise<ActionResult> {
+  let actorId: string;
+  try {
+    const actor = await requirePermission("m3.set_target");
+    actorId = actor.id;
+  } catch (e) {
+    return { ok: false, error: (e as Error).message };
+  }
+
+  const okrName      = String(formData.get("okr_name") ?? "").trim();
+  const objectiveIdRaw = String(formData.get("objective_id") ?? "").trim();
+  const objectiveNew = String(formData.get("objective_new") ?? "").trim();
+  const keyResult    = String(formData.get("key_result") ?? "").trim();
+  const targetRaw    = String(formData.get("target") ?? "").trim();
+  const unitRaw      = String(formData.get("target_unit") ?? "angka").trim();
+
+  if (!okrName) return { ok: false, error: "Nama OKR wajib diisi (mis. \"OKR divisi CM\")." };
+  if (okrName.length > 120) return { ok: false, error: "Nama OKR maksimal 120 karakter." };
+  if (!objectiveIdRaw && !objectiveNew) {
+    return { ok: false, error: "Pilih Objective yang sudah ada, atau tulis Objective baru." };
+  }
+  if (!keyResult) return { ok: false, error: "Key Result wajib diisi." };
+  if (objectiveNew.length > 2000 || keyResult.length > 2000) {
+    return { ok: false, error: "Objective / Key Result maksimal 2000 karakter." };
+  }
+  if (!targetRaw) return { ok: false, error: "Target wajib diisi (mis. 85000000)." };
+
+  // Toleran terhadap "Rp100.000.000" / "100.000.000" / "85000000,5" (CLAUDE.md #7).
+  const target = parseRupiah(targetRaw);
+  if (target === null) return { ok: false, error: `Target "${targetRaw}" bukan angka yang valid.` };
+  if (target < 0) return { ok: false, error: "Target tidak boleh negatif." };
+
+  const targetUnit: TargetUnit = (TARGET_UNITS as readonly string[]).includes(unitRaw)
+    ? (unitRaw as TargetUnit)
+    : "angka";
+  if (targetUnit === "persen" && target > 100) {
+    return { ok: false, error: "Target persen maksimal 100." };
+  }
+
+  const admin = createAdminClient();
+
+  // Nama OKR dikanonikalkan ke ejaan yang sudah tersimpan bila hanya beda
+  // huruf besar/kecil — supaya "OKR divisi CM" dan "okr divisi cm" tidak jadi
+  // dua grup terpisah di tabel (masalah varian ejaan, CLAUDE.md #6).
+  const { data: existingNames } = await admin.from("okr_objectives").select("okr_name");
+  const okrNameKey = okrName.toLowerCase();
+  const okrNameFinal =
+    (existingNames ?? []).find((r) => String(r.okr_name).trim().toLowerCase() === okrNameKey)?.okr_name ??
+    okrName;
+
+  let objectiveId: number;
+
+  if (objectiveNew) {
+    // Objective baru: kalau paragraf yang sama sudah ada di nama OKR ini, pakai
+    // yang lama (unique index okr_objectives_uniq) — jangan bikin kembar.
+    const { data: existing } = await admin
+      .from("okr_objectives")
+      .select("id")
+      .eq("okr_name", okrNameFinal)
+      .eq("objective", objectiveNew)
+      .maybeSingle();
+
+    if (existing) {
+      objectiveId = existing.id;
+    } else {
+      const { data, error } = await admin
+        .from("okr_objectives")
+        .insert({ okr_name: okrNameFinal, objective: objectiveNew, created_by: actorId })
+        .select("id")
+        .single();
+      if (error) return { ok: false, error: `Gagal simpan Objective: ${error.message}` };
+      objectiveId = data.id;
+
+      await writeAudit({
+        actorId, action: "m3.create_okr_objective", entityType: "okr_objectives",
+        entityId: String(objectiveId),
+        after: { okr_name: okrNameFinal, objective: objectiveNew },
+        type: "approval",
+      });
+    }
+  } else {
+    // Objective pilihan dropdown harus benar-benar ada dan cocok dengan nama OKR
+    // yang tertulis — mencegah KR nempel ke OKR divisi lain karena nama diedit
+    // setelah dropdown dipilih.
+    const { data: obj } = await admin
+      .from("okr_objectives")
+      .select("id, okr_name")
+      .eq("id", Number(objectiveIdRaw))
+      .maybeSingle();
+    if (!obj) return { ok: false, error: "Objective yang dipilih tidak ditemukan." };
+    if (obj.okr_name !== okrNameFinal) {
+      return {
+        ok: false,
+        error: `Objective ini milik "${obj.okr_name}". Ganti nama OKR atau tulis Objective baru.`,
+      };
+    }
+    objectiveId = obj.id;
+  }
+
+  const { data: krRow, error: krError } = await admin
+    .from("okr_objective_key_results")
+    .insert({
+      objective_id: objectiveId,
+      key_result: keyResult,
+      target,
+      target_unit: targetUnit,
+      created_by: actorId,
+    })
+    .select("id")
+    .single();
+  if (krError) return { ok: false, error: `Gagal simpan Key Result: ${krError.message}` };
+
+  await writeAudit({
+    actorId, action: "m3.set_okr_setting", entityType: "okr_objective_key_results",
+    entityId: String(krRow.id),
+    after: { okr_name: okrNameFinal, objective_id: objectiveId, key_result: keyResult, target, target_unit: targetUnit },
+    type: "approval",
+  });
+
+  revalidatePath("/okr/director");
+  return { ok: true };
+}
+
+/** Hapus satu baris Key Result naskah OKR (Objective-nya tetap ada di dropdown). */
+export async function deleteOkrSettingKr(formData: FormData): Promise<void> {
+  const actor = await requirePermission("m3.set_target");
+  const admin = createAdminClient();
+
+  const krId = Number(formData.get("kr_id"));
+  if (!krId) throw new Error("kr_id wajib");
+
+  const { data: before } = await admin
+    .from("okr_objective_key_results")
+    .select("id, objective_id, key_result, target, target_unit")
+    .eq("id", krId)
+    .maybeSingle();
+  if (!before) throw new Error(`Key Result #${krId} tidak ditemukan`);
+
+  const { error } = await admin.from("okr_objective_key_results").delete().eq("id", krId);
+  if (error) throw new Error(`Gagal hapus Key Result: ${error.message}`);
+
+  await writeAudit({
+    actorId: actor.id, action: "m3.delete_okr_setting", entityType: "okr_objective_key_results",
+    entityId: String(krId), before, type: "approval",
+  });
+  revalidatePath("/okr/director");
+}
 
 /** Simpan / update definisi KR (Director + Head propose). */
 export async function saveKrTarget(formData: FormData): Promise<void> {

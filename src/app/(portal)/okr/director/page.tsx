@@ -1,12 +1,15 @@
 import { createClient } from "@/lib/supabase/server";
 import { requirePermission } from "@/lib/rbac";
+import { formatOkrTarget } from "@/lib/utils/format";
 import {
   decidGating,
+  deleteOkrSettingKr,
   saveKrTarget,
   saveRewardTier,
   scoreWeekly,
   snapshotQuarter,
 } from "./actions";
+import { OkrSettingForm, type ObjectiveOption } from "./okr-setting-form";
 
 export const dynamic = "force-dynamic";
 
@@ -38,7 +41,13 @@ export default async function DirectorOkrPage() {
   await requirePermission("m3.set_target");
 
   const supabase = await createClient();
-  const [{ data: krs }, { data: tiers }, { data: gatingEvents }] = await Promise.all([
+  const [
+    { data: krs },
+    { data: tiers },
+    { data: gatingEvents },
+    { data: objectives },
+    { data: settingKrs },
+  ] = await Promise.all([
     supabase
       .from("okr_key_results")
       .select("id, role, segment, metric, target, period_type, period_start, period_end, aggregation_rule, active, objective_ref")
@@ -52,7 +61,33 @@ export default async function DirectorOkrPage() {
       .select("id, kr_id, subject_id, event_desc, evidence_ref, flagged_at, director_decision, decided_at, okr_key_results(role, metric)")
       .eq("director_decision", "pending")
       .order("flagged_at", { ascending: false }),
+    supabase
+      .from("okr_objectives")
+      .select("id, okr_name, objective")
+      .eq("active", true)
+      .order("okr_name")
+      .order("id"),
+    supabase
+      .from("okr_objective_key_results")
+      .select("id, objective_id, key_result, target, target_unit")
+      .eq("active", true)
+      .order("objective_id")
+      .order("id"),
   ]);
+
+  // Naskah OKR: Objective + KR-KR miliknya. Urutan sudah dari query (nama OKR,
+  // lalu urutan pembuatan) — di sini hanya dikelompokkan untuk rowSpan tabel.
+  const objectiveOptions: ObjectiveOption[] = (objectives ?? []).map((o) => ({
+    id: o.id,
+    okrName: o.okr_name,
+    objective: o.objective,
+  }));
+
+  const okrSettingGroups = (objectives ?? []).map((o) => ({
+    ...o,
+    krs: (settingKrs ?? []).filter((kr) => kr.objective_id === o.id),
+  }));
+  const okrSettingRowCount = okrSettingGroups.reduce((n, g) => n + g.krs.length, 0);
 
   return (
     <div className="space-y-10">
@@ -63,6 +98,87 @@ export default async function DirectorOkrPage() {
           Semua perubahan tercatat di audit_logs.
         </p>
       </div>
+
+      {/* ===== OKR Setting: naskah OKR (nama OKR → Objective → Key Result → Target) ===== */}
+      <section>
+        <h2 className="text-lg font-medium">OKR Setting</h2>
+        <p className="mt-1 text-sm text-slate-500">
+          Naskah OKR per divisi: satu nama OKR memuat beberapa Objective, dan setiap Objective
+          memuat beberapa Key Result dengan target 3 bulan. Objective yang sudah pernah diisi
+          otomatis jadi pilihan dropdown.
+        </p>
+
+        <OkrSettingForm objectives={objectiveOptions} />
+
+        <div className="mt-4 overflow-x-auto rounded-lg border border-slate-200 bg-white">
+          <table className="min-w-full text-sm">
+            <thead className="bg-slate-50 text-left text-xs uppercase text-slate-500">
+              <tr>
+                <th className="px-4 py-3">Nama OKR</th>
+                <th className="px-4 py-3">Objective</th>
+                <th className="px-4 py-3">Key Result</th>
+                <th className="px-4 py-3">Target (3 bulan)</th>
+                <th className="px-4 py-3 w-10"></th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {okrSettingGroups.map((g) =>
+                g.krs.length === 0 ? (
+                  // Objective sudah tersimpan (ada di dropdown) tapi belum punya KR.
+                  <tr key={`obj-${g.id}`} className="border-t-2 border-slate-200">
+                    <td className="px-4 py-2 font-medium align-top">{g.okr_name}</td>
+                    <td className="px-4 py-2 align-top">{g.objective}</td>
+                    <td className="px-4 py-2 text-slate-400" colSpan={3}>
+                      Belum ada Key Result untuk Objective ini.
+                    </td>
+                  </tr>
+                ) : (
+                  g.krs.map((kr, i) => (
+                    <tr key={kr.id} className={i === 0 ? "border-t-2 border-slate-200" : ""}>
+                      {i === 0 && (
+                        <>
+                          <td className="px-4 py-2 font-medium align-top" rowSpan={g.krs.length}>
+                            {g.okr_name}
+                          </td>
+                          <td className="px-4 py-2 align-top" rowSpan={g.krs.length}>
+                            {g.objective}
+                          </td>
+                        </>
+                      )}
+                      <td className="px-4 py-2">{kr.key_result}</td>
+                      <td className="px-4 py-2 whitespace-nowrap font-semibold">
+                        {formatOkrTarget(kr.target, kr.target_unit)}
+                      </td>
+                      <td className="px-4 py-2">
+                        <form action={deleteOkrSettingKr}>
+                          <input type="hidden" name="kr_id" value={kr.id} />
+                          <button type="submit" className={`${btnSm} bg-red-50 text-red-700 hover:bg-red-100`}>
+                            Hapus
+                          </button>
+                        </form>
+                      </td>
+                    </tr>
+                  ))
+                )
+              )}
+              {okrSettingGroups.length === 0 && (
+                <tr>
+                  <td colSpan={5} className="px-4 py-6 text-center text-slate-400">
+                    Belum ada OKR tersimpan. Isi form di atas untuk memulai.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+        {okrSettingRowCount > 0 && (
+          <p className="mt-2 text-xs text-slate-500">
+            {okrSettingRowCount} Key Result pada {okrSettingGroups.length} Objective.
+            Naskah ini belum ikut scoring otomatis — KR yang punya metrik terukur didefinisikan di
+            bagian &ldquo;Tambah / Edit Key Result&rdquo; di bawah.
+          </p>
+        )}
+      </section>
 
       {/* ===== Trigger scoring & snapshot ===== */}
       <section className="grid gap-4 sm:grid-cols-2">

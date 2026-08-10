@@ -28,3 +28,24 @@ export function rupiahRingkas(n: number | null | undefined): string {
   if (abs >= 1_000) return `Rp${(v / 1_000).toFixed(0)}rb`;
   return `Rp${Math.round(v).toLocaleString("id-ID")}`;
 }
+
+/**
+ * Target OKR naratif: satu angka + satuannya (angka | rupiah | persen).
+ * Desimal dipertahankan sampai 2 digit supaya target seperti 2,5 tidak hilang,
+ * tanpa memaksa ",00" pada bilangan bulat.
+ */
+export function formatOkrTarget(
+  target: number | string | null | undefined,
+  unit: "angka" | "rupiah" | "persen" | string = "angka"
+): string {
+  if (target === null || target === undefined || target === "") return "—";
+  const v = Number(target);
+  if (!Number.isFinite(v)) return "—";
+  const angka = v.toLocaleString("id-ID", {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 2,
+  });
+  if (unit === "rupiah") return `Rp${angka}`;
+  if (unit === "persen") return `${angka}%`;
+  return angka;
+}
