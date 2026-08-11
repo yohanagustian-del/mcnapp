@@ -8,6 +8,7 @@ import { computePctProgress, isAchieved, isGatingTriggered } from "@/lib/m3/scor
 import { getActualForMetric } from "@/lib/m3/adapters";
 import { getConfig } from "@/lib/config";
 import { parseRupiah } from "@/lib/utils/rupiah";
+import { KR_DIRECTIONS, validateAssignPeriod, type KrDirection } from "@/lib/m3/okr-setting";
 
 export type ActionResult = { ok: true } | { ok: false; error: string };
 
@@ -33,6 +34,7 @@ interface OkrSettingInput {
   keyResult: string;
   target: number;
   targetUnit: TargetUnit;
+  krDirection: KrDirection;
 }
 
 /**
@@ -46,6 +48,7 @@ function readOkrSettingInput(formData: FormData): OkrSettingInput | string {
   const keyResult      = String(formData.get("key_result") ?? "").trim();
   const targetRaw      = String(formData.get("target") ?? "").trim();
   const unitRaw        = String(formData.get("target_unit") ?? "angka").trim();
+  const directionRaw   = String(formData.get("kr_direction") ?? "positif").trim();
 
   if (!okrName) return "Nama OKR wajib diisi (mis. \"OKR divisi CM\").";
   if (okrName.length > 120) return "Nama OKR maksimal 120 karakter.";
@@ -66,7 +69,14 @@ function readOkrSettingInput(formData: FormData): OkrSettingInput | string {
     : "angka";
   if (targetUnit === "persen" && target > 100) return "Target persen maksimal 100.";
 
-  return { okrName, objectiveIdRaw, objectiveNew, keyResult, target, targetUnit };
+  // Sifat KR menentukan arti angka target (batas bawah vs batas atas), jadi nilai
+  // asing tidak boleh jatuh ke default diam-diam.
+  if (!(KR_DIRECTIONS as readonly string[]).includes(directionRaw)) {
+    return "Sifat KR harus positif atau negatif.";
+  }
+  const krDirection = directionRaw as KrDirection;
+
+  return { okrName, objectiveIdRaw, objectiveNew, keyResult, target, targetUnit, krDirection };
 }
 
 type AdminClient = ReturnType<typeof createAdminClient>;
@@ -159,6 +169,7 @@ export async function saveOkrSetting(formData: FormData): Promise<ActionResult> 
       key_result: input.keyResult,
       target: input.target,
       target_unit: input.targetUnit,
+      kr_direction: input.krDirection,
       created_by: actorId,
     })
     .select("id")
@@ -169,8 +180,8 @@ export async function saveOkrSetting(formData: FormData): Promise<ActionResult> 
     actorId, action: "m3.set_okr_setting", entityType: "okr_objective_key_results",
     entityId: String(krRow.id),
     after: {
-      okr_name: okrNameFinal, objective_id: objectiveId,
-      key_result: input.keyResult, target: input.target, target_unit: input.targetUnit,
+      okr_name: okrNameFinal, objective_id: objectiveId, key_result: input.keyResult,
+      target: input.target, target_unit: input.targetUnit, kr_direction: input.krDirection,
     },
     type: "approval",
   });
@@ -206,7 +217,7 @@ export async function updateOkrSetting(formData: FormData): Promise<ActionResult
 
   const { data: before } = await admin
     .from("okr_objective_key_results")
-    .select("id, objective_id, key_result, target, target_unit")
+    .select("id, objective_id, key_result, target, target_unit, kr_direction")
     .eq("id", krId)
     .maybeSingle();
   if (!before) return { ok: false, error: `Key Result #${krId} tidak ditemukan.` };
@@ -220,6 +231,7 @@ export async function updateOkrSetting(formData: FormData): Promise<ActionResult
     key_result: input.keyResult,
     target: input.target,
     target_unit: input.targetUnit,
+    kr_direction: input.krDirection,
     updated_at: new Date().toISOString(),
   };
   const { error } = await admin.from("okr_objective_key_results").update(after).eq("id", krId);
@@ -250,7 +262,7 @@ export async function deleteOkrSettingKr(formData: FormData): Promise<ActionResu
 
   const { data: before } = await admin
     .from("okr_objective_key_results")
-    .select("id, objective_id, key_result, target, target_unit")
+    .select("id, objective_id, key_result, target, target_unit, kr_direction")
     .eq("id", krId)
     .maybeSingle();
   if (!before) return { ok: false, error: `Key Result #${krId} tidak ditemukan.` };
@@ -310,11 +322,35 @@ export async function deleteOkrObjective(formData: FormData): Promise<ActionResu
   return { ok: true };
 }
 
+/** Nama OKR + daftar anggota tercentang, dipakai assign & unassign bulk. */
+async function readAssignTargets(
+  admin: AdminClient,
+  formData: FormData
+): Promise<{ okrNameFinal: string; memberIds: string[] } | string> {
+  const okrName = String(formData.get("okr_name") ?? "").trim();
+  const memberIds = [...new Set(formData.getAll("member_ids").map((v) => String(v).trim()).filter(Boolean))];
+
+  if (!okrName) return "Pilih nama OKR-nya dulu.";
+  if (memberIds.length === 0) return "Centang minimal satu anggota tim.";
+
+  const { data: members } = await admin.from("team_members").select("id").in("id", memberIds);
+  const validIds = new Set((members ?? []).map((m) => m.id));
+  const unknown = memberIds.filter((id) => !validIds.has(id));
+  if (unknown.length > 0) {
+    return `${unknown.length} anggota tim tidak ditemukan — muat ulang halaman.`;
+  }
+
+  return { okrNameFinal: await canonicalOkrName(admin, okrName), memberIds };
+}
+
 /**
- * Assign OKR: tugaskan satu nama OKR ke beberapa anggota tim sekaligus (bulk
- * lewat centang). Anggota yang sudah punya OKR ini dilewati — insert-nya
+ * Assign OKR: tugaskan satu nama OKR + periode (tanggal awal–akhir) ke beberapa
+ * anggota tim sekaligus (bulk lewat centang).
+ *
+ * Anggota yang sudah punya OKR ini UNTUK PERIODE YANG SAMA dilewati — insert-nya
  * idempoten (unique index okr_assignments_uniq), jadi mencentang ulang tidak
- * menggandakan penugasan dan tidak menghasilkan error.
+ * menggandakan penugasan. Periode yang berbeda (mis. quartal berikutnya) tetap
+ * jadi baris baru, sehingga naskah OKR yang sama bisa dipakai ulang.
  */
 export async function assignOkrToMembers(formData: FormData): Promise<ActionResult> {
   let actorId: string;
@@ -325,57 +361,105 @@ export async function assignOkrToMembers(formData: FormData): Promise<ActionResu
     return { ok: false, error: (e as Error).message };
   }
 
-  const okrName = String(formData.get("okr_name") ?? "").trim();
-  const memberIds = [...new Set(formData.getAll("member_ids").map((v) => String(v).trim()).filter(Boolean))];
-
-  if (!okrName) return { ok: false, error: "Pilih nama OKR yang mau di-assign." };
-  if (memberIds.length === 0) return { ok: false, error: "Centang minimal satu anggota tim." };
-
   const admin = createAdminClient();
+  const targets = await readAssignTargets(admin, formData);
+  if (typeof targets === "string") return { ok: false, error: targets };
+  const { okrNameFinal, memberIds } = targets;
+
+  const periodStart = String(formData.get("period_start") ?? "").trim();
+  const periodEnd   = String(formData.get("period_end") ?? "").trim();
+  const periodError = validateAssignPeriod(periodStart, periodEnd);
+  if (periodError) return { ok: false, error: periodError };
 
   // Nama OKR harus benar-benar ada di naskah OKR — assign ke nama yang salah
   // ketik akan jadi penugasan tanpa Objective/KR apa pun.
-  const okrNameFinal = await canonicalOkrName(admin, okrName);
   const { count: objectiveCount } = await admin
     .from("okr_objectives")
     .select("id", { count: "exact", head: true })
     .eq("okr_name", okrNameFinal);
   if ((objectiveCount ?? 0) === 0) {
-    return { ok: false, error: `"${okrName}" belum ada di OKR Setting — isi Objective-nya dulu.` };
-  }
-
-  const { data: members } = await admin
-    .from("team_members")
-    .select("id")
-    .in("id", memberIds);
-  const validIds = new Set((members ?? []).map((m) => m.id));
-  const unknown = memberIds.filter((id) => !validIds.has(id));
-  if (unknown.length > 0) {
-    return { ok: false, error: `${unknown.length} anggota tim tidak ditemukan — muat ulang halaman.` };
+    return { ok: false, error: `"${okrNameFinal}" belum ada di OKR Setting — isi Objective-nya dulu.` };
   }
 
   const { data: already } = await admin
     .from("okr_assignments")
     .select("member_id")
     .eq("okr_name", okrNameFinal)
+    .eq("period_start", periodStart)
+    .eq("period_end", periodEnd)
     .in("member_id", memberIds);
   const alreadySet = new Set((already ?? []).map((a) => a.member_id));
   const toInsert = memberIds.filter((id) => !alreadySet.has(id));
 
   if (toInsert.length === 0) {
-    return { ok: false, error: "Semua anggota terpilih sudah dapat OKR ini." };
+    return { ok: false, error: "Semua anggota terpilih sudah dapat OKR ini untuk periode tersebut." };
   }
 
   const { error } = await admin.from("okr_assignments").insert(
-    toInsert.map((memberId) => ({ okr_name: okrNameFinal, member_id: memberId, assigned_by: actorId }))
+    toInsert.map((memberId) => ({
+      okr_name: okrNameFinal, member_id: memberId,
+      period_start: periodStart, period_end: periodEnd,
+      assigned_by: actorId,
+    }))
   );
   if (error) return { ok: false, error: `Gagal assign OKR: ${error.message}` };
 
   await writeAudit({
     actorId, action: "m3.assign_okr", entityType: "okr_assignments",
     entityId: okrNameFinal,
-    after: { okr_name: okrNameFinal, member_ids: toInsert, skipped_already_assigned: [...alreadySet] },
+    after: {
+      okr_name: okrNameFinal, period_start: periodStart, period_end: periodEnd,
+      member_ids: toInsert, skipped_already_assigned: [...alreadySet],
+    },
     type: "approval",
+  });
+
+  revalidatePath("/okr/director");
+  revalidatePath("/okr");
+  return { ok: true };
+}
+
+/**
+ * Unassign OKR bulk: lepas satu nama OKR dari semua anggota yang dicentang.
+ *
+ * SELURUH periode nama OKR itu dilepas untuk anggota tersebut — bukan hanya
+ * periode yang sedang terisi di form — supaya hasil satu klik tidak bergantung
+ * pada isi field tanggal yang mungkin sudah diganti. Untuk melepas satu periode
+ * saja, pakai tombol × pada badge OKR anggota (unassignOkr).
+ */
+export async function unassignOkrFromMembers(formData: FormData): Promise<ActionResult> {
+  let actorId: string;
+  try {
+    const actor = await requirePermission("m3.set_target");
+    actorId = actor.id;
+  } catch (e) {
+    return { ok: false, error: (e as Error).message };
+  }
+
+  const admin = createAdminClient();
+  const targets = await readAssignTargets(admin, formData);
+  if (typeof targets === "string") return { ok: false, error: targets };
+  const { okrNameFinal, memberIds } = targets;
+
+  const { data: before } = await admin
+    .from("okr_assignments")
+    .select("id, okr_name, member_id, period_start, period_end")
+    .eq("okr_name", okrNameFinal)
+    .in("member_id", memberIds);
+
+  if (!before?.length) {
+    return { ok: false, error: `Tidak ada anggota terpilih yang memegang "${okrNameFinal}".` };
+  }
+
+  const { error } = await admin
+    .from("okr_assignments")
+    .delete()
+    .in("id", before.map((a) => a.id));
+  if (error) return { ok: false, error: `Gagal batalkan penugasan: ${error.message}` };
+
+  await writeAudit({
+    actorId, action: "m3.unassign_okr_bulk", entityType: "okr_assignments",
+    entityId: okrNameFinal, before, type: "approval",
   });
 
   revalidatePath("/okr/director");
@@ -399,7 +483,7 @@ export async function unassignOkr(formData: FormData): Promise<ActionResult> {
 
   const { data: before } = await admin
     .from("okr_assignments")
-    .select("id, okr_name, member_id")
+    .select("id, okr_name, member_id, period_start, period_end")
     .eq("id", assignmentId)
     .maybeSingle();
   if (!before) return { ok: false, error: "Penugasan tidak ditemukan." };

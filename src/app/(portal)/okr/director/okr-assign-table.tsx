@@ -8,12 +8,15 @@ import {
   TablePagination,
   useTableControls,
 } from "@/components/table-controls";
-import { assignOkrToMembers, unassignOkr } from "./actions";
+import { formatPeriodRange, validateAssignPeriod } from "@/lib/m3/okr-setting";
+import { assignOkrToMembers, unassignOkr, unassignOkrFromMembers } from "./actions";
 
 /** OKR yang sudah dipegang satu anggota (untuk badge + tombol batalkan). */
 export interface MemberOkr {
   assignmentId: number;
   okrName: string;
+  periodStart: string | null;
+  periodEnd: string | null;
   /** Nama OKR ini sudah tidak punya Objective di OKR Setting (naskahnya dihapus). */
   orphan: boolean;
 }
@@ -28,12 +31,18 @@ export interface AssignMemberRow {
 }
 
 /**
- * Section "Assign OKR": tugaskan satu nama OKR ke banyak anggota tim sekaligus
- * dengan mencentang namanya (bulk), plus header asc/desc dan paginasi 10 baris.
+ * Section "Assign OKR": tugaskan (atau lepas) satu nama OKR ke banyak anggota tim
+ * sekaligus dengan mencentang namanya, plus periode berlaku, header asc/desc, dan
+ * paginasi 10 baris.
  *
  * Centang disimpan per memberId di state, jadi pilihan TIDAK hilang saat user
  * pindah halaman atau mengurutkan ulang — footer menampilkan berapa yang terpilih
  * di luar halaman aktif supaya tidak ada penugasan yang "diam-diam" ikut terkirim.
+ *
+ * Assign butuh periode (tanggal awal & akhir); unassign bulk tidak — satu klik
+ * melepas nama OKR itu dari anggota terpilih untuk semua periodenya, biar hasilnya
+ * tidak bergantung pada isi field tanggal. Untuk melepas satu periode saja, pakai
+ * tombol × di badge OKR anggota.
  */
 export function OkrAssignTable({
   members,
@@ -43,6 +52,8 @@ export function OkrAssignTable({
   okrNames: string[];
 }) {
   const [okrName, setOkrName] = useState(okrNames[0] ?? "");
+  const [periodStart, setPeriodStart] = useState("");
+  const [periodEnd, setPeriodEnd] = useState("");
   const [selected, setSelected] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState<string | null>(null);
@@ -72,16 +83,38 @@ export function OkrAssignTable({
   const allPageSelected = pageIds.length > 0 && pageIds.every((id) => selectedSet.has(id));
   const selectedOffPage = selected.filter((id) => !pageIds.includes(id)).length;
 
-  /** Anggota terpilih yang SUDAH punya OKR ini — dilewati server, ditandai di sini. */
+  /**
+   * Anggota terpilih yang SUDAH punya OKR ini untuk periode yang sedang diisi —
+   * dilewati server, ditandai di sini supaya jumlah di tombol tidak menyesatkan.
+   */
   const alreadyAssigned = useMemo(
+    () =>
+      members.filter(
+        (m) =>
+          selectedSet.has(m.memberId) &&
+          m.okrs.some(
+            (o) =>
+              o.okrName === okrName &&
+              o.periodStart === (periodStart || null) &&
+              o.periodEnd === (periodEnd || null)
+          )
+      ).length,
+    // selectedSet diturunkan dari selected pada setiap render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [members, selected, okrName, periodStart, periodEnd]
+  );
+
+  /** Anggota terpilih yang memegang OKR ini (periode apa pun) — target unassign bulk. */
+  const holdersSelected = useMemo(
     () =>
       members.filter(
         (m) => selectedSet.has(m.memberId) && m.okrs.some((o) => o.okrName === okrName)
       ).length,
-    // selectedSet diturunkan dari selected pada setiap render.
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [members, selected, okrName]
   );
+
+  const periodError = validateAssignPeriod(periodStart, periodEnd);
 
   function toggleMember(id: string) {
     setSaved(null);
@@ -98,10 +131,17 @@ export function OkrAssignTable({
   }
 
   function submitAssign() {
+    if (periodError) {
+      setError(periodError);
+      return;
+    }
     const formData = new FormData();
     formData.set("okr_name", okrName);
+    formData.set("period_start", periodStart);
+    formData.set("period_end", periodEnd);
     for (const id of selected) formData.append("member_ids", id);
 
+    const assignedCount = selected.length - alreadyAssigned;
     setError(null);
     setSaved(null);
     startTransition(async () => {
@@ -110,7 +150,28 @@ export function OkrAssignTable({
         setError(res.error);
         return;
       }
-      setSaved(`"${okrName}" ter-assign ke ${selected.length - alreadyAssigned} anggota tim.`);
+      setSaved(
+        `"${okrName}" ter-assign ke ${assignedCount} anggota tim untuk ${formatPeriodRange(periodStart, periodEnd)}.`
+      );
+      setSelected([]);
+    });
+  }
+
+  function submitUnassign() {
+    const formData = new FormData();
+    formData.set("okr_name", okrName);
+    for (const id of selected) formData.append("member_ids", id);
+
+    const removedFrom = holdersSelected;
+    setError(null);
+    setSaved(null);
+    startTransition(async () => {
+      const res = await unassignOkrFromMembers(formData);
+      if (!res.ok) {
+        setError(res.error);
+        return;
+      }
+      setSaved(`"${okrName}" dilepas dari ${removedFrom} anggota tim (semua periode).`);
       setSelected([]);
     });
   }
@@ -128,49 +189,93 @@ export function OkrAssignTable({
 
   return (
     <div className="mt-3 space-y-2">
-      {/* Baris aksi: pilih nama OKR + assign massal ke yang dicentang */}
-      <div className="flex flex-wrap items-end gap-3 rounded-lg border border-slate-200 bg-white p-4">
-        <div>
-          <label className="text-xs font-medium text-slate-600" htmlFor="assign-okr-name">
-            Nama OKR
-          </label>
-          <select
-            id="assign-okr-name"
-            value={okrName}
-            onChange={(e) => { setOkrName(e.target.value); setSaved(null); }}
-            disabled={okrNames.length === 0}
-            className="mt-1 w-72 rounded-md border border-slate-300 bg-white px-3 py-2 text-sm disabled:bg-slate-50 disabled:text-slate-400"
-          >
-            {okrNames.length === 0 && <option value="">— belum ada OKR —</option>}
-            {okrNames.map((n) => <option key={n} value={n}>{n}</option>)}
-          </select>
+      {/* Baris aksi: nama OKR + periode, lalu assign/unassign massal ke yang dicentang */}
+      <div className="rounded-lg border border-slate-200 bg-white p-4">
+        <div className="flex flex-wrap items-end gap-3">
+          <div>
+            <label className="text-xs font-medium text-slate-600" htmlFor="assign-okr-name">
+              Nama OKR
+            </label>
+            <select
+              id="assign-okr-name"
+              value={okrName}
+              onChange={(e) => { setOkrName(e.target.value); setSaved(null); }}
+              disabled={okrNames.length === 0}
+              className="mt-1 w-72 rounded-md border border-slate-300 bg-white px-3 py-2 text-sm disabled:bg-slate-50 disabled:text-slate-400"
+            >
+              {okrNames.length === 0 && <option value="">— belum ada OKR —</option>}
+              {okrNames.map((n) => <option key={n} value={n}>{n}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="text-xs font-medium text-slate-600" htmlFor="assign-period-start">
+              Tanggal awal periode
+            </label>
+            <input
+              id="assign-period-start"
+              type="date"
+              value={periodStart}
+              onChange={(e) => { setPeriodStart(e.target.value); setSaved(null); }}
+              className="mt-1 rounded-md border border-slate-300 px-3 py-2 text-sm"
+            />
+          </div>
+          <div>
+            <label className="text-xs font-medium text-slate-600" htmlFor="assign-period-end">
+              Tanggal akhir periode
+            </label>
+            <input
+              id="assign-period-end"
+              type="date"
+              value={periodEnd}
+              min={periodStart || undefined}
+              onChange={(e) => { setPeriodEnd(e.target.value); setSaved(null); }}
+              className="mt-1 rounded-md border border-slate-300 px-3 py-2 text-sm"
+            />
+          </div>
         </div>
-        <button
-          type="button"
-          onClick={submitAssign}
-          disabled={pending || !okrName || selected.length === 0}
-          className="rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-700 disabled:opacity-50"
-        >
-          {pending ? "Menyimpan…" : `Assign ke ${selected.length} tim terpilih`}
-        </button>
-        {selected.length > 0 && (
+
+        <div className="mt-3 flex flex-wrap items-center gap-3">
           <button
             type="button"
-            onClick={() => setSelected([])}
-            disabled={pending}
-            className="rounded-md px-2 py-2 text-sm text-slate-500 underline underline-offset-2 hover:text-slate-800"
+            onClick={submitAssign}
+            disabled={pending || !okrName || selected.length === 0 || periodError !== null}
+            title={periodError ?? undefined}
+            className="rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-700 disabled:opacity-50"
           >
-            Bersihkan centang
+            {pending ? "Menyimpan…" : `Assign ke ${selected.length} tim terpilih`}
           </button>
-        )}
-        <p className="text-xs text-slate-400">
+          <button
+            type="button"
+            onClick={submitUnassign}
+            disabled={pending || !okrName || selected.length === 0}
+            className="rounded-md border border-red-300 bg-red-50 px-4 py-2 text-sm font-medium text-red-700 hover:bg-red-100 disabled:opacity-50"
+          >
+            {pending ? "Menyimpan…" : `Unassign dari ${selected.length} tim terpilih`}
+          </button>
+          {selected.length > 0 && (
+            <button
+              type="button"
+              onClick={() => setSelected([])}
+              disabled={pending}
+              className="rounded-md px-2 py-2 text-sm text-slate-500 underline underline-offset-2 hover:text-slate-800"
+            >
+              Bersihkan centang
+            </button>
+          )}
+        </div>
+
+        <p className="mt-2 text-xs text-slate-400">
           {okrNames.length === 0
             ? "Isi OKR Setting dulu — daftar nama OKR diambil dari sana."
-            : "Centang nama tim di tabel, lalu Assign. Anggota yang sudah punya OKR ini otomatis dilewati."}
-          {alreadyAssigned > 0 && ` ${alreadyAssigned} dari yang dicentang sudah punya OKR ini.`}
+            : "Centang nama tim di tabel, lalu Assign (butuh periode) atau Unassign. Periode berbeda = penugasan baru, jadi OKR yang sama bisa dipakai lagi untuk quartal berikutnya."}
+          {" "}Unassign melepas semua periode nama OKR ini dari anggota terpilih; untuk satu periode saja pakai tombol × di badge.
+          {alreadyAssigned > 0 && ` ${alreadyAssigned} dari yang dicentang sudah punya OKR ini untuk periode tersebut (akan dilewati).`}
         </p>
-        {saved && <span className="text-xs text-green-700">{saved}</span>}
-        {error && <span className="text-xs text-red-700">{error}</span>}
+        {periodError && selected.length > 0 && (
+          <p className="mt-1 text-xs text-amber-700">{periodError} (hanya wajib untuk Assign)</p>
+        )}
+        {saved && <p className="mt-1 text-xs text-green-700">{saved}</p>}
+        {error && <p className="mt-1 text-xs text-red-700">{error}</p>}
       </div>
 
       <TableFilterBar controls={controls} searchPlaceholder="Cari nama / role tim…" />
@@ -227,6 +332,9 @@ export function OkrAssignTable({
                         >
                           {o.okrName}
                           {o.orphan && " ⚠"}
+                          <span className="font-normal text-slate-500">
+                            ({formatPeriodRange(o.periodStart, o.periodEnd)})
+                          </span>
                           <button
                             type="button"
                             onClick={() => removeAssignment(o.assignmentId)}

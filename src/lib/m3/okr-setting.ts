@@ -13,6 +13,24 @@ export interface ObjectiveOption {
   objective: string;
 }
 
+/**
+ * Arah Key Result yang dianggap baik:
+ *  - positif = makin tinggi makin baik, target jadi batas BAWAH (mis. total GMV).
+ *  - negatif = makin rendah makin baik, target jadi batas ATAS  (mis. GMV bocor).
+ */
+export const KR_DIRECTIONS = ["positif", "negatif"] as const;
+export type KrDirection = (typeof KR_DIRECTIONS)[number];
+
+/** Label + penjelasan singkat untuk badge/tabel dan dropdown form. */
+export function krDirectionLabel(direction: string | null | undefined): {
+  label: string;
+  hint: string;
+} {
+  return direction === "negatif"
+    ? { label: "Negatif ↓", hint: "Makin rendah makin baik — target = batas maksimal." }
+    : { label: "Positif ↑", hint: "Makin tinggi makin baik — target = batas minimal." };
+}
+
 /** Nilai satu baris OKR Setting selama diedit (semua string — ini isi form). */
 export interface OkrSettingFieldValue {
   okrName: string;
@@ -22,6 +40,7 @@ export interface OkrSettingFieldValue {
   keyResult: string;
   target: string;
   targetUnit: "angka" | "rupiah" | "persen";
+  krDirection: KrDirection;
 }
 
 /** Nilai sentinel dropdown Objective untuk "tulis Objective baru". */
@@ -34,6 +53,7 @@ export const EMPTY_OKR_FIELDS: OkrSettingFieldValue = {
   keyResult: "",
   target: "",
   targetUnit: "angka",
+  krDirection: "positif",
 };
 
 /**
@@ -74,5 +94,36 @@ export function toOkrSettingFormData(value: OkrSettingFieldValue, choices: Objec
   formData.set("key_result", value.keyResult);
   formData.set("target", value.target);
   formData.set("target_unit", value.targetUnit);
+  formData.set("kr_direction", value.krDirection);
   return formData;
+}
+
+/**
+ * Periode penugasan OKR: dua tanggal, akhir tidak boleh mendahului awal.
+ * Mengembalikan pesan siap tampil, atau null kalau valid. Dipakai form (feedback
+ * langsung) dan server action (penjaga sebenarnya) supaya aturannya satu.
+ */
+export function validateAssignPeriod(
+  periodStart: string,
+  periodEnd: string
+): string | null {
+  if (!periodStart || !periodEnd) return "Tanggal awal dan tanggal akhir periode wajib diisi.";
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(periodStart) || !/^\d{4}-\d{2}-\d{2}$/.test(periodEnd)) {
+    return "Format tanggal periode tidak valid.";
+  }
+  if (periodEnd < periodStart) return "Tanggal akhir periode tidak boleh sebelum tanggal awal.";
+  return null;
+}
+
+/** Rentang periode untuk badge/tabel, mis. "1 Jul 2026 – 30 Sep 2026". */
+export function formatPeriodRange(
+  periodStart: string | null | undefined,
+  periodEnd: string | null | undefined
+): string {
+  if (!periodStart && !periodEnd) return "periode belum diisi";
+  const fmt = (d: string | null | undefined) =>
+    d ? new Date(`${d}T00:00:00Z`).toLocaleDateString("id-ID", {
+      day: "numeric", month: "short", year: "numeric", timeZone: "UTC",
+    }) : "?";
+  return `${fmt(periodStart)} – ${fmt(periodEnd)}`;
 }

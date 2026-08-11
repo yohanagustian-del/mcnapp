@@ -1,11 +1,14 @@
 import { describe, expect, it } from "vitest";
 import {
   EMPTY_OKR_FIELDS,
+  formatPeriodRange,
   isNewObjectiveMode,
+  krDirectionLabel,
   NEW_OBJECTIVE,
   objectiveChoicesFor,
   okrNamesOf,
   toOkrSettingFormData,
+  validateAssignPeriod,
   type ObjectiveOption,
   type OkrSettingFieldValue,
 } from "../okr-setting";
@@ -68,6 +71,7 @@ describe("toOkrSettingFormData", () => {
     keyResult: "Total GMV kreator baru",
     target: "Rp100.000.000",
     targetUnit: "rupiah",
+    krDirection: "positif",
   };
 
   it("sends objective_id and never objective_new when picking an existing objective", () => {
@@ -80,6 +84,13 @@ describe("toOkrSettingFormData", () => {
     // Target dikirim mentah — parseRupiah di server yang menormalkannya.
     expect(fd.get("target")).toBe("Rp100.000.000");
     expect(fd.get("target_unit")).toBe("rupiah");
+    expect(fd.get("kr_direction")).toBe("positif");
+  });
+
+  it("carries a negative KR direction through", () => {
+    const choices = objectiveChoicesFor(OBJECTIVES, filled.okrName);
+    const fd = toOkrSettingFormData({ ...filled, krDirection: "negatif" }, choices);
+    expect(fd.get("kr_direction")).toBe("negatif");
   });
 
   it("sends objective_new and never objective_id when writing a new objective", () => {
@@ -96,5 +107,54 @@ describe("toOkrSettingFormData", () => {
     );
     expect(fd.get("objective_id")).toBe("");
     expect(fd.get("objective_new")).toBe("Objective pertama");
+  });
+});
+
+describe("krDirectionLabel", () => {
+  it("labels a negative KR as lower-is-better with a max target", () => {
+    const { label, hint } = krDirectionLabel("negatif");
+    expect(label).toBe("Negatif ↓");
+    expect(hint).toContain("maksimal");
+  });
+
+  it("labels positive — and anything unset — as higher-is-better", () => {
+    expect(krDirectionLabel("positif").label).toBe("Positif ↑");
+    expect(krDirectionLabel(null).label).toBe("Positif ↑");
+    expect(krDirectionLabel(undefined).hint).toContain("minimal");
+  });
+});
+
+describe("validateAssignPeriod", () => {
+  it("accepts a well-ordered range", () => {
+    expect(validateAssignPeriod("2026-07-01", "2026-09-30")).toBeNull();
+    // Satu hari (awal = akhir) tetap periode yang sah.
+    expect(validateAssignPeriod("2026-07-01", "2026-07-01")).toBeNull();
+  });
+
+  it("requires both dates", () => {
+    expect(validateAssignPeriod("", "2026-09-30")).toMatch(/wajib diisi/);
+    expect(validateAssignPeriod("2026-07-01", "")).toMatch(/wajib diisi/);
+  });
+
+  it("rejects an end date before the start date", () => {
+    expect(validateAssignPeriod("2026-09-30", "2026-07-01")).toMatch(/tidak boleh sebelum/);
+  });
+
+  it("rejects non-ISO dates (input type=date always sends ISO)", () => {
+    expect(validateAssignPeriod("01/07/2026", "2026-09-30")).toMatch(/tidak valid/);
+  });
+});
+
+describe("formatPeriodRange", () => {
+  it("renders an Indonesian range", () => {
+    expect(formatPeriodRange("2026-07-01", "2026-09-30")).toBe("1 Jul 2026 – 30 Sep 2026");
+  });
+
+  it("marks legacy assignments that have no period yet", () => {
+    expect(formatPeriodRange(null, null)).toBe("periode belum diisi");
+  });
+
+  it("shows a placeholder for a half-filled range instead of guessing", () => {
+    expect(formatPeriodRange("2026-07-01", null)).toBe("1 Jul 2026 – ?");
   });
 });

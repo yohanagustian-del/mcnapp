@@ -72,7 +72,7 @@ export default async function DirectorOkrPage() {
       .order("id"),
     supabase
       .from("okr_objective_key_results")
-      .select("id, objective_id, key_result, target, target_unit")
+      .select("id, objective_id, key_result, target, target_unit, kr_direction")
       .eq("active", true)
       .order("objective_id")
       .order("id"),
@@ -82,8 +82,9 @@ export default async function DirectorOkrPage() {
       .order("name"),
     supabase
       .from("okr_assignments")
-      .select("id, okr_name, member_id")
-      .order("okr_name"),
+      .select("id, okr_name, member_id, period_start, period_end")
+      .order("okr_name")
+      .order("period_start", { ascending: false, nullsFirst: false }),
   ]);
 
   const objectiveOptions: ObjectiveOption[] = (objectives ?? []).map((o) => ({
@@ -101,7 +102,7 @@ export default async function DirectorOkrPage() {
     if (krs.length === 0) {
       return [{
         krId: null, objectiveId: o.id, okrName: o.okr_name, objective: o.objective,
-        keyResult: null, target: null, targetUnit: null,
+        keyResult: null, target: null, targetUnit: null, krDirection: null,
       }];
     }
     return krs.map((kr) => ({
@@ -114,6 +115,7 @@ export default async function DirectorOkrPage() {
       // sekali di sini supaya sort kolom Target membandingkan angka, bukan teks.
       target: Number(kr.target),
       targetUnit: kr.target_unit,
+      krDirection: kr.kr_direction,
     }));
   });
   const okrSettingKrCount = okrSettingRows.filter((r) => r.krId !== null).length;
@@ -134,6 +136,8 @@ export default async function DirectorOkrPage() {
       .map<MemberOkr>((a) => ({
         assignmentId: a.id,
         okrName: a.okr_name,
+        periodStart: a.period_start ?? null,
+        periodEnd: a.period_end ?? null,
         // Naskahnya sudah dihapus dari OKR Setting — ditandai, bukan disembunyikan.
         orphan: !okrNameSet.has(a.okr_name),
       })),

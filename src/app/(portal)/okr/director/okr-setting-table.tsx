@@ -10,6 +10,7 @@ import {
 } from "@/components/table-controls";
 import { formatOkrTarget } from "@/lib/utils/format";
 import { deleteOkrObjective, deleteOkrSettingKr, updateOkrSetting } from "./actions";
+import { krDirectionLabel } from "@/lib/m3/okr-setting";
 import {
   objectiveChoicesFor,
   OkrSettingFields,
@@ -27,6 +28,7 @@ export interface OkrSettingRow {
   keyResult: string | null;
   target: number | null;
   targetUnit: string | null;
+  krDirection: string | null;
 }
 
 const btnSm = "rounded-md px-2 py-1 text-xs font-medium";
@@ -66,6 +68,7 @@ export function OkrSettingTable({
           objective:  { value: (r: OkrSettingRow) => r.objective },
           key_result: { value: (r: OkrSettingRow) => r.keyResult },
           target:     { value: (r: OkrSettingRow) => r.target, firstDir: "desc" as const },
+          direction:  { value: (r: OkrSettingRow) => r.krDirection },
         },
       }),
       []
@@ -84,6 +87,7 @@ export function OkrSettingTable({
       keyResult: row.keyResult ?? "",
       target: row.target === null ? "" : String(row.target),
       targetUnit: (row.targetUnit as OkrSettingFieldValue["targetUnit"]) ?? "angka",
+      krDirection: (row.krDirection as OkrSettingFieldValue["krDirection"]) ?? "positif",
     });
   }
 
@@ -139,6 +143,7 @@ export function OkrSettingTable({
               <SortableTh controls={controls} sortKey="objective">Objective</SortableTh>
               <SortableTh controls={controls} sortKey="key_result">Key Result</SortableTh>
               <SortableTh controls={controls} sortKey="target">Target (3 bulan)</SortableTh>
+              <SortableTh controls={controls} sortKey="direction">Sifat KR</SortableTh>
               <th className="px-4 py-3">Aksi</th>
             </tr>
           </thead>
@@ -148,7 +153,7 @@ export function OkrSettingTable({
               if (isEditing && draft) {
                 return (
                   <tr key={`edit-${row.krId}`} className="bg-slate-50">
-                    <td colSpan={5} className="px-4 py-3">
+                    <td colSpan={6} className="px-4 py-3">
                       <p className="text-xs font-medium text-slate-600">Edit Key Result</p>
                       <div className="mt-2 grid gap-4 lg:grid-cols-2">
                         <OkrSettingFields
@@ -197,6 +202,22 @@ export function OkrSettingTable({
                     {row.krId === null ? "—" : formatOkrTarget(row.target, row.targetUnit ?? "angka")}
                   </td>
                   <td className="px-4 py-2 align-top">
+                    {row.krId === null ? (
+                      <span className="text-slate-400">—</span>
+                    ) : (
+                      <span
+                        className={`inline-block whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-medium ${
+                          row.krDirection === "negatif"
+                            ? "bg-amber-100 text-amber-800"
+                            : "bg-green-100 text-green-800"
+                        }`}
+                        title={krDirectionLabel(row.krDirection).hint}
+                      >
+                        {krDirectionLabel(row.krDirection).label}
+                      </span>
+                    )}
+                  </td>
+                  <td className="px-4 py-2 align-top">
                     <div className="flex gap-2">
                       {row.krId !== null && (
                         <button
@@ -224,7 +245,7 @@ export function OkrSettingTable({
             })}
             {controls.total === 0 && (
               <tr>
-                <td colSpan={5} className="px-4 py-6 text-center text-slate-400">
+                <td colSpan={6} className="px-4 py-6 text-center text-slate-400">
                   {controls.filterActive
                     ? "Tidak ada nama OKR yang cocok dengan pencarian."
                     : "Belum ada OKR tersimpan. Isi form di atas untuk memulai."}

@@ -3,6 +3,7 @@
 import { formatOkrTarget } from "@/lib/utils/format";
 import {
   isNewObjectiveMode,
+  krDirectionLabel,
   NEW_OBJECTIVE,
   objectiveChoicesFor,
   okrNamesOf,
@@ -18,9 +19,10 @@ export {
   objectiveChoicesFor,
   okrNamesOf,
   isNewObjectiveMode,
+  krDirectionLabel,
   toOkrSettingFormData,
 } from "@/lib/m3/okr-setting";
-export type { ObjectiveOption, OkrSettingFieldValue } from "@/lib/m3/okr-setting";
+export type { ObjectiveOption, OkrSettingFieldValue, KrDirection } from "@/lib/m3/okr-setting";
 
 const input =
   "w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-slate-500 focus:outline-none";
@@ -28,9 +30,9 @@ const labelCls = "text-xs font-medium text-slate-600";
 const hint = "mt-1 text-xs text-slate-400";
 
 /**
- * Empat field OKR Setting (nama OKR, Objective, Key Result, Target) sebagai satu
- * komponen supaya form tambah dan form edit tidak pernah punya aturan berbeda —
- * termasuk aturan dropdown Objective yang menyaring per nama OKR.
+ * Field OKR Setting (nama OKR, Objective, Key Result, Target, sifat KR) sebagai
+ * satu komponen supaya form tambah dan form edit tidak pernah punya aturan
+ * berbeda — termasuk aturan dropdown Objective yang menyaring per nama OKR.
  *
  * Parent yang menentukan tata letak (komponen ini merender <div> grid item) dan
  * yang memegang state; komponen ini murni tampilan + onChange.
@@ -140,7 +142,7 @@ export function OkrSettingFields({
       </div>
 
       {/* c. Key Result — paragraf, milik Objective yang dipilih di atas */}
-      <div className="lg:col-span-2">
+      <div>
         <label className={labelCls} htmlFor={`${idPrefix}-kr`}>Key Result</label>
         <textarea
           id={`${idPrefix}-kr`}
@@ -152,6 +154,26 @@ export function OkrSettingFields({
           placeholder="contoh: Total GMV yang dihasilkan oleh creator baru hasil ..."
           className={input}
         />
+      </div>
+
+      {/* Sifat KR: arah mana yang dianggap baik — menentukan arti angka target */}
+      <div>
+        <label className={labelCls} htmlFor={`${idPrefix}-direction`}>Sifat KR</label>
+        <select
+          id={`${idPrefix}-direction`}
+          value={value.krDirection}
+          onChange={(e) => set({ krDirection: e.target.value as OkrSettingFieldValue["krDirection"] })}
+          className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm"
+        >
+          <option value="positif">Positif ↑ (makin tinggi makin baik)</option>
+          <option value="negatif">Negatif ↓ (makin rendah makin baik)</option>
+        </select>
+        <p className={hint}>
+          {krDirectionLabel(value.krDirection).hint}{" "}
+          {value.krDirection === "negatif"
+            ? "Contoh: GMV bocor, jumlah komplain."
+            : "Contoh: total GMV, jumlah kreator level 3."}
+        </p>
       </div>
     </>
   );
