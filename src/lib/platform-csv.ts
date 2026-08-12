@@ -50,9 +50,9 @@ export const COL = {
   shopName: ["shop_name", "nama_toko"],
   cat1: ["level_1_category", "level1_category", "kategori_level_1"],
   cat2: ["level_2_category", "level2_category", "kategori_level_2"],
-  gmv: ["affiliate_gmv", "gmv_afiliasi"],
-  gmvLive: ["affiliate_live_gmv", "gmv_live_afiliasi"],
-  gmvVideo: ["affiliate_video_gmv", "gmv_video_afiliasi"],
+  gmv: ["affiliate_gmv", "gmv_afiliasi", "creator-attributed_gmv", "gmv_dari_kreator"],
+  gmvLive: ["affiliate_live_gmv", "gmv_live_afiliasi", "creator_live-attributed_gmv", "gmv_live_dari_kreator"],
+  gmvVideo: ["affiliate_video_gmv", "gmv_video_afiliasi", "affiliate_video-attributed_gmv", "gmv_video_dari_kreator"],
   orders: ["affiliate_orders", "orders", "pesanan_dari_afiliasi", "pesanan"],
   itemsSold: ["items_sold", "produk_terjual"],
   estPartnerCommission: [

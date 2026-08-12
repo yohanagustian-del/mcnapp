@@ -168,6 +168,11 @@ export const MCN_HEADER_ALIASES: Record<string, string> = {
   "creator_video-attributed_orders": "affiliate_video_orders",
   "creator-attributed_items_sold": "items_sold",
   "ctor_(sku_order)": "ctor",
+  // Creator-attributed GMV (Indonesian: GMV dari kreator).
+  "gmv_dari_kreator": "affiliate_gmv",
+  "gmv_live_dari_kreator": "affiliate_live_gmv",
+  "gmv_video_dari_kreator": "affiliate_video_gmv",
+  "pesanan_dari_kreator": "affiliate_orders",
 };
 
 /** TAP (CSV-2 / agency-link) header aliases. See MCN_HEADER_ALIASES doc above. */
@@ -195,6 +200,11 @@ export const TAP_HEADER_ALIASES: Record<string, string> = {
   "creator_live-attributed_gmv": "affiliate_live_gmv",
   "creator-attributed_orders": "orders",
   "creator-attributed_items_sold": "items_sold",
+  // Creator-attributed GMV (Indonesian: GMV dari kreator).
+  "gmv_dari_kreator": "affiliate_gmv",
+  "gmv_live_dari_kreator": "affiliate_live_gmv",
+  "gmv_video_dari_kreator": "affiliate_video_gmv",
+  "pesanan_dari_kreator": "orders",
 };
 
 /** Percentage cell ("5.45%" / "13.19%") → number (5.45). null when unreadable (never crash). */
