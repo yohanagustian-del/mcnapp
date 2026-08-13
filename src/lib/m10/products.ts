@@ -27,8 +27,21 @@ import type { UploadReport } from "@/app/(portal)/tim/actions";
 //  (a) TikTok Partner Compass → Analytics → Custom report (role TAP, dimensi
 //      Product + Shop + Product category). Ini format "metric terbaru": satu baris
 //      per (produk × campaign × periode) dengan metrik performa lengkap.
-//  (b) Campaign product list (export "product brand"): Product ID/name, Sale price,
-//      Shop name, rate komisi kreator & partner, masa berlaku produk, link produk.
+//  (b) TAP → Creator Matchmaking → Manage → room campaign → View detail →
+//      Approved → Products → "Export link". Ini format yang dipakai tim sekarang.
+//      Header persisnya (14 kolom, urutan apa adanya):
+//        Campaign ID | product name | <kosong: kolom gambar produk> | Product ID |
+//        Sale price | Shop name | Product effective start time |
+//        Product effective end time | Creator commission rate |
+//        Affiliate partner commission rate | Creator Shop Ads commission rate |
+//        Affiliate partner Shop Ads commission rate | Product link |
+//        (Only for checking. Please use the left one.)
+//      Catatan bentuk data: TIDAK ada Shop ID (hanya Shop name), tidak ada kategori,
+//      dan tidak ada metrik performa — ini daftar produk, bukan laporan GMV. Harga
+//      "Rp65.000" (titik = ribuan), tanggal "16/07/2026 00:00:00" (DD/MM/YYYY),
+//      komisi "7.00%". Kolom terakhir sengaja TIDAK dipetakan: itu URL pembanding
+//      yang oleh platform sendiri ditandai "only for checking" — link yang dipakai
+//      adalah "Product link".
 //  (c) Template master lama (Product ID, Shop ID, Price, Commission).
 // Nama kunci sudah dinormalisasi normalizeHeader() (huruf kecil, spasi → "_").
 
@@ -44,6 +57,10 @@ const H = {
   // Rate komisi KREATOR (persen).
   commission: ["creator_commission_rate", "commission", "komisi"],
   partnerCommissionRate: ["affiliate_partner_commission_rate", "partner_commission_rate"],
+  // Rate komisi khusus penjualan lewat Shop Ads — nilainya beda dari rate afiliasi
+  // biasa, jadi disimpan terpisah (bukan menimpa dua kolom di atas).
+  creatorShopAdsCommissionRate: ["creator_shop_ads_commission_rate"],
+  partnerShopAdsCommissionRate: ["affiliate_partner_shop_ads_commission_rate"],
   // Konteks campaign & periode
   date: ["date", "periode", "tanggal"],
   campaignId: ["campaign_id"],
@@ -128,6 +145,8 @@ interface ProductAccumulator {
   commission_pct: number | null;
   commission_note: string | null;
   partner_commission_pct: number | null;
+  creator_shop_ads_commission_pct: number | null;
+  partner_shop_ads_commission_pct: number | null;
   product_link: string | null;
   effective_start: string | null;
   effective_end: string | null;
@@ -239,6 +258,8 @@ export async function uploadProductMasterList(formData: FormData): Promise<Uploa
     const commission = parseCommission(commissionRaw);
     const commissionKotor = commissionRaw !== "" && commission === null;
     const partnerCommission = parseCommission(pick(raw, H.partnerCommissionRate));
+    const creatorShopAds = parseCommission(pick(raw, H.creatorShopAdsCommissionRate));
+    const partnerShopAds = parseCommission(pick(raw, H.partnerShopAdsCommissionRate));
     const period = parsePeriodRange(pick(raw, H.date));
     const affiliateGmv = rp(pick(raw, H.affiliateGmv));
 
@@ -289,6 +310,12 @@ export async function uploadProductMasterList(formData: FormData): Promise<Uploa
         partner_commission_pct: partnerCommission
           ? (partnerCommission.min + partnerCommission.max) / 2
           : null,
+        creator_shop_ads_commission_pct: creatorShopAds
+          ? (creatorShopAds.min + creatorShopAds.max) / 2
+          : null,
+        partner_shop_ads_commission_pct: partnerShopAds
+          ? (partnerShopAds.min + partnerShopAds.max) / 2
+          : null,
         product_link: pick(raw, H.productLink) || null,
         effective_start: parseDateCell(pick(raw, H.effectiveStart)),
         effective_end: parseDateCell(pick(raw, H.effectiveEnd)),
@@ -334,6 +361,12 @@ export async function uploadProductMasterList(formData: FormData): Promise<Uploa
     }
     if (existing.partner_commission_pct === null && partnerCommission) {
       existing.partner_commission_pct = (partnerCommission.min + partnerCommission.max) / 2;
+    }
+    if (existing.creator_shop_ads_commission_pct === null && creatorShopAds) {
+      existing.creator_shop_ads_commission_pct = (creatorShopAds.min + creatorShopAds.max) / 2;
+    }
+    if (existing.partner_shop_ads_commission_pct === null && partnerShopAds) {
+      existing.partner_shop_ads_commission_pct = (partnerShopAds.min + partnerShopAds.max) / 2;
     }
   }
 
@@ -384,6 +417,8 @@ export async function uploadProductMasterList(formData: FormData): Promise<Uploa
       commission_pct: p.commission_pct,
       commission_note: p.commission_note,
       partner_commission_pct: p.partner_commission_pct,
+      creator_shop_ads_commission_pct: p.creator_shop_ads_commission_pct,
+      partner_shop_ads_commission_pct: p.partner_shop_ads_commission_pct,
       product_link: p.product_link,
       effective_start: p.effective_start,
       effective_end: p.effective_end,

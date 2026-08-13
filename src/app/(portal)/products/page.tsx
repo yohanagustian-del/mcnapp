@@ -12,8 +12,10 @@ export const dynamic = "force-dynamic";
 const SELECT_COLUMNS = [
   "product_id", "product_name", "shop_id", "shop_name",
   "level1_category", "level2_category", "price", "price_segment",
-  "commission_pct", "commission_note", "partner_commission_pct", "product_link",
-  "campaign_name", "campaign_count", "period_start", "period_end",
+  "commission_pct", "commission_note", "partner_commission_pct",
+  "creator_shop_ads_commission_pct", "partner_shop_ads_commission_pct", "product_link",
+  "campaign_id", "campaign_name", "campaign_count", "period_start", "period_end",
+  "effective_start", "effective_end",
   "affiliate_gmv", "affiliate_video_gmv", "affiliate_live_gmv",
   "settled_gmv", "gmv_refund", "revenue_showcase",
   "orders", "items_sold",
@@ -45,6 +47,11 @@ export default async function ProductsPage({
     // bawah), bukan sekadar yang terakhir terlihat — itu yang dicari saat matching.
     .order("affiliate_gmv", { ascending: false, nullsFirst: false })
     .order("last_seen", { ascending: false })
+    // Tie-break wajib: export "Export link" tidak membawa metrik GMV sama sekali,
+    // jadi tanpa ini SELURUH baris seri di dua kunci di atas dan Postgres bebas
+    // memulangkan urutan berbeda tiap request — baris bisa lompat antar halaman.
+    .order("campaign_id", { ascending: true, nullsFirst: false })
+    .order("product_id", { ascending: true })
     .limit(1000);
 
   if (level2) query = query.ilike("level2_category", `%${level2}%`);
@@ -66,8 +73,8 @@ export default async function ProductsPage({
     <div>
       <h1 className="text-2xl font-semibold">Produk TAP</h1>
       <p className="mt-1 text-sm text-slate-500">
-        Katalog produk TAP MEA — gabungan upload custom report TikTok Partner Compass + derive
-        otomatis dari file TAP mingguan (/ingest). Dipakai untuk Product×Creator Matching
+        Katalog produk TAP MEA — gabungan upload master product list (export TAP “Export link”) +
+        derive otomatis dari file TAP mingguan (/ingest). Dipakai untuk Product×Creator Matching
         (rule-based, 0 token AI): cocokkan segmen harga kemampuan jual kreator dengan produk di
         segmen sama.
       </p>
@@ -82,11 +89,12 @@ export default async function ProductsPage({
             <CsvUploadForm
               action={uploadMasterProducts}
               buttonLabel="Upload Master Product List"
-              helpText='Terima langsung export "Custom report" TikTok Partner Compass (Product ID, Product
-                name, Shop, Level 1/2 category, Affiliate GMV total/video/live, Orders, Items sold,
-                Collaborated creators, komisi estimasi & aktual, Settled GMV, refund, metrik Link)
-                MAUPUN campaign product list (Sale price, Creator/Partner commission rate, masa berlaku,
-                link produk). Kolom Shop opsional. Rupiah campur (titik/koma ribuan), harga rentang
+              helpText='Terima langsung file export TAP "Export link" (Campaign ID, product name,
+                Product ID, Sale price, Shop name, masa berlaku produk, rate komisi kreator & partner
+                termasuk versi Shop Ads, Product link) MAUPUN export "Custom report" Partner Compass
+                yang membawa metrik performa (Affiliate GMV total/video/live, Orders, Items sold,
+                Collaborated creators, komisi estimasi & aktual, Settled GMV, refund, metrik Link).
+                Kolom Shop ID dan kategori opsional. Rupiah campur (titik/koma ribuan), harga rentang
                 varian, dan komisi kotor ("not found", "5-7%") ditangani otomatis dengan flag "perlu
                 review", tidak crash. Baris "Summary" dilewati. Segmen harga dihitung dari harga memakai
                 app_config segments.price_bounds.'

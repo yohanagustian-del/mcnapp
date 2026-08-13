@@ -21,11 +21,16 @@ export interface ProductRow {
   commission_pct: number | null;
   commission_note: string | null;
   partner_commission_pct: number | null;
+  creator_shop_ads_commission_pct: number | null;
+  partner_shop_ads_commission_pct: number | null;
   product_link: string | null;
+  campaign_id: string | null;
   campaign_name: string | null;
   campaign_count: number | null;
   period_start: string | null;
   period_end: string | null;
+  effective_start: string | null;
+  effective_end: string | null;
   affiliate_gmv: number | null;
   affiliate_video_gmv: number | null;
   affiliate_live_gmv: number | null;
@@ -101,29 +106,30 @@ interface TableColumn {
 
 /**
  * Definisi kolom katalog — satu sumber untuk header, sel, pengurutan, dan menu Kolom.
- * Default kompak: Campaign ID, Product ID, Harga, Shop Name
+ *
+ * SEMUA kolom katalog ada di daftar ini dan bisa dimunculkan lewat menu "Kolom".
+ * Yang bertanda `compact: true` adalah preset bawaan, dan urutannya sengaja sama
+ * dengan export TAP "Export link": Campaign ID, Product ID, Sale Price, Shop Name.
  */
 const COLUMNS: TableColumn[] = [
   {
     label: "Campaign ID",
     compact: true,
-    value: (p) => p.campaign_name,
-    className: `${td} max-w-[12rem] truncate font-mono text-xs`,
+    value: (p) => p.campaign_id,
+    className: `${td} font-mono text-[11px]`,
     cell: (p) => (
-      <span title={p.campaign_name ?? undefined}>
-        {p.campaign_name ?? "—"}
-      </span>
+      <span title={p.campaign_name ?? undefined}>{p.campaign_id ?? "—"}</span>
     ),
   },
   {
     label: "Product ID",
     compact: true,
     value: (p) => p.product_id,
-    className: `${td} max-w-[12rem] truncate font-mono text-xs`,
+    className: `${td} font-mono text-[11px]`,
     cell: (p) => p.product_id,
   },
   {
-    label: "Harga (Sale Price)",
+    label: "Sale Price",
     compact: true,
     value: (p) => p.price,
     firstDir: "desc",
@@ -134,7 +140,7 @@ const COLUMNS: TableColumn[] = [
     label: "Shop Name",
     compact: true,
     value: (p) => p.shop_name ?? p.shop_id,
-    className: `${td} max-w-[10rem] truncate`,
+    className: `${td} max-w-[14rem] truncate`,
     cell: (p) => <span title={p.shop_id ?? undefined}>{p.shop_name ?? p.shop_id ?? "—"}</span>,
   },
   {
@@ -240,6 +246,8 @@ const COLUMNS: TableColumn[] = [
     ),
   },
   { label: "Komisi Partner", value: (p) => p.partner_commission_pct, firstDir: "desc", className: tdNum, cell: (p) => pct(p.partner_commission_pct) },
+  { label: "Komisi Kreator (Shop Ads)", value: (p) => p.creator_shop_ads_commission_pct, firstDir: "desc", className: tdNum, cell: (p) => pct(p.creator_shop_ads_commission_pct) },
+  { label: "Komisi Partner (Shop Ads)", value: (p) => p.partner_shop_ads_commission_pct, firstDir: "desc", className: tdNum, cell: (p) => pct(p.partner_shop_ads_commission_pct) },
   { label: "Komisi Kreator (Rp)", value: (p) => p.actual_creator_commission ?? p.est_creator_commission, firstDir: "desc", className: tdNum, cell: (p) => rpShort(p.actual_creator_commission ?? p.est_creator_commission) },
   { label: "Komisi Partner (Rp)", value: (p) => p.actual_partner_commission ?? p.est_partner_commission, firstDir: "desc", className: tdNum, cell: (p) => rpShort(p.actual_partner_commission ?? p.est_partner_commission) },
   { label: "Link GMV", value: (p) => p.link_gmv, firstDir: "desc", className: tdNum, cell: (p) => rpShort(p.link_gmv) },
@@ -262,6 +270,39 @@ const COLUMNS: TableColumn[] = [
     label: "Periode",
     value: (p) => p.period_start,
     cell: (p) => (p.period_start ? `${p.period_start} → ${p.period_end ?? "?"}` : "—"),
+  },
+  {
+    // Masa berlaku produk di campaign — dari "Product effective start/end time".
+    label: "Masa Berlaku",
+    value: (p) => p.effective_end,
+    firstDir: "asc",
+    cell: (p) =>
+      p.effective_start || p.effective_end
+        ? `${p.effective_start ?? "?"} → ${p.effective_end ?? "?"}`
+        : "—",
+  },
+  {
+    label: "Shop ID",
+    value: (p) => p.shop_id,
+    className: `${td} font-mono text-[11px]`,
+    cell: (p) => p.shop_id ?? "—",
+  },
+  {
+    label: "Link Produk",
+    value: (p) => p.product_link,
+    cell: (p) =>
+      p.product_link ? (
+        <a
+          href={p.product_link}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-blue-700 underline"
+        >
+          buka
+        </a>
+      ) : (
+        "—"
+      ),
   },
   {
     label: "Sumber",
@@ -296,7 +337,10 @@ const COLUMNS: TableColumn[] = [
 
 const ALL_LABELS = COLUMNS.map((c) => c.label);
 const COMPACT_LABELS = COLUMNS.filter((c) => c.compact).map((c) => c.label);
-const COLUMN_PREF_KEY = "mcn.products.columns.v1";
+// v2: preset bawaan berubah jadi Campaign ID / Product ID / Sale Price / Shop Name.
+// Kunci sengaja dinaikkan — kalau tetap v1, browser yang sudah pernah membuka
+// halaman ini akan memulihkan pilihan kolom lama dan preset baru tidak pernah terlihat.
+const COLUMN_PREF_KEY = "mcn.products.columns.v2";
 
 const SORT: SortConfig<ProductRow> = {
   columns: Object.fromEntries(
@@ -311,16 +355,22 @@ const SORT: SortConfig<ProductRow> = {
  * Tabel katalog Produk TAP.
  *
  * Fitur:
- * - Pengurutan ascending/descending per kolom dengan klik header
- * - Paginasi 10/50/100 baris per halaman (client-side)
- * - Wild search untuk Campaign ID, Product ID, Shop Name, Product Name
- * - Pilih kolom yang ingin ditampilkan (default: Campaign ID, Product ID, Harga, Shop Name)
- * - Preset compact menyimpan pilihan kolom di localStorage
+ * - Klik header untuk mengurutkan: naik → turun → urutan bawaan server.
+ * - Paginasi 10/50/100 baris per halaman.
+ * - Wild search satu kotak: Campaign ID, Product ID, Shop Name, Product Name.
+ * - Menu "Kolom" memuat SELURUH kolom katalog; bawaannya empat kolom inti
+ *   (Campaign ID, Product ID, Sale Price, Shop Name) dan pilihan pengguna
+ *   tersimpan di localStorage.
+ *
+ * Pengurutan/paginasi/pencarian semuanya client-side atas baris yang sudah
+ * dikirim server — mengetik atau klik header tidak memicu query Supabase baru.
  */
 export function ProductsTable({ rows, canEdit }: { rows: ProductRow[]; canEdit: boolean }) {
   const controls = useTableControls<ProductRow>({
     rows,
-    searchText: (p) => `${p.product_name ?? ""} ${p.product_id} ${p.shop_name ?? ""} ${p.campaign_name ?? ""}`,
+    // Wild search satu kotak: campaign id, product id, shop name, product name.
+    searchText: (p) =>
+      `${p.campaign_id ?? ""} ${p.product_id} ${p.shop_name ?? ""} ${p.product_name ?? ""} ${p.shop_id ?? ""} ${p.campaign_name ?? ""}`,
     sort: SORT,
     pageSizes: PAGE_SIZES_10_50_100,
     itemLabel: "produk",
@@ -337,7 +387,10 @@ export function ProductsTable({ rows, canEdit }: { rows: ProductRow[]; canEdit: 
   return (
     <div className="rounded-lg border border-slate-200 bg-white">
       <div className="flex flex-wrap items-center gap-2 border-b border-slate-200 px-3 py-2">
-        <TableFilterBar controls={controls} searchPlaceholder="Cari Campaign ID / Product ID / Shop Name / Product…" />
+        <TableFilterBar
+          controls={controls}
+          searchPlaceholder="Cari Campaign ID / Product ID / Shop Name / Product Name…"
+        />
         <ColumnPicker pref={columnPref} allLabels={ALL_LABELS} />
         <span className="ml-auto text-xs text-slate-400">
           Klik judul kolom untuk mengurutkan · pilihan kolom tersimpan di browser ini
