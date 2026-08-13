@@ -2,7 +2,7 @@
 
 import type { ReactNode } from "react";
 import {
-  ColumnPicker, PAGE_SIZES_10_20_50_100, SortableTh, TableFilterBar, TablePagination,
+  ColumnPicker, PAGE_SIZES_10_50_100, SortableTh, TableFilterBar, TablePagination,
   useColumnPreference, useTableControls,
   type SortConfig, type SortDir, type SortValue,
 } from "@/components/table-controls";
@@ -101,13 +101,44 @@ interface TableColumn {
 
 /**
  * Definisi kolom katalog — satu sumber untuk header, sel, pengurutan, dan menu Kolom.
- * Metrik mengikuti export Custom report TikTok Partner Compass (lihat tutorial di
- * halaman): GMV total/video/live, orders, items sold, jumlah kreator, komisi.
+ * Default kompak: Campaign ID, Product ID, Harga, Shop Name
  */
 const COLUMNS: TableColumn[] = [
   {
-    label: "Produk",
+    label: "Campaign ID",
     compact: true,
+    value: (p) => p.campaign_name,
+    className: `${td} max-w-[12rem] truncate font-mono text-xs`,
+    cell: (p) => (
+      <span title={p.campaign_name ?? undefined}>
+        {p.campaign_name ?? "—"}
+      </span>
+    ),
+  },
+  {
+    label: "Product ID",
+    compact: true,
+    value: (p) => p.product_id,
+    className: `${td} max-w-[12rem] truncate font-mono text-xs`,
+    cell: (p) => p.product_id,
+  },
+  {
+    label: "Harga (Sale Price)",
+    compact: true,
+    value: (p) => p.price,
+    firstDir: "desc",
+    className: tdNum,
+    cell: (p) => rpShort(p.price),
+  },
+  {
+    label: "Shop Name",
+    compact: true,
+    value: (p) => p.shop_name ?? p.shop_id,
+    className: `${td} max-w-[10rem] truncate`,
+    cell: (p) => <span title={p.shop_id ?? undefined}>{p.shop_name ?? p.shop_id ?? "—"}</span>,
+  },
+  {
+    label: "Produk",
     value: (p) => p.product_name ?? p.product_id,
     className: `${td} max-w-[20rem] truncate font-medium`,
     cell: (p) => (
@@ -123,15 +154,7 @@ const COLUMNS: TableColumn[] = [
     ),
   },
   {
-    label: "Shop",
-    compact: true,
-    value: (p) => p.shop_name ?? p.shop_id,
-    className: `${td} max-w-[10rem] truncate`,
-    cell: (p) => <span title={p.shop_id ?? undefined}>{p.shop_name ?? p.shop_id ?? "—"}</span>,
-  },
-  {
     label: "Kategori L2",
-    compact: true,
     value: (p) => p.level2_category,
     className: `${td} max-w-[11rem] truncate`,
     cell: (p) => (
@@ -142,16 +165,7 @@ const COLUMNS: TableColumn[] = [
   },
   { label: "Kategori L1", value: (p) => p.level1_category, cell: (p) => p.level1_category ?? "—" },
   {
-    label: "Harga",
-    compact: true,
-    value: (p) => p.price,
-    firstDir: "desc",
-    className: tdNum,
-    cell: (p) => rpShort(p.price),
-  },
-  {
     label: "Segmen",
-    compact: true,
     value: (p) => p.price_segment,
     cell: (p) =>
       p.price_segment ? (
@@ -164,17 +178,13 @@ const COLUMNS: TableColumn[] = [
   },
   {
     label: "Affiliate GMV",
-    compact: true,
     value: (p) => p.affiliate_gmv,
     firstDir: "desc",
     className: tdNum,
     cell: (p) => rpShort(p.affiliate_gmv),
   },
   {
-    // %live tersedia langsung dari export (live vs video GMV) — dihitung di sel,
-    // bukan disimpan: turunan murni dari dua kolom yang sudah ada.
     label: "% Live",
-    compact: true,
     value: (p) => (p.affiliate_gmv ? (p.affiliate_live_gmv ?? 0) / p.affiliate_gmv : null),
     firstDir: "desc",
     className: tdNum,
@@ -190,7 +200,6 @@ const COLUMNS: TableColumn[] = [
   { label: "Revenue Showcase", value: (p) => p.revenue_showcase, firstDir: "desc", className: tdNum, cell: (p) => rpShort(p.revenue_showcase) },
   {
     label: "Items Sold",
-    compact: true,
     value: (p) => p.items_sold,
     firstDir: "desc",
     className: tdNum,
@@ -199,7 +208,6 @@ const COLUMNS: TableColumn[] = [
   { label: "Orders", value: (p) => p.orders, firstDir: "desc", className: tdNum, cell: (p) => count(p.orders) },
   {
     label: "Kreator",
-    compact: true,
     value: (p) => p.collaborated_creators,
     firstDir: "desc",
     className: tdNum,
@@ -217,7 +225,6 @@ const COLUMNS: TableColumn[] = [
   { label: "Kreator Ada Sales", value: (p) => p.creators_with_sales, firstDir: "desc", className: tdNum, cell: (p) => count(p.creators_with_sales) },
   {
     label: "Komisi Kreator",
-    compact: true,
     value: (p) => p.commission_pct,
     firstDir: "desc",
     className: tdNum,
@@ -271,7 +278,6 @@ const COLUMNS: TableColumn[] = [
   },
   {
     label: "Status",
-    compact: true,
     value: (p) => (p.needs_review ? 0 : p.active ? 2 : 1),
     cell: (p) => (
       <>
@@ -286,7 +292,6 @@ const COLUMNS: TableColumn[] = [
     ),
   },
   { label: "Terakhir Terlihat", value: (p) => p.last_seen, firstDir: "desc", cell: (p) => p.last_seen ?? "—" },
-  { label: "Product ID", value: (p) => p.product_id, className: `${td} font-mono text-[11px]`, cell: (p) => p.product_id },
 ];
 
 const ALL_LABELS = COLUMNS.map((c) => c.label);
@@ -305,24 +310,19 @@ const SORT: SortConfig<ProductRow> = {
 /**
  * Tabel katalog Produk TAP.
  *
- * Header bisa diklik untuk mengurutkan naik → turun → urutan bawaan server (GMV
- * terbesar dulu), paginasi 10/20/50/100, pencarian nama/ID produk, dan tombol Edit
- * per baris untuk pemegang izin `products.edit`.
- *
- * Katalog ini punya ~30 kolom metrik, jadi halaman TIDAK dirancang untuk digeser
- * kanan-kiri: defaultnya preset "Ringkas" (11 kolom + Aksi) dengan padding rapat
- * dan nominal dipadatkan ("Rp1,2 jt", angka penuh di tooltip); sisanya dimunculkan
- * lewat menu Kolom dan pilihannya tersimpan di browser.
- *
- * Semua pengurutan/paginasi client-side atas baris yang sudah dikirim server —
- * mengetik atau klik header tidak memicu query Supabase baru.
+ * Fitur:
+ * - Pengurutan ascending/descending per kolom dengan klik header
+ * - Paginasi 10/50/100 baris per halaman (client-side)
+ * - Wild search untuk Campaign ID, Product ID, Shop Name, Product Name
+ * - Pilih kolom yang ingin ditampilkan (default: Campaign ID, Product ID, Harga, Shop Name)
+ * - Preset compact menyimpan pilihan kolom di localStorage
  */
 export function ProductsTable({ rows, canEdit }: { rows: ProductRow[]; canEdit: boolean }) {
   const controls = useTableControls<ProductRow>({
     rows,
-    searchText: (p) => `${p.product_name ?? ""} ${p.product_id} ${p.shop_name ?? ""}`,
+    searchText: (p) => `${p.product_name ?? ""} ${p.product_id} ${p.shop_name ?? ""} ${p.campaign_name ?? ""}`,
     sort: SORT,
-    pageSizes: PAGE_SIZES_10_20_50_100,
+    pageSizes: PAGE_SIZES_10_50_100,
     itemLabel: "produk",
   });
 
@@ -337,15 +337,13 @@ export function ProductsTable({ rows, canEdit }: { rows: ProductRow[]; canEdit: 
   return (
     <div className="rounded-lg border border-slate-200 bg-white">
       <div className="flex flex-wrap items-center gap-2 border-b border-slate-200 px-3 py-2">
-        <TableFilterBar controls={controls} searchPlaceholder="Cari nama / ID produk / shop…" />
+        <TableFilterBar controls={controls} searchPlaceholder="Cari Campaign ID / Product ID / Shop Name / Product…" />
         <ColumnPicker pref={columnPref} allLabels={ALL_LABELS} />
         <span className="ml-auto text-xs text-slate-400">
           Klik judul kolom untuk mengurutkan · pilihan kolom tersimpan di browser ini
         </span>
       </div>
 
-      {/* Jaring pengaman untuk layar sempit / saat semua kolom dicentang — bukan
-          cara baca yang diharapkan pada preset Ringkas. */}
       <div className="overflow-x-auto">
         <table className="min-w-full text-xs sm:text-sm">
           <thead className="bg-slate-50 text-left text-xs uppercase text-slate-500">
