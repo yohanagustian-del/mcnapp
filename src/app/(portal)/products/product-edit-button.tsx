@@ -73,6 +73,9 @@ export function ProductEditButton({ product }: { product: ProductRow }) {
 
             <form action={formAction} className="mt-4">
               <input type="hidden" name="product_id" value={product.product_id} />
+              {/* Kunci baris = (campaign_id, product_id) sejak 0040 — tanpa ini
+                  update akan menyasar seluruh campaign untuk produk yang sama. */}
+              <input type="hidden" name="campaign_id" value={product.campaign_id ?? "-"} />
 
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                 <div className="sm:col-span-2">

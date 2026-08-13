@@ -7,6 +7,7 @@ import {
   type SortConfig, type SortDir, type SortValue,
 } from "@/components/table-controls";
 import { ProductEditButton } from "./product-edit-button";
+import { CopyLinkButton } from "./copy-link-button";
 
 /** Satu baris katalog Produk TAP — master + metrik dari export Custom report. */
 export interface ProductRow {
@@ -54,6 +55,10 @@ export interface ProductRow {
   needs_review: boolean;
   first_seen: string | null;
   last_seen: string | null;
+  /** Pemilik baris: akun yang meng-upload (null = hasil derive ingest mingguan). */
+  uploaded_by: string | null;
+  uploader_name: string | null;
+  uploader_team: string | null;
 }
 
 export const SEGMENT_LABEL: Record<string, string> = {
@@ -142,6 +147,60 @@ const COLUMNS: TableColumn[] = [
     value: (p) => p.shop_name ?? p.shop_id,
     className: `${td} max-w-[14rem] truncate`,
     cell: (p) => <span title={p.shop_id ?? undefined}>{p.shop_name ?? p.shop_id ?? "—"}</span>,
+  },
+  {
+    // Nama pemilik baris — akun yang meng-upload campaign ini.
+    label: "Nama",
+    compact: true,
+    value: (p) => p.uploader_name,
+    className: `${td} max-w-[12rem] truncate`,
+    cell: (p) => {
+      if (p.uploader_name) {
+        return (
+          <span title={[p.uploader_name, p.uploader_team].filter(Boolean).join(" · ")}>
+            {p.uploader_name}
+          </span>
+        );
+      }
+      // Tanpa pemilik ada dua sebab yang berbeda artinya, jadi jangan disamakan:
+      // baris derive memang tidak pernah punya peng-upload, sedangkan baris
+      // master_upload lama diunggah sebelum kolom kepemilikan ada.
+      return p.source === "derived_tap" ? (
+        <span className="text-slate-400" title="Hasil derive ingest mingguan, bukan upload manual">
+          ingest
+        </span>
+      ) : (
+        <span
+          className="text-slate-400"
+          title="Diunggah sebelum kepemilikan dicatat — akan terisi saat campaign ini di-upload ulang"
+        >
+          belum tercatat
+        </span>
+      );
+    },
+  },
+  {
+    label: "Tim",
+    value: (p) => p.uploader_team,
+    cell: (p) =>
+      p.uploader_team ? (
+        <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-700">
+          {p.uploader_team}
+        </span>
+      ) : (
+        "—"
+      ),
+  },
+  {
+    label: "Salin Link",
+    compact: true,
+    className: `${td} text-center`,
+    cell: (p) =>
+      p.product_link ? (
+        <CopyLinkButton url={p.product_link} label={p.product_name ?? p.product_id} />
+      ) : (
+        <span className="text-slate-300">—</span>
+      ),
   },
   {
     label: "Produk",
@@ -337,10 +396,10 @@ const COLUMNS: TableColumn[] = [
 
 const ALL_LABELS = COLUMNS.map((c) => c.label);
 const COMPACT_LABELS = COLUMNS.filter((c) => c.compact).map((c) => c.label);
-// v2: preset bawaan berubah jadi Campaign ID / Product ID / Sale Price / Shop Name.
-// Kunci sengaja dinaikkan — kalau tetap v1, browser yang sudah pernah membuka
-// halaman ini akan memulihkan pilihan kolom lama dan preset baru tidak pernah terlihat.
-const COLUMN_PREF_KEY = "mcn.products.columns.v2";
+// v3: preset bawaan bertambah kolom Nama (pemilik baris) dan Salin Link.
+// Kunci dinaikkan tiap preset berubah — kalau tidak, browser yang sudah pernah
+// membuka halaman ini memulihkan pilihan lama dan kolom baru tidak pernah muncul.
+const COLUMN_PREF_KEY = "mcn.products.columns.v3";
 
 const SORT: SortConfig<ProductRow> = {
   columns: Object.fromEntries(
@@ -370,7 +429,7 @@ export function ProductsTable({ rows, canEdit }: { rows: ProductRow[]; canEdit: 
     rows,
     // Wild search satu kotak: campaign id, product id, shop name, product name.
     searchText: (p) =>
-      `${p.campaign_id ?? ""} ${p.product_id} ${p.shop_name ?? ""} ${p.product_name ?? ""} ${p.shop_id ?? ""} ${p.campaign_name ?? ""}`,
+      `${p.campaign_id ?? ""} ${p.product_id} ${p.shop_name ?? ""} ${p.product_name ?? ""} ${p.shop_id ?? ""} ${p.campaign_name ?? ""} ${p.uploader_name ?? ""}`,
     sort: SORT,
     pageSizes: PAGE_SIZES_10_50_100,
     itemLabel: "produk",
@@ -415,7 +474,12 @@ export function ProductsTable({ rows, canEdit }: { rows: ProductRow[]; canEdit: 
           </thead>
           <tbody className="divide-y divide-slate-100">
             {controls.visibleRows.map((p) => (
-              <tr key={p.product_id} className={p.needs_review ? "bg-amber-50" : "hover:bg-slate-50"}>
+              // Kunci baris ikut campaign: satu product_id bisa muncul di beberapa
+              // campaign, jadi product_id saja akan bentrok sebagai React key.
+              <tr
+                key={`${p.campaign_id ?? "-"}|${p.product_id}`}
+                className={p.needs_review ? "bg-amber-50" : "hover:bg-slate-50"}
+              >
                 {visibleColumns.map((col) => (
                   <td key={col.label} className={col.className ?? td}>
                     {col.cell(p)}

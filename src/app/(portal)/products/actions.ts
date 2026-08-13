@@ -51,14 +51,19 @@ export async function updateProduct(
     const actor = await requirePermission("products.edit");
     const productId = String(formData.get("product_id") ?? "").trim();
     if (!productId) throw new Error("Product ID wajib diisi");
+    // Kunci baris = (campaign_id, product_id) sejak 0040. Tanpa menyaring
+    // campaign, satu edit akan mengubah baris produk ini di SEMUA campaign —
+    // termasuk milik akun lain.
+    const campaignId = String(formData.get("campaign_id") ?? "").trim() || "-";
 
     const admin = createAdminClient();
     const { data: before } = await admin
       .from("products_tap")
       .select(
-        "product_id, product_name, shop_id, shop_name, level1_category, level2_category, price, price_segment, commission_pct, commission_note, partner_commission_pct, product_link, active, needs_review"
+        "product_id, campaign_id, product_name, shop_id, shop_name, level1_category, level2_category, price, price_segment, commission_pct, commission_note, partner_commission_pct, product_link, active, needs_review"
       )
       .eq("product_id", productId)
+      .eq("campaign_id", campaignId)
       .maybeSingle();
     if (!before) throw new Error(`Produk ${productId} tidak ditemukan`);
 
@@ -101,7 +106,11 @@ export async function updateProduct(
     patch.needs_review = price === null || commission === null;
     patch.updated_at = new Date().toISOString();
 
-    const { error } = await admin.from("products_tap").update(patch).eq("product_id", productId);
+    const { error } = await admin
+      .from("products_tap")
+      .update(patch)
+      .eq("product_id", productId)
+      .eq("campaign_id", campaignId);
     if (error) throw new Error(`Gagal menyimpan: ${error.message}`);
 
     await writeAudit({

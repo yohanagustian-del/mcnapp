@@ -24,12 +24,30 @@ const SELECT_COLUMNS = [
   "est_creator_commission", "actual_creator_commission",
   "link_gmv", "link_items_sold", "link_orders",
   "source", "active", "needs_review", "first_seen", "last_seen",
+  "uploaded_by",
 ].join(", ");
+
+/** Tim yang bisa dipakai menyaring katalog (nilai enum team_group_t). */
+const TEAM_OPTIONS = [
+  { value: "bizdev", label: "BizDev" },
+  { value: "cm", label: "CM" },
+  { value: "acquisition", label: "Acquisition" },
+  { value: "management", label: "Management" },
+  { value: "od", label: "OD" },
+  { value: "support", label: "Support" },
+  { value: "finance", label: "Finance" },
+  { value: "external", label: "External" },
+];
 
 export default async function ProductsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ level2?: string; segment?: string; review?: string }>;
+  searchParams: Promise<{
+    level2?: string;
+    segment?: string;
+    review?: string;
+    team?: string;
+  }>;
 }) {
   const member = await requireMember();
   const navItem = NAV_ITEMS.find((n) => n.href === "/products");
@@ -37,9 +55,23 @@ export default async function ProductsPage({
   const canUpload = hasPermission("products.upload_master", member.role);
   const canEdit = hasPermission("products.edit", member.role);
 
-  const { level2, segment, review } = await searchParams;
+  const { level2, segment, review, team } = await searchParams;
 
   const supabase = await createClient();
+
+  // Identitas peng-upload di-join di aplikasi, bukan lewat embed PostgREST:
+  // team_members hanya puluhan baris, sekali baca jauh lebih murah (dan lebih
+  // tahan perubahan nama constraint FK) daripada embed per query.
+  const { data: memberRows } = await supabase
+    .from("team_members")
+    .select("id, name, team_group");
+  const memberById = new Map(
+    (memberRows ?? []).map((m) => [
+      m.id as string,
+      { name: m.name as string, team: m.team_group as string },
+    ])
+  );
+
   let query = supabase
     .from("products_tap")
     .select(SELECT_COLUMNS)
@@ -57,6 +89,15 @@ export default async function ProductsPage({
   if (level2) query = query.ilike("level2_category", `%${level2}%`);
   if (segment) query = query.eq("price_segment", segment);
   if (review === "1") query = query.eq("needs_review", true);
+  if (team) {
+    // Tim disaring lewat pemiliknya. Kalau tim itu belum punya anggota, daftar id
+    // kosong dan `.in()` dengan array kosong akan memulangkan 0 baris — memang
+    // itu jawaban yang benar, bukan "tampilkan semua".
+    const teamMemberIds = (memberRows ?? [])
+      .filter((m) => m.team_group === team)
+      .map((m) => m.id as string);
+    query = query.in("uploaded_by", teamMemberIds);
+  }
 
   const { data: products, error } = await query;
 
@@ -67,7 +108,10 @@ export default async function ProductsPage({
     .limit(1000);
   const categories = [...new Set((categoryRows ?? []).map((r) => r.level2_category).filter(Boolean))].sort();
 
-  const rows = (products ?? []) as unknown as ProductRow[];
+  const rows = ((products ?? []) as unknown as ProductRow[]).map((p) => {
+    const owner = p.uploaded_by ? memberById.get(p.uploaded_by) : undefined;
+    return { ...p, uploader_name: owner?.name ?? null, uploader_team: owner?.team ?? null };
+  });
 
   return (
     <div>
@@ -76,7 +120,9 @@ export default async function ProductsPage({
         Katalog produk TAP MEA — gabungan upload master product list (export TAP “Export link”) +
         derive otomatis dari file TAP mingguan (/ingest). Dipakai untuk Product×Creator Matching
         (rule-based, 0 token AI): cocokkan segmen harga kemampuan jual kreator dengan produk di
-        segmen sama.
+        segmen sama. Tiap baris tercatat atas nama akun yang meng-upload-nya (kolom{" "}
+        <strong>Nama</strong>); satu produk yang dipakai di beberapa campaign muncul sebagai baris
+        terpisah per campaign, jadi upload satu tim tidak pernah menimpa milik tim lain.
       </p>
 
       {canUpload && (
@@ -125,6 +171,21 @@ export default async function ProductsPage({
             <option value="">Semua segmen</option>
             {Object.entries(SEGMENT_LABEL).map(([k, label]) => (
               <option key={k} value={k}>{label}</option>
+            ))}
+          </select>
+        </div>
+        <div>
+          <label className="block text-xs text-slate-500">Tim (pemilik data)</label>
+          <select
+            name="team"
+            defaultValue={team ?? ""}
+            className="mt-1 w-44 rounded-md border border-slate-200 px-2 py-1.5 text-sm"
+          >
+            <option value="">Semua tim</option>
+            {TEAM_OPTIONS.map((t) => (
+              <option key={t.value} value={t.value}>
+                {t.label}
+              </option>
             ))}
           </select>
         </div>
