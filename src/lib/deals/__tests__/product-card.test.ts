@@ -6,6 +6,7 @@ import {
 } from "@/lib/deals/campaign-type";
 import {
   campaignDefaultsFromForm,
+  isEmptyProductCard,
   productCardIssues,
   productCardSchema,
 } from "@/lib/deals/product-card";
@@ -14,7 +15,7 @@ import {
 function form(over: Record<string, string> = {}) {
   return {
     campaign_id: "",
-    product_name: "Serum Vit C 30ml",
+    product_name: "",
     product_id: "",
     price: "",
     shop_name: "",
@@ -36,19 +37,32 @@ function form(over: Record<string, string> = {}) {
 }
 
 describe("form kartu produk (Registrasi Deal)", () => {
-  it("hanya Product Name yang wajib — sisanya boleh kosong", () => {
-    const parsed = productCardSchema.safeParse(form());
+  it("semua pertanyaan opsional — termasuk Product Name", () => {
+    const parsed = productCardSchema.safeParse(form({ product_name: "   " }));
     expect(parsed.success).toBe(true);
     if (!parsed.success) return;
-    expect(parsed.data.product_name).toBe("Serum Vit C 30ml");
+    expect(parsed.data.product_name).toBeUndefined();
     expect(productCardIssues(parsed.data)).toEqual({});
   });
 
-  it("menolak Product Name kosong", () => {
-    const parsed = productCardSchema.safeParse(form({ product_name: "   " }));
-    expect(parsed.success).toBe(false);
-    if (parsed.success) return;
-    expect(parsed.error.issues[0].path[0]).toBe("product_name");
+  it("kartu dengan Product Name terisi tetap dibaca apa adanya", () => {
+    const parsed = productCardSchema.parse(form({ product_name: " Serum Vit C 30ml " }));
+    expect(parsed.product_name).toBe("Serum Vit C 30ml");
+    expect(isEmptyProductCard(parsed)).toBe(false);
+  });
+
+  it("form yang kosong SELURUHNYA ditolak — kartunya tak menyimpan informasi apa pun", () => {
+    expect(isEmptyProductCard(productCardSchema.parse(form()))).toBe(true);
+
+    // Satu kolom mana pun sudah cukup: tidak ada kolom tertentu yang diwajibkan.
+    const satuKolom: Record<string, string>[] = [
+      { product_name: "Serum" },
+      { product_id: "1729859716545022432" },
+      { price: "0" },
+    ];
+    for (const isian of satuKolom) {
+      expect(isEmptyProductCard(productCardSchema.parse(form(isian)))).toBe(false);
+    }
   });
 
   it('kolom kosong jadi undefined, bukan 0 — 0% komisi ≠ "belum diisi"', () => {

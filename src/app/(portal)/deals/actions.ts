@@ -15,6 +15,7 @@ import { parseFlexibleDate } from "@/lib/utils/date";
 import { commissionRaw, dealReviewFlags } from "@/lib/deals/form";
 import {
   PRODUCT_CARD_FIELD_LABEL,
+  isEmptyProductCard,
   productCardIssues,
   productCardSchema,
 } from "@/lib/deals/product-card";
@@ -45,10 +46,12 @@ export interface DealFormState {
  * service fee, deal by, PIC TAP), dan barisnya masuk ke `products_tap` — bukan tabel
  * kartu tersendiri, supaya katalog produk tetap satu sumber (CLAUDE.md #4).
  *
- * Yang wajib hanya Product Name (plus Ads Budget & Service Fee saat tipe campaign =
- * komisi extra). Kolom yang belum diketahui sengaja boleh kosong: memaksa mengisi
- * shop_id/komisi yang belum ketemu justru memancing isian karangan — masalah persis
- * yang membuat master deal lama berantakan (CLAUDE.md #6).
+ * SEMUA pertanyaan opsional; satu-satunya kewajiban yang tersisa bersifat kondisional
+ * (Ads Budget & Service Fee saat tipe campaign = Paid Campaign). Kolom yang belum
+ * diketahui sengaja boleh kosong: memaksa mengisi nama/shop_id/komisi yang belum
+ * ketemu justru memancing isian karangan — masalah persis yang membuat master deal
+ * lama berantakan (CLAUDE.md #6). Yang ditolak hanya form yang kosong SELURUHNYA,
+ * karena kartu tanpa satu pun isian tidak menyimpan informasi apa pun.
  *
  * Menulis lewat admin client karena RLS products_tap = service-role only (0019);
  * izinnya tetap ditegakkan di server lewat requirePermission.
@@ -69,6 +72,15 @@ export async function registerDealCard(
   }
   const d = parsed.data;
 
+  if (isEmptyProductCard(d)) {
+    return {
+      ok: false,
+      message:
+        "Form masih kosong. Isi minimal satu kolom (mis. Product Name atau Product ID) " +
+        "supaya kartunya bisa dikenali di tab Produk TAP.",
+    };
+  }
+
   const issues = productCardIssues(d);
   if (Object.keys(issues).length > 0) {
     return { ok: false, message: "Periksa kembali isian form.", fieldErrors: issues };
@@ -88,7 +100,7 @@ export async function registerDealCard(
   const record = {
     campaign_id: campaignId,
     product_id: productId,
-    product_name: d.product_name,
+    product_name: d.product_name ?? null,
     price,
     // Segmen harga TIDAK diisi manual — dihitung dari harga memakai threshold
     // app_config, sama seperti jalur upload & derive (CLAUDE.md konvensi kode).
@@ -110,7 +122,10 @@ export async function registerDealCard(
     source: "deal_register",
     // Pemilik baris = akun yang mendaftarkan (kolom "Nama BD" di tabel Produk TAP).
     uploaded_by: actor.id,
-    needs_review: generatedProductId,
+    // Kartu tanpa Product ID asli tak bisa dicocokkan ke data TAP mingguan; kartu
+    // tanpa nama tak bisa dikenali manusia di tabel. Keduanya perlu dilengkapi lewat
+    // Edit di tab Produk TAP, jadi keduanya menandai baris "perlu review".
+    needs_review: generatedProductId || d.product_name === undefined,
     first_seen: new Date().toISOString().slice(0, 10),
     last_seen: new Date().toISOString().slice(0, 10),
     updated_at: new Date().toISOString(),
@@ -148,10 +163,13 @@ export async function registerDealCard(
   if (generatedProductId) {
     notes.push(`Product ID belum diisi → dipakai ID internal ${productId} dan ditandai perlu review`);
   }
+  if (d.product_name === undefined) {
+    notes.push("Product Name belum diisi → kartu ditandai perlu review, lengkapi lewat tab Produk TAP");
+  }
   return {
     ok: true,
     message:
-      `Kartu produk "${d.product_name}" tersimpan di tab Produk TAP.` +
+      `Kartu produk ${d.product_name ? `"${d.product_name}"` : productId} tersimpan di tab Produk TAP.` +
       (notes.length ? ` ${notes.join("; ")}.` : ""),
   };
 }

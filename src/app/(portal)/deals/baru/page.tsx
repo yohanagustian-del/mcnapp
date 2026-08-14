@@ -45,9 +45,9 @@ export default async function DealBaruPage() {
       <p className="mt-1 text-sm text-slate-500">
         Isian form ini mengikuti kolom tabel <strong>Produk TAP</strong> (export TAP “Export
         link”), ditambah Tipe Campaign, Ads Budget, Service Fee, Deal by, dan PIC TAP. Setelah
-        disimpan, kartunya langsung muncul sebagai baris di tab Produk TAP. Hanya Product Name
-        yang wajib; Ads Budget &amp; Service Fee wajib khusus untuk tipe{" "}
-        <strong>Paid Campaign</strong>.
+        disimpan, kartunya langsung muncul sebagai baris di tab Produk TAP.{" "}
+        <strong>Semua pertanyaannya opsional</strong> — isi minimal satu kolom; hanya Ads Budget
+        &amp; Service Fee yang wajib, dan itu khusus untuk tipe <strong>Paid Campaign</strong>.
       </p>
       <div className="mt-6">
         <DealForm picOptions={(picOptions ?? []) as MemberOption[]} dealByOptions={dealByOptions} />

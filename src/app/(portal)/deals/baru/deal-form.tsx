@@ -22,9 +22,9 @@ export interface MemberOption {
  * yang tampil di tabel Produk TAP, supaya BizDev bisa menyalin isian langsung dari
  * file/room campaign tanpa menerjemahkan istilah.
  *
- * Hanya Product Name yang wajib. Ads Budget & Service Fee baru muncul (dan baru
- * wajib) saat Tipe Campaign = Paid Campaign — aturan yang sama divalidasi ulang di
- * server lewat productCardIssues, bukan hanya di sini.
+ * Semua pertanyaan opsional. Satu-satunya yang bisa jadi wajib adalah Ads Budget &
+ * Service Fee, dan hanya saat Tipe Campaign = Paid Campaign — aturan yang sama
+ * divalidasi ulang di server lewat productCardIssues, bukan hanya di sini.
  */
 export function DealForm({
   picOptions,
@@ -60,8 +60,8 @@ export function DealForm({
         <Field label="Campaign ID" error={err("campaign_id")}>
           <input name="campaign_id" className={inputCls} placeholder="7662920044527912724" />
         </Field>
-        <Field label="Product Name *" error={err("product_name")}>
-          <input name="product_name" required className={inputCls} placeholder="Serum Vit C 30ml" />
+        <Field label="Product Name" error={err("product_name")}>
+          <input name="product_name" className={inputCls} placeholder="Serum Vit C 30ml" />
         </Field>
         <Field label="Product ID" error={err("product_id")}>
           <input name="product_id" inputMode="numeric" className={inputCls} placeholder="1729859716545022432" />
@@ -169,11 +169,14 @@ export function DealForm({
       </Field>
 
       <p className="rounded-md bg-slate-50 p-3 text-xs text-slate-500">
-        Hanya <strong>Product Name</strong> yang wajib diisi; sisanya boleh menyusul dan bisa
-        diperbaiki lewat tombol Edit di tab Produk TAP. Kolom <strong>Nama BD</strong> terisi
-        otomatis dari akun Anda, dan <strong>Segmen Harga</strong> dihitung server dari Sale Price
-        memakai threshold app_config. Kartu tanpa Product ID tetap tersimpan, tapi ditandai
-        &ldquo;perlu review&rdquo; karena tidak bisa dicocokkan dengan data TAP mingguan.
+        <strong>Semua isian opsional</strong> — isi yang sudah diketahui saja, sisanya boleh
+        menyusul lewat tombol Edit di tab Produk TAP (kecuali Ads Budget &amp; Service Fee yang
+        wajib untuk {CAMPAIGN_TYPE_NEEDS_BUDGET_LABEL}). Minimal satu kolom harus terisi supaya
+        kartunya bisa dikenali. Kolom <strong>Nama BD</strong> terisi otomatis dari akun Anda, dan{" "}
+        <strong>Segmen Harga</strong> dihitung server dari Sale Price memakai threshold app_config.
+        Kartu tanpa <strong>Product ID</strong> atau tanpa <strong>Product Name</strong> tetap
+        tersimpan, tapi ditandai &ldquo;perlu review&rdquo;: tanpa Product ID kartunya tidak bisa
+        dicocokkan dengan data TAP mingguan, tanpa nama sulit dikenali di tabel.
       </p>
 
       <button

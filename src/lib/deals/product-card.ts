@@ -13,9 +13,15 @@ import {
  *
  * Pertanyaan formnya = header tabel Produk TAP (export TAP "Export link") + dimensi
  * komersial yang tidak ada di export platform (tipe campaign, ads budget, service
- * fee, deal by, PIC TAP). Hanya Product Name yang wajib — sisanya sering belum
- * diketahui saat deal baru ditutup, dan memaksa mengisinya justru memancing isian
- * karangan (masalah yang sama dengan master deal lama, CLAUDE.md #6).
+ * fee, deal by, PIC TAP). SEMUA pertanyaan opsional — termasuk Product Name — karena
+ * saat deal baru ditutup sebagian besar kolom belum diketahui, dan memaksa mengisinya
+ * justru memancing isian karangan (masalah yang sama dengan master deal lama,
+ * CLAUDE.md #6). Satu-satunya aturan "wajib" yang tersisa bersifat kondisional: Ads
+ * Budget & Service Fee saat tipe campaign = Paid Campaign.
+ *
+ * Yang tetap dijaga ketat = FORMAT isian yang diisi (ID numerik, tanggal dari date
+ * picker, komisi 0–100), plus larangan menyimpan kartu yang benar-benar kosong
+ * (`isEmptyProductCard`) — kartu tanpa satu pun isian tidak menambah informasi apa pun.
  */
 
 /** Teks kosong dari input yang tidak diisi → undefined (bukan 0 / string kosong). */
@@ -42,8 +48,10 @@ const optionalDate = z.preprocess(
 
 export const productCardSchema = z.object({
   campaign_id: optionalText,
-  // Satu-satunya isian wajib: tanpa nama produk kartunya tidak berarti apa-apa.
-  product_name: z.string().trim().min(1, "Product Name wajib diisi"),
+  // Opsional seperti kolom lain: nama produk sering baru turun belakangan (kartu
+  // didaftarkan dari Product ID/link lebih dulu) dan bisa dilengkapi lewat Edit di
+  // tab Produk TAP. Kartu tanpa nama ditandai perlu review oleh pemanggilnya.
+  product_name: optionalText,
   product_id: z.preprocess(
     blankToUndefined,
     z.string().trim().regex(/^\d+$/, "Product ID harus angka").optional()
@@ -69,6 +77,16 @@ export const productCardSchema = z.object({
 });
 
 export type ProductCardInput = z.infer<typeof productCardSchema>;
+
+/**
+ * Semua pertanyaan opsional berarti form kosong pun lolos validasi per-field. Kartu
+ * seperti itu hanya menghasilkan baris ber-ID internal tanpa satu pun informasi —
+ * sampah yang tidak bisa dicocokkan maupun diperbaiki. Ditolak di sini, bukan dengan
+ * mewajibkan salah satu kolom tertentu.
+ */
+export function isEmptyProductCard(d: ProductCardInput): boolean {
+  return Object.values(d).every((v) => v === undefined);
+}
 
 /**
  * Aturan yang tidak bisa dinyatakan per-field: Ads Budget & Service Fee wajib
