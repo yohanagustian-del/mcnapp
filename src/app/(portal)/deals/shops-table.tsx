@@ -1,6 +1,6 @@
 "use client";
 
-import type { ReactNode } from "react";
+import { useMemo, type ReactNode } from "react";
 import {
   ColumnPicker, PAGE_SIZES_10_20_50_100, SortableTh, TablePagination,
   useColumnPreference, useTableControls,
@@ -43,6 +43,11 @@ export interface ShopSummaryRow {
   /** Nama anggota tim hasil resolve server dari deal_by_ids / pic_tap_ids. */
   deal_by_names: string[];
   pic_tap_names: string[];
+  /**
+   * Nama BD pemilik kartu shop ini (products_tap.uploaded_by). Selalu kosong untuk
+   * role yang tidak boleh melihatnya — servernya yang menyaring, bukan tabel ini.
+   */
+  uploaded_by_names: string[];
 }
 
 /** Rupiah dipadatkan ("Rp1,2 jt") — nominal penuh tetap tersedia lewat title. */
@@ -86,6 +91,11 @@ interface TableColumn {
   label: string;
   /** Ikut tampil pada preset "Ringkas" (tampilan awal, muat tanpa scroll). */
   compact?: boolean;
+  /**
+   * Kolom yang membuka identitas pemilik data (Nama BD). Hanya dirender untuk role
+   * yang punya izin `products.view_owner_name` — sama seperti tabel Produk TAP.
+   */
+  ownerOnly?: boolean;
   value?: (s: ShopSummaryRow) => SortValue;
   firstDir?: SortDir;
   cell: (s: ShopSummaryRow) => ReactNode;
@@ -180,8 +190,11 @@ const COLUMNS: TableColumn[] = [
     className: tdNum,
     cell: (s) => pct(s.avg_partner_commission_pct),
   },
+  // Ads Budget & Service Fee TIDAK lagi ada di tabel Produk TAP — tabel inilah
+  // satu-satunya tempat keduanya terbaca, jadi ikut preset "Ringkas".
   {
     label: "Ads Budget",
+    compact: true,
     value: (s) => s.ads_budget,
     firstDir: "desc",
     className: tdNum,
@@ -189,6 +202,7 @@ const COLUMNS: TableColumn[] = [
   },
   {
     label: "Service Fee",
+    compact: true,
     value: (s) => s.service_fee,
     firstDir: "desc",
     className: tdNum,
@@ -220,16 +234,36 @@ const COLUMNS: TableColumn[] = [
     ),
   },
   {
+    // Yang menutup deal (CM/BizDev) — beda dari Nama BD (akun yang menginput kartu).
     label: "Deal by",
+    compact: true,
     value: (s) => s.deal_by_names[0] ?? null,
     className: tdTruncate,
     cell: (s) => nameList(s.deal_by_names),
   },
   {
     label: "PIC TAP",
+    compact: true,
     value: (s) => s.pic_tap_names[0] ?? null,
     className: tdTruncate,
     cell: (s) => nameList(s.pic_tap_names),
+  },
+  {
+    label: "Nama BD",
+    compact: true,
+    ownerOnly: true,
+    value: (s) => s.uploaded_by_names[0] ?? null,
+    className: tdTruncate,
+    cell: (s) =>
+      s.uploaded_by_names.length > 0 ? (
+        nameList(s.uploaded_by_names)
+      ) : (
+        // Kartu hasil derive ingest mingguan memang tidak punya peng-upload; begitu
+        // pula kartu yang diunggah sebelum kolom kepemilikan ada.
+        <span className="text-slate-400" title="Kartu shop ini tidak punya pemilik tercatat (hasil ingest / upload lama)">
+          —
+        </span>
+      ),
   },
   {
     label: "Review",
@@ -250,9 +284,10 @@ const COLUMNS: TableColumn[] = [
   },
 ];
 
-const ALL_LABELS = COLUMNS.map((c) => c.label);
-const COMPACT_LABELS = COLUMNS.filter((c) => c.compact).map((c) => c.label);
-const COLUMN_PREF_KEY = "mcn.deals.shops.columns.v1";
+// Kunci dinaikkan tiap daftar/preset kolom berubah — kalau tidak, browser yang
+// sudah pernah membuka halaman ini memulihkan pilihan lama dan kolom baru
+// (Nama BD, Ads Budget, Service Fee, Deal by, PIC TAP) tidak pernah muncul.
+const COLUMN_PREF_KEY = "mcn.deals.shops.columns.v2";
 
 const SORT: SortConfig<ShopSummaryRow> = {
   columns: Object.fromEntries(
@@ -282,10 +317,13 @@ const SORT: SortConfig<ShopSummaryRow> = {
 export function ShopsTable({
   rows,
   canEdit,
+  canSeeOwner,
   emptyMessage,
 }: {
   rows: ShopSummaryRow[];
   canEdit: boolean;
+  /** Role boleh melihat kolom Nama BD (products.view_owner_name). */
+  canSeeOwner: boolean;
   emptyMessage: string;
 }) {
   const controls = useTableControls<ShopSummaryRow>({
@@ -295,18 +333,30 @@ export function ShopsTable({
     itemLabel: "shop",
   });
 
+  // Kolom Nama BD tidak sekadar disembunyikan: untuk role tanpa izin ia tidak masuk
+  // daftar pilihan sama sekali (namanya pun tidak dikirim server).
+  const allowedColumns = useMemo(
+    () => COLUMNS.filter((c) => !c.ownerOnly || canSeeOwner),
+    [canSeeOwner]
+  );
+  const allLabels = useMemo(() => allowedColumns.map((c) => c.label), [allowedColumns]);
+  const compactLabels = useMemo(
+    () => allowedColumns.filter((c) => c.compact).map((c) => c.label),
+    [allowedColumns]
+  );
+
   const columnPref = useColumnPreference({
     storageKey: COLUMN_PREF_KEY,
-    allLabels: ALL_LABELS,
-    compactLabels: COMPACT_LABELS,
+    allLabels,
+    compactLabels,
   });
-  const visibleColumns = COLUMNS.filter((c) => columnPref.isShown(c.label));
+  const visibleColumns = allowedColumns.filter((c) => columnPref.isShown(c.label));
   const colCount = visibleColumns.length + (canEdit ? 1 : 0);
 
   return (
     <div className="rounded-lg border border-slate-200 bg-white">
       <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 px-3 py-2">
-        <ColumnPicker pref={columnPref} allLabels={ALL_LABELS} />
+        <ColumnPicker pref={columnPref} allLabels={allLabels} />
         <span className="text-xs text-slate-400">
           Klik judul kolom untuk mengurutkan · pilihan kolom tersimpan di browser ini
         </span>

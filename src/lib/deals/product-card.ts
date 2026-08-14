@@ -121,21 +121,31 @@ export function productCardIssueMessage(issues: Record<string, string>): string 
  * Jawaban Tipe Campaign pada UPLOAD MASSAL kartu produk ("Upload Produk Deal Lama
  * via Excel" di halaman Registrasi Deal).
  *
- * File export TAP tidak membawa tipe campaign, ads budget, maupun service fee —
- * ketiganya dimensi komersial MEA. Ditanyakan sekali di form upload lalu diisikan
- * ke SETIAP kartu di file itu, dengan aturan Paid Campaign yang sama seperti form
- * satuan (CLAUDE.md #6): satu file = satu campaign, jadi satu jawaban.
+ * File export TAP tidak membawa tipe campaign, ads budget, service fee, Deal by,
+ * maupun PIC TAP — semuanya dimensi komersial MEA. Ditanyakan sekali di form upload
+ * lalu diisikan ke SETIAP kartu di file itu, dengan aturan Paid Campaign yang sama
+ * seperti form satuan (CLAUDE.md #6): satu file = satu campaign, jadi satu jawaban.
+ *
+ * (Kolom "Nama BD" tidak ditanyakan: ia = akun yang meng-upload, diisi importer dari
+ * sesi login — menanyakannya justru membuka pintu salah tulis pemilik data.)
  */
 export const uploadCampaignSchema = z.object({
   campaign_type: z.preprocess(blankToUndefined, z.enum(CAMPAIGN_TYPE_VALUES).optional()),
   ads_budget: optionalNumber(),
   service_fee: optionalNumber(),
+  // Deal by & PIC TAP juga tidak ada di export TAP, dan sama-sama satu jawaban per
+  // file (satu file = satu deal). Keduanya OPSIONAL: tidak dijawab → kolomnya tidak
+  // disentuh sama sekali, bukan dikosongkan.
+  deal_by: z.preprocess(blankToUndefined, z.string().uuid().optional()),
+  pic_tap: z.preprocess(blankToUndefined, z.string().uuid().optional()),
 });
 
 export interface CampaignDefaults {
   campaign_type?: CampaignType;
   ads_budget?: number;
   service_fee?: number;
+  deal_by?: string;
+  pic_tap?: string;
 }
 
 /**
@@ -153,6 +163,8 @@ export function campaignDefaultsFromForm(raw: {
   campaign_type?: unknown;
   ads_budget?: unknown;
   service_fee?: unknown;
+  deal_by?: unknown;
+  pic_tap?: unknown;
 }): { defaults: CampaignDefaults; error?: string } {
   const parsed = uploadCampaignSchema.safeParse(raw);
   if (!parsed.success) {

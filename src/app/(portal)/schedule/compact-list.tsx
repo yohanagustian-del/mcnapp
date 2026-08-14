@@ -50,7 +50,10 @@ const rowCm = (r: CompactSlotRow) => ({ id: r.ownerCpmId ?? null, name: r.cmName
 const SORT: SortConfig<CompactSlotRow> = {
   columns: {
     tanggal: { value: (r) => `${r.slot.schedule_date} ${r.slot.start_time ?? ""}` },
+    // Kolom identitas kreator: diurutkan memakai nilai yang benar-benar TAMPIL
+    // (username kalau kolomnya menampilkan username), bukan selalu nama.
     kreator: { value: (r) => r.creatorName },
+    username: { value: (r) => r.creatorUsername ?? r.creatorName },
     brand: { value: (r) => (r.slot.status === "off" ? null : r.slot.brand_name?.trim() || "Organik") },
     jam: { value: (r) => r.slot.start_time },
     // Catatan ads ditulis bebas ("Rp500rb", "invoicing MEA"); diurutkan sebagai
@@ -98,6 +101,7 @@ export function CompactScheduleList({
   filterable = false,
   searchable = false,
   showAdsNote = false,
+  identity = "name",
 }: {
   title: string;
   rows: CompactSlotRow[];
@@ -106,6 +110,13 @@ export function CompactScheduleList({
   filterable?: boolean;
   /** Search box tanpa filter multi-select. Implisit aktif kalau `filterable`. */
   searchable?: boolean;
+  /**
+   * Identitas kreator yang ditampilkan di kolom pertama: nama tampilan ("name",
+   * bawaan — dipakai CM Workspace) atau username akun TikTok ("username" — dipakai
+   * BizDev Workspace, karena brand & report campaign mengenal kreator lewat
+   * username-nya, bukan nama panggilan internal).
+   */
+  identity?: "name" | "username";
   /**
    * Tampilkan kolom "Catatan Ads" (live_schedule_slots.ads_note — nominal /
    * detail ads yang diisi di form slot). Dipakai CM Workspace; BizDev memakai
@@ -168,7 +179,13 @@ export function CompactScheduleList({
             <thead className="bg-slate-50 text-left text-xs uppercase text-slate-500">
               <tr>
                 <SortableTh controls={controls} sortKey="tanggal" className="px-3 py-2">Tanggal</SortableTh>
-                <SortableTh controls={controls} sortKey="kreator" className="px-3 py-2">Kreator</SortableTh>
+                <SortableTh
+                  controls={controls}
+                  sortKey={identity === "username" ? "username" : "kreator"}
+                  className="px-3 py-2"
+                >
+                  {identity === "username" ? "Username" : "Kreator"}
+                </SortableTh>
                 <SortableTh controls={controls} sortKey="brand" className="px-3 py-2">Brand</SortableTh>
                 <SortableTh controls={controls} sortKey="jam" className="px-3 py-2">Jam</SortableTh>
                 {showAdsNote && (
@@ -186,9 +203,19 @@ export function CompactScheduleList({
                   <tr key={r.slot.id}>
                     <td className="px-3 py-2">{r.slot.schedule_date}</td>
                     <td className="px-3 py-2 font-medium">
-                      {r.creatorName}
-                      {r.creatorUsername && (
-                        <span className="ml-1 text-xs text-slate-400">@{r.creatorUsername}</span>
+                      {identity === "username" ? (
+                        // Kreator tanpa username di master tetap harus terbaca —
+                        // jatuh ke namanya, bukan sel kosong.
+                        <span title={r.creatorName}>
+                          {r.creatorUsername ? `@${r.creatorUsername}` : r.creatorName}
+                        </span>
+                      ) : (
+                        <>
+                          {r.creatorName}
+                          {r.creatorUsername && (
+                            <span className="ml-1 text-xs text-slate-400">@{r.creatorUsername}</span>
+                          )}
+                        </>
                       )}
                     </td>
                     <td className="px-3 py-2">{flags.isOff ? "—" : r.slot.brand_name?.trim() || "Organik"}</td>

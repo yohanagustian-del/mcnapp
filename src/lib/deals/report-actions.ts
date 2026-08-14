@@ -8,6 +8,12 @@ import { parseSheet } from "@/lib/utils/sheet";
 import { parseRupiah } from "@/lib/utils/rupiah";
 import { parseFlexibleDate } from "@/lib/utils/date";
 import { pick, pickPrefix, resolveCreatorNames } from "@/lib/platform-csv";
+import {
+  buildReportCreatorTemplate,
+  buildReportSessionTemplate,
+  REPORT_CREATOR_TEMPLATE_FILENAME,
+  REPORT_SESSION_TEMPLATE_FILENAME,
+} from "@/lib/deals/report-template";
 import type { UploadReport } from "@/app/(portal)/tim/actions";
 
 /** "$75.25" / "$3,100" / "-" → number USD, null bila kosong/strip. */
@@ -255,4 +261,31 @@ export async function uploadReportCreators(formData: FormData): Promise<UploadRe
 
   revalidatePath(owner.path);
   return report;
+}
+
+/**
+ * Template .xlsx untuk kedua upload di atas.
+ *
+ * Headernya dibangun dari daftar kolom yang sama dengan yang dibaca parser
+ * (lib/deals/report-template.ts), jadi file hasil unduh bisa langsung diisi dan
+ * diunggah kembali tanpa penyesuaian — persoalan "upload 0 baris karena nama kolom
+ * beda" tidak perlu ditemukan user lewat percobaan.
+ *
+ * Dikembalikan sebagai base64 karena server action hanya boleh mengembalikan nilai
+ * serializable; klien merakitnya kembali lewat downloadBase64File().
+ */
+export async function downloadReportSessionTemplate(): Promise<{ filename: string; base64: string }> {
+  await requirePermission("m8.brand_report");
+  return {
+    filename: REPORT_SESSION_TEMPLATE_FILENAME,
+    base64: Buffer.from(buildReportSessionTemplate()).toString("base64"),
+  };
+}
+
+export async function downloadReportCreatorTemplate(): Promise<{ filename: string; base64: string }> {
+  await requirePermission("m8.brand_report");
+  return {
+    filename: REPORT_CREATOR_TEMPLATE_FILENAME,
+    base64: Buffer.from(buildReportCreatorTemplate()).toString("base64"),
+  };
 }

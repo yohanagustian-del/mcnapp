@@ -20,6 +20,14 @@ import { z } from "zod";
  */
 export const PROJECT_SHOP_LIMIT = 100;
 
+/**
+ * Batas kartu produk yang bisa ditandai "dikerjasamakan" dalam satu project.
+ * Alasannya sama dengan batas shop: sekali simpan menulis seluruh daftar, dan
+ * project dengan ribuan kartu terpilih hampir pasti hasil salah klik "pilih semua".
+ * Selaras dengan batas 500 kartu yang dibaca halaman detail.
+ */
+export const PROJECT_PRODUCT_LIMIT = 500;
+
 export const PROJECT_STATUSES = [
   { value: "running", label: "Running" },
   { value: "hold", label: "Hold" },

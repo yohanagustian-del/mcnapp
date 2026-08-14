@@ -246,22 +246,10 @@ const COLUMNS: TableColumn[] = [
         "—"
       ),
   },
-  {
-    label: "Ads Budget",
-    dealCard: true,
-    value: (p) => p.ads_budget,
-    firstDir: "desc",
-    className: tdNum,
-    cell: (p) => rpShort(p.ads_budget),
-  },
-  {
-    label: "Service Fee",
-    dealCard: true,
-    value: (p) => p.service_fee,
-    firstDir: "desc",
-    className: tdNum,
-    cell: (p) => rpShort(p.service_fee),
-  },
+  // Ads Budget & Service Fee sengaja TIDAK ada di tabel ini: keduanya nominal
+  // komitmen per DEAL, dan dibaca per shop di tabel "Shop dari Produk TAP" (tab Deal
+  // Brand) yang menjumlahkannya. Nilainya tetap tersimpan di kartu dan tetap bisa
+  // diperbaiki lewat tombol Edit — hanya kolom tampilannya yang dilepas.
   {
     // Yang menutup deal (CM/BizDev) — beda dari Nama BD (akun yang menginput baris).
     label: "Deal by",
@@ -314,7 +302,7 @@ const COLUMNS: TableColumn[] = [
 const COMPACT_LABELS = COLUMNS.filter((c) => !c.dealCard && !c.ownerOnly).map((c) => c.label);
 // Kunci dinaikkan tiap daftar kolom berubah — kalau tidak, browser yang sudah pernah
 // membuka halaman ini memulihkan pilihan lama dan kolom baru tidak pernah muncul.
-const COLUMN_PREF_KEY = "mcn.products.columns.v4";
+const COLUMN_PREF_KEY = "mcn.products.columns.v5";
 
 const SORT: SortConfig<ProductRow> = {
   columns: Object.fromEntries(
@@ -386,8 +374,8 @@ export function ProductsTable({
     storageKey: COLUMN_PREF_KEY,
     allLabels,
     compactLabels,
-    // Bawaannya SEMUA kolom: kolom kartu deal (tipe campaign, budget, deal by, PIC)
-    // baru ada gunanya kalau langsung kelihatan. "Ringkas" tetap tersedia di menu.
+    // Bawaannya SEMUA kolom: kolom kartu deal (tipe campaign, deal by, PIC TAP) baru
+    // ada gunanya kalau langsung kelihatan. "Ringkas" tetap tersedia di menu.
     defaultLabels: allLabels,
   });
   const visibleColumns = allowedColumns.filter((c) => columnPref.isShown(c.label));

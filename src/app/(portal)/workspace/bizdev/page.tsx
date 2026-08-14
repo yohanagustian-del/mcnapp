@@ -48,16 +48,21 @@ export default async function BizdevWorkspacePage() {
       .select("*")
       .gte("schedule_date", bdWeekStart)
       .lte("schedule_date", bdWeekEnd)
-      .or("deals_by.eq.bd,deal_id.not.is.null")
+      // Slot dianggap "deal BD" kalau sumbernya BD, menunjuk deal lama (deal_id),
+      // ATAU menunjuk shop dari Produk TAP (shop_key, migrasi 0045).
+      .or("deals_by.eq.bd,deal_id.not.is.null,shop_key.not.is.null")
       .order("schedule_date", { ascending: true });
     const bdCreatorIds = [...new Set(((bdSlots ?? []) as LiveScheduleSlot[]).map((s) => s.creator_id))];
+    // Username ikut diambil: kolom identitas di tabel BizDev menampilkan username
+    // (brand & report campaign mengenal kreator lewat username, bukan nama internal).
     const { data: bdSlotCreators } = bdCreatorIds.length
-      ? await supabase.from("creators").select("id, name").in("id", bdCreatorIds)
-      : { data: [] as { id: string; name: string }[] };
-    const bdNameById = new Map((bdSlotCreators ?? []).map((c) => [c.id, c.name]));
+      ? await supabase.from("creators").select("id, name, username").in("id", bdCreatorIds)
+      : { data: [] as { id: string; name: string; username: string | null }[] };
+    const bdCreatorById = new Map((bdSlotCreators ?? []).map((c) => [c.id, c]));
     bdScheduleRows = ((bdSlots ?? []) as LiveScheduleSlot[]).map((s) => ({
       slot: s,
-      creatorName: bdNameById.get(s.creator_id) ?? s.creator_id,
+      creatorName: bdCreatorById.get(s.creator_id)?.name ?? s.creator_id,
+      creatorUsername: bdCreatorById.get(s.creator_id)?.username ?? null,
     }));
   }
   const [{ data: deals }, { data: creatorReqs }, { data: campaignReqs }, { data: leads }, { data: brandReports }] =
@@ -165,6 +170,8 @@ export default async function BizdevWorkspacePage() {
           todayIso={todayIso}
           emptyLabel="Belum ada jadwal live minggu ini yang terkait deal BD."
           searchable
+          showAdsNote
+          identity="username"
         />
       )}
 

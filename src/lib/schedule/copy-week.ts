@@ -48,6 +48,7 @@ export function buildCopiedSlots(
       off_reason: null,
       brand_name: slot.brand_name,
       deal_id: slot.deal_id,
+      shop_key: slot.shop_key,
       deals_by: slot.deals_by,
       ads_payer: slot.ads_payer,
       ads_note: slot.ads_note,

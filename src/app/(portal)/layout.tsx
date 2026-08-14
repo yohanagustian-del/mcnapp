@@ -1,5 +1,6 @@
 import { requireMember, NAV_ITEMS, NAV_GROUPS, canAccessNav, hasPermission } from "@/lib/rbac";
 import { countPendingCmRequests } from "@/lib/creators/cm-requests";
+import { loadPicTapScheduleAlert } from "@/lib/schedule/pic-tap-alerts";
 import { PortalSidebar, type SidebarGroup } from "@/components/portal-sidebar";
 
 const ROLE_LABELS: Record<string, string> = {
@@ -31,6 +32,19 @@ export default async function PortalLayout({ children }: { children: React.React
     ? await countPendingCmRequests()
     : 0;
 
+  // Notifikasi PIC TAP: jadwal live (hari ini ke depan) untuk brand yang PIC TAP-nya
+  // akun ini. Yang menyiapkan produk & campaign brand tersebut di TAP adalah dia,
+  // jadi jadwalnya tidak boleh baru ketahuan saat live-nya jalan.
+  const picTapSchedule = hasPermission("schedule.view", member.role)
+    ? await loadPicTapScheduleAlert(member.id)
+    : { count: 0, shopNames: [], items: [] };
+  const picTapTitle =
+    picTapSchedule.count > 0
+      ? `${picTapSchedule.count} jadwal live brand yang Anda pegang sebagai PIC TAP: ` +
+        `${picTapSchedule.shopNames.slice(0, 5).join(", ")}` +
+        (picTapSchedule.shopNames.length > 5 ? `, +${picTapSchedule.shopNames.length - 5} lainnya` : "")
+      : undefined;
+
   // Pengelompokan menu per divisi. Filter RBAC sudah dilakukan di atas, jadi grup
   // yang seluruh itemnya tidak boleh diakses role ini tidak ikut dirender.
   const groups: SidebarGroup[] = NAV_GROUPS.map((group) => ({
@@ -40,11 +54,18 @@ export default async function PortalLayout({ children }: { children: React.React
       .map((item) => ({
         href: item.href,
         label: item.label,
-        badge: item.href === "/creators" ? pendingCmRequests : 0,
+        badge:
+          item.href === "/creators"
+            ? pendingCmRequests
+            : item.href === "/schedule"
+              ? picTapSchedule.count
+              : 0,
         badgeTitle:
           item.href === "/creators"
             ? `${pendingCmRequests} request penugasan CM menunggu keputusan Anda`
-            : undefined,
+            : item.href === "/schedule"
+              ? picTapTitle
+              : undefined,
       })),
   })).filter((group) => group.items.length > 0);
 

@@ -9,9 +9,19 @@ const btn = "rounded-md bg-slate-900 px-3 py-2 text-sm font-medium text-white ho
 const btnGhost = "rounded-md border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50";
 const btnDanger = "rounded-md border border-red-300 px-3 py-2 text-sm font-medium text-red-700 hover:bg-red-50 disabled:opacity-50";
 
-export interface DealOption {
-  id: string;
-  brand_name: string;
+/**
+ * Satu pilihan brand pada pertanyaan "Link ke deal (opsional)".
+ *
+ * Sumbernya tabel "Shop dari Produk TAP" (tab Deal Brand) — deal baru didaftarkan
+ * sebagai kartu produk, jadi di sanalah brand yang sedang berjalan hidup. Nilainya
+ * `shop_key`, kunci grup yang sama dengan view ringkasan (products_tap.shop_key).
+ */
+export interface ShopDealOption {
+  shop_key: string;
+  shop_name: string | null;
+  shop_id: string | null;
+  /** Ada PIC TAP-nya → slot ini akan memunculkan notifikasi di akun PIC tersebut. */
+  has_pic_tap: boolean;
 }
 
 export interface RosterCreatorOption {
@@ -30,7 +40,7 @@ export function SlotForm({
   creatorId,
   date,
   creators,
-  deals,
+  shops,
   onDone,
   onCancel,
 }: {
@@ -38,15 +48,30 @@ export function SlotForm({
   creatorId: string;
   date: string;
   creators: RosterCreatorOption[];
-  deals: DealOption[];
+  shops: ShopDealOption[];
   onDone: () => void;
   onCancel: () => void;
 }) {
   const [status, setStatus] = useState<SlotStatus>(slot?.status === "done" ? "scheduled" : slot?.status ?? "scheduled");
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
+  const [shopKey, setShopKey] = useState(slot?.shop_key ?? "");
+  const [brandName, setBrandName] = useState(slot?.brand_name ?? "");
   const isEdit = slot !== null;
   const locked = slot?.status === "done";
+  const selectedShop = shops.find((s) => s.shop_key === shopKey) ?? null;
+
+  /**
+   * Memilih shop ikut mengisi kolom "Brand (bebas teks)" SELAMA kolom itu masih
+   * kosong — brand di jadwal hampir selalu sama dengan nama shopnya, dan mengetik
+   * ulang hanya melahirkan ejaan berbeda untuk brand yang sama. Kolomnya tetap bisa
+   * diubah manual, dan isian yang sudah ada tidak pernah ditimpa.
+   */
+  function onShopChange(next: string) {
+    setShopKey(next);
+    const shop = shops.find((s) => s.shop_key === next);
+    if (shop && brandName.trim() === "") setBrandName(shop.shop_name ?? shop.shop_key);
+  }
 
   function onSubmit(formData: FormData) {
     setError(null);
@@ -157,19 +182,40 @@ export function SlotForm({
                 <label className="block text-xs font-medium text-slate-600">Brand (bebas teks)</label>
                 <input
                   name="brand_name" disabled={locked}
-                  defaultValue={slot?.brand_name ?? ""}
+                  value={brandName}
+                  onChange={(e) => setBrandName(e.target.value)}
                   placeholder="mis. MIX Brand / Organik"
                   className={input}
                 />
               </div>
               <div>
                 <label className="block text-xs font-medium text-slate-600">Link ke deal (opsional)</label>
-                <select name="deal_id" disabled={locked} defaultValue={slot?.deal_id ?? ""} className={input}>
+                <select
+                  name="shop_key"
+                  disabled={locked}
+                  value={shopKey}
+                  onChange={(e) => onShopChange(e.target.value)}
+                  className={input}
+                >
                   <option value="">— tidak ada —</option>
-                  {deals.map((d) => (
-                    <option key={d.id} value={d.id}>{d.brand_name} ({d.id})</option>
+                  {shops.map((s) => (
+                    <option key={s.shop_key} value={s.shop_key}>
+                      {s.shop_name ?? s.shop_key}
+                      {s.shop_id ? ` (${s.shop_id})` : ""}
+                      {s.has_pic_tap ? " · ada PIC TAP" : ""}
+                    </option>
                   ))}
                 </select>
+                <p className="mt-1 text-[11px] leading-tight text-slate-400">
+                  Daftar brand diambil dari <strong>Shop dari Produk TAP</strong> (tab Deal Brand).
+                  {selectedShop?.has_pic_tap && (
+                    <>
+                      {" "}
+                      Brand ini punya <strong>PIC TAP</strong> — jadwal ini akan muncul sebagai
+                      notifikasi di akun PIC tersebut.
+                    </>
+                  )}
+                </p>
               </div>
             </div>
 

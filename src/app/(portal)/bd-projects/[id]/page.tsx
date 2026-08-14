@@ -10,10 +10,12 @@ import {
   uploadReportSessions,
   uploadReportCreators,
 } from "@/lib/deals/report-actions";
-import { CAMPAIGN_TYPE_LABEL } from "@/lib/deals/campaign-type";
+import { ReportTemplateButton } from "@/components/report-template-button";
 import { PROJECT_STATUS_LABEL, sumProjectShops, type ProjectShopMetrics } from "@/lib/deals/bd-project";
 import { ProjectFormButton, type ShopOption } from "../project-form-button";
 import { DeleteProjectButton } from "./delete-project-button";
+import { ProjectShopsTable, type ProjectShopRow } from "./project-shops-table";
+import { ProjectProductsTable, type ProjectProductRow } from "./project-products-table";
 
 function formatRp(v: number | null | undefined): string {
   return v ? `Rp${Number(v).toLocaleString("id-ID")}` : "—";
@@ -124,16 +126,45 @@ export default async function BdProjectDetailPage({
 
   // Kartu produk milik shop-shop project. Difilter di SQL lewat shop_key — kunci
   // grup yang sama dengan view ringkasan (kolom generated, migrasi 0043).
-  const { data: products } = shopKeys.length
-    ? await supabase
-        .from("products_tap")
-        .select(
-          "campaign_id, product_id, product_name, product_link, shop_name, shop_id, price, commission_pct, partner_commission_pct, effective_end, campaign_type, ads_budget, service_fee, active, needs_review"
-        )
-        .in("shop_key", shopKeys)
-        .order("shop_name", { ascending: true })
-        .limit(500)
-    : { data: [] };
+  const [{ data: products }, { data: pickedProducts }] = await Promise.all([
+    shopKeys.length
+      ? supabase
+          .from("products_tap")
+          .select(
+            "campaign_id, product_id, product_name, product_link, shop_name, shop_id, price, commission_pct, partner_commission_pct, effective_end, campaign_type, ads_budget, service_fee, active, needs_review"
+          )
+          .in("shop_key", shopKeys)
+          .order("shop_name", { ascending: true })
+          .limit(500)
+      : Promise.resolve({ data: [] as Record<string, unknown>[] }),
+    // Kartu yang DICENTANG sebagai dikerjasamakan (0045). Yang disimpan cuma
+    // kuncinya — atribut produknya tetap dibaca dari products_tap di atas.
+    supabase
+      .from("bd_project_products")
+      .select("campaign_id, product_id")
+      .eq("project_id", id),
+  ]);
+
+  const pickedKeys = new Set(
+    (pickedProducts ?? []).map((p) => `${p.campaign_id as string}|${p.product_id as string}`)
+  );
+  const productRows: ProjectProductRow[] = (products ?? []).map((p) => ({
+    campaign_id: (p.campaign_id as string) ?? "-",
+    product_id: p.product_id as string,
+    product_name: (p.product_name as string | null) ?? null,
+    product_link: (p.product_link as string | null) ?? null,
+    shop_name: (p.shop_name as string | null) ?? null,
+    price: numeric(p.price),
+    commission_pct: numeric(p.commission_pct),
+    partner_commission_pct: numeric(p.partner_commission_pct),
+    campaign_type: (p.campaign_type as string | null) ?? null,
+    ads_budget: numeric(p.ads_budget),
+    service_fee: numeric(p.service_fee),
+    effective_end: (p.effective_end as string | null) ?? null,
+    needs_review: p.needs_review === true,
+    selected: pickedKeys.has(`${(p.campaign_id as string) ?? "-"}|${p.product_id as string}`),
+  }));
+  const pickedCount = productRows.filter((p) => p.selected).length;
 
   const memberNameById = new Map<string, string>();
   for (const m of memberRows ?? []) memberNameById.set(m.id as string, m.name as string);
@@ -227,123 +258,42 @@ export default async function BdProjectDetailPage({
 
       {/* ===== Shop dalam project ===== */}
       <h2 className="mt-8 text-lg font-semibold">Shop dalam Project ({shops.length})</h2>
-      <div className="mt-3 overflow-x-auto rounded-lg border border-slate-200 bg-white">
-        <table className="min-w-full text-sm">
-          <thead className="bg-slate-50 text-left text-xs uppercase text-slate-500">
-            <tr>
-              <th className="px-3 py-3">Shop Name</th>
-              <th className="px-3 py-3">Shop ID</th>
-              <th className="px-3 py-3">Produk</th>
-              <th className="px-3 py-3">Campaign</th>
-              <th className="px-3 py-3">Komisi Kreator</th>
-              <th className="px-3 py-3">Ads Budget</th>
-              <th className="px-3 py-3">Service Fee</th>
-              <th className="px-3 py-3">GMV TAP</th>
-              <th className="px-3 py-3">Exp Date</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-slate-100">
-            {shops.map((s) => (
-              <tr key={s.shop_key}>
-                <td className="px-3 py-2 font-medium">{s.shop_name ?? s.shop_key}</td>
-                <td className="px-3 py-2 font-mono text-xs">{s.shop_id ?? "—"}</td>
-                <td className="px-3 py-2">{s.product_count}</td>
-                <td className="px-3 py-2">{s.campaign_count}</td>
-                <td className="px-3 py-2">
-                  {s.avg_commission_pct != null ? `${s.avg_commission_pct.toFixed(1)}%` : "—"}
-                </td>
-                <td className="px-3 py-2">{formatRp(s.ads_budget)}</td>
-                <td className="px-3 py-2">{formatRp(s.service_fee)}</td>
-                <td className="px-3 py-2">{formatRp(s.gmv_tap)}</td>
-                <td className="px-3 py-2">{s.effective_end ?? "—"}</td>
-              </tr>
-            ))}
-            {shops.length === 0 && (
-              <tr>
-                <td colSpan={9} className="px-4 py-6 text-center text-slate-400">
-                  Belum ada shop di project ini. Tambahkan lewat Edit Project.
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
+      <p className="mt-1 text-xs text-slate-400">
+        Klik judul kolom untuk mengurutkan (naik → turun → urutan bawaan).
+      </p>
+      <div className="mt-2">
+        <ProjectShopsTable rows={shops as ProjectShopRow[]} />
       </div>
 
       {/* ===== Produk yang dikerjasamakan ===== */}
       <h2 className="mt-8 text-lg font-semibold">
-        Produk yang Dikerjasamakan ({(products ?? []).length})
+        Produk yang Dikerjasamakan ({pickedCount} dari {productRows.length} kartu)
       </h2>
-      <div className="mt-3 overflow-x-auto rounded-lg border border-slate-200 bg-white">
-        <table className="min-w-full text-sm">
-          <thead className="bg-slate-50 text-left text-xs uppercase text-slate-500">
-            <tr>
-              <th className="px-3 py-3">Product ID</th>
-              <th className="px-3 py-3">Nama Produk</th>
-              <th className="px-3 py-3">Shop</th>
-              <th className="px-3 py-3">Link</th>
-              <th className="px-3 py-3">Harga</th>
-              <th className="px-3 py-3">Komisi Kreator</th>
-              <th className="px-3 py-3">Komisi Partner</th>
-              <th className="px-3 py-3">Tipe Campaign</th>
-              <th className="px-3 py-3">Ads Budget</th>
-              <th className="px-3 py-3">Service Fee</th>
-              <th className="px-3 py-3">Exp Date</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-slate-100">
-            {(products ?? []).map((p) => (
-              <tr key={`${p.campaign_id}|${p.product_id}`}>
-                <td className="px-3 py-2 font-mono text-xs">{p.product_id as string}</td>
-                <td className="px-3 py-2 font-medium">
-                  {(p.product_name as string | null) ?? "—"}
-                  {p.needs_review === true && (
-                    <span className="ml-1 rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] text-amber-800">
-                      review
-                    </span>
-                  )}
-                </td>
-                <td className="px-3 py-2">{(p.shop_name as string | null) ?? "—"}</td>
-                <td className="px-3 py-2">
-                  {p.product_link ? (
-                    <a
-                      href={p.product_link as string}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-blue-700 underline"
-                    >
-                      buka ↗
-                    </a>
-                  ) : (
-                    "—"
-                  )}
-                </td>
-                <td className="px-3 py-2">{formatRp(numeric(p.price))}</td>
-                <td className="px-3 py-2">
-                  {p.commission_pct != null ? `${Number(p.commission_pct)}%` : "—"}
-                </td>
-                <td className="px-3 py-2">
-                  {p.partner_commission_pct != null ? `${Number(p.partner_commission_pct)}%` : "—"}
-                </td>
-                <td className="px-3 py-2">
-                  {CAMPAIGN_TYPE_LABEL[(p.campaign_type as string | null) ?? ""] ?? "—"}
-                </td>
-                <td className="px-3 py-2">{formatRp(numeric(p.ads_budget))}</td>
-                <td className="px-3 py-2">{formatRp(numeric(p.service_fee))}</td>
-                <td className="px-3 py-2">{(p.effective_end as string | null) ?? "—"}</td>
-              </tr>
-            ))}
-            {(products ?? []).length === 0 && (
-              <tr>
-                <td colSpan={11} className="px-4 py-6 text-center text-slate-400">
-                  Belum ada kartu produk untuk shop project ini. Daftarkan lewat Registrasi Deal
-                  atau upload master product list.
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
+      <p className="mt-1 text-sm text-slate-500">
+        Daftar di bawah adalah SEMUA kartu produk milik shop project ini.{" "}
+        {canManage ? (
+          <>
+            Centang kartu yang benar-benar masuk kerja sama lalu tekan{" "}
+            <strong>Simpan pilihan</strong> — yang disimpan hanya penandanya, atribut produknya
+            tetap dibaca dari <strong>Produk TAP</strong>.
+          </>
+        ) : (
+          <>
+            Kartu bertanda <strong>Dikerjasamakan</strong> adalah yang dipilih masuk kerja sama;
+            pilihannya diatur oleh BizDev.
+          </>
+        )}{" "}
+        Gunakan kotak pencarian nama produk, klik judul kolom untuk mengurutkan, dan atur baris per
+        halaman (10 / 20 / 50) di bawah tabel.
+      </p>
+      <div className="mt-3">
+        <ProjectProductsTable
+          projectId={project.id as string}
+          rows={productRows}
+          canManage={canManage}
+        />
       </div>
-      {(products ?? []).length >= 500 && (
+      {productRows.length >= 500 && (
         <p className="mt-2 text-xs text-amber-700">
           Ditampilkan 500 kartu pertama. Buka tab <strong>Produk TAP</strong> untuk daftar lengkap
           dengan filter.
@@ -360,20 +310,32 @@ export default async function BdProjectDetailPage({
 
       {canReport && (
         <div className="mt-4 grid gap-4 lg:grid-cols-2">
-          <CsvUploadForm
-            action={uploadReportSessions}
-            buttonLabel="Upload Report Performance"
-            helpText="Format contoh 'Report Performance' (xlsx/csv): id, Brand, Nama Creator, Tanggal Session Live, Event, Support Ads, Ads Spending, IDR, SS Dashboard (link), GMV, ROAS. Baris BULK-xxx di atas header & baris TOTAL otomatis dilewati. Re-upload = replace."
-          >
-            <input type="hidden" name="project_id" value={project.id as string} />
-          </CsvUploadForm>
-          <CsvUploadForm
-            action={uploadReportCreators}
-            buttonLabel="Upload Creator TC & Celeb"
-            helpText="Daftar usulan creator campaign (format contoh 'Creator TC & Celeb'): Username, Creator Manager, Tipe Kreator, Channel, GMV L30D, Ratecard, Approval brand/creator, Status pengiriman."
-          >
-            <input type="hidden" name="project_id" value={project.id as string} />
-          </CsvUploadForm>
+          <div>
+            {/* Template diunduh dari daftar kolom yang SAMA dengan yang dibaca
+                importer, jadi file hasil unduh langsung cocok saat diunggah balik. */}
+            <div className="mb-2">
+              <ReportTemplateButton kind="session" />
+            </div>
+            <CsvUploadForm
+              action={uploadReportSessions}
+              buttonLabel="Upload Report Performance"
+              helpText="Format contoh 'Report Performance' (xlsx/csv): id, Brand, Nama Creator, Tanggal Session Live, Event, Support Ads, Ads Spending, IDR, SS Dashboard (link), GMV, ROAS. Unduh template di atas supaya nama kolomnya pasti cocok. Baris BULK-xxx di atas header & baris TOTAL otomatis dilewati. Re-upload = replace."
+            >
+              <input type="hidden" name="project_id" value={project.id as string} />
+            </CsvUploadForm>
+          </div>
+          <div>
+            <div className="mb-2">
+              <ReportTemplateButton kind="creator" />
+            </div>
+            <CsvUploadForm
+              action={uploadReportCreators}
+              buttonLabel="Upload Creator TC & Celeb"
+              helpText="Daftar usulan creator campaign (format contoh 'Creator TC & Celeb'): Username, Creator Manager, Tipe Kreator, Channel, GMV L30D, Ratecard, Approval brand/creator, Status pengiriman. Unduh template di atas supaya nama kolomnya pasti cocok."
+            >
+              <input type="hidden" name="project_id" value={project.id as string} />
+            </CsvUploadForm>
+          </div>
         </div>
       )}
 
@@ -496,9 +458,12 @@ export default async function BdProjectDetailPage({
       )}
 
       {/* ===== Creator campaign (TC & Celeb) ===== */}
-      <h2 className="mt-10 text-lg font-semibold">
-        Creator Campaign — TC &amp; Celeb ({(proposals ?? []).length})
-      </h2>
+      <div className="mt-10 flex flex-wrap items-center justify-between gap-2">
+        <h2 className="text-lg font-semibold">
+          Creator Campaign — TC &amp; Celeb ({(proposals ?? []).length})
+        </h2>
+        {canReport && <ReportTemplateButton kind="creator" />}
+      </div>
       <div className="mt-3 overflow-x-auto rounded-lg border border-slate-200 bg-white">
         <table className="min-w-full text-sm">
           <thead className="bg-slate-50 text-left text-xs uppercase text-slate-500">

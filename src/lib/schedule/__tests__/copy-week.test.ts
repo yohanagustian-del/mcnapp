@@ -11,6 +11,7 @@ function slot(partial: Partial<LiveScheduleSlot> & { id: number; schedule_date: 
     off_reason: null,
     brand_name: null,
     deal_id: null,
+    shop_key: null,
     deals_by: null,
     ads_payer: null,
     ads_note: null,

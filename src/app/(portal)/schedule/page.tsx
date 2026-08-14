@@ -4,6 +4,8 @@ import { getWeekStart, getWeekDays, formatDayLabel, prevWeek, nextWeek } from "@
 import { buildWeekMatrix } from "@/lib/schedule/matrix";
 import type { LiveScheduleSlot } from "@/lib/schedule/types";
 import { ScheduleBoard, type BoardWeekMatrix } from "./schedule-board";
+import { loadPicTapScheduleAlert } from "@/lib/schedule/pic-tap-alerts";
+import type { ShopDealOption } from "./slot-form";
 import { WeekNav } from "./week-nav";
 import { VerifyPanel, type VerifyRow } from "./verify-panel";
 import { RosterPanel, type RosterRow } from "./roster-panel";
@@ -26,11 +28,6 @@ interface CreatorRow {
 interface TeamMemberNameRow {
   id: string;
   name: string;
-}
-
-interface DealRow {
-  id: string;
-  brand_name: string;
 }
 
 /** Creator row for the "Kelola Roster" panel, with the CM name resolved via join. */
@@ -117,13 +114,29 @@ export default async function SchedulePage({
     ? fetchAllCreators(supabase)
     : Promise.resolve([]);
 
-  const [{ data: rosterCreators }, allCreators, { data: cpms }, { data: deals }] =
+  // Pilihan brand pada form slot = shop dari tabel "Shop dari Produk TAP" (tab Deal
+  // Brand): deal baru didaftarkan sebagai KARTU PRODUK, jadi di sanalah brand yang
+  // sedang berjalan hidup — bukan lagi di brand_deals (yang kini khusus deal lama).
+  const [{ data: rosterCreators }, allCreators, { data: cpms }, { data: shopSummary }] =
     await Promise.all([
       rosterQuery,
       allCreatorsPromise,
       supabase.from("team_members").select("id, name").eq("role", "cpm"),
-      supabase.from("brand_deals").select("id, brand_name").order("created_at", { ascending: false }).limit(200),
+      supabase
+        .from("products_tap_shop_summary")
+        .select("shop_key, shop_name, shop_id, pic_tap_ids, product_count")
+        .order("product_count", { ascending: false })
+        .limit(500),
     ]);
+
+  const shopOptions: ShopDealOption[] = (shopSummary ?? [])
+    .map((s) => ({
+      shop_key: s.shop_key as string,
+      shop_name: (s.shop_name as string | null) ?? null,
+      shop_id: (s.shop_id as string | null) ?? null,
+      has_pic_tap: Array.isArray(s.pic_tap_ids) && s.pic_tap_ids.length > 0,
+    }))
+    .sort((a, b) => (a.shop_name ?? a.shop_key).localeCompare(b.shop_name ?? b.shop_key, "id"));
 
   // CM names for the calendar rows — scoped to the calendar's roster creators.
   const cmNameByCreator = new Map<string, string>();
@@ -216,6 +229,10 @@ export default async function SchedulePage({
     live_roster: c.live_roster,
   }));
 
+  // Notifikasi PIC TAP — sumber & aturannya SATU dengan badge sidebar
+  // (lib/schedule/pic-tap-alerts.ts), di sini ditampilkan rinciannya.
+  const picTap = await loadPicTapScheduleAlert(member.id);
+
   const rangeLabel = `${formatDayLabel(weekStart)} – ${formatDayLabel(weekEnd)}`;
 
   return (
@@ -228,6 +245,31 @@ export default async function SchedulePage({
             Deterministik, 0 token AI.
           </p>
         </div>
+
+        {picTap.count > 0 && (
+          <section className="rounded-lg border border-sky-200 bg-sky-50 p-4">
+            <p className="text-sm font-medium text-sky-900">
+              {picTap.count} jadwal live brand yang Anda pegang sebagai PIC TAP
+            </p>
+            <ul className="mt-2 space-y-0.5 text-sm text-sky-900/80">
+              {picTap.items.slice(0, 8).map((i) => (
+                <li key={i.slotId}>
+                  {i.scheduleDate}
+                  {i.startTime ? ` · ${i.startTime.slice(0, 5)}` : ""} — <strong>{i.brandLabel}</strong>
+                </li>
+              ))}
+            </ul>
+            {picTap.items.length > 8 && (
+              <p className="mt-1 text-xs text-sky-900/60">
+                +{picTap.items.length - 8} jadwal lainnya di kalender di bawah.
+              </p>
+            )}
+            <p className="mt-2 text-xs text-sky-900/60">
+              Muncul karena kartu produk brand ini mencantumkan Anda sebagai{" "}
+              <strong>PIC TAP</strong> di tab Produk TAP.
+            </p>
+          </section>
+        )}
 
         <section className="space-y-3">
           <WeekNav
@@ -244,7 +286,7 @@ export default async function SchedulePage({
           <ScheduleBoard
             matrix={matrix}
             creators={matrixCreators}
-            deals={(deals ?? []) as DealRow[]}
+            shops={shopOptions}
             todayIso={today}
             canEdit={canEdit}
           />

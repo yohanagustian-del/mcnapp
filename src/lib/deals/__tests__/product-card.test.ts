@@ -142,6 +142,32 @@ describe("form kartu produk (Registrasi Deal)", () => {
     expect(defaults).toEqual({ campaign_type: "sample" });
   });
 
+  it("Deal by & PIC TAP ikut dijawab sekali untuk seluruh file", () => {
+    const dealBy = "11111111-1111-4111-8111-111111111111";
+    const picTap = "22222222-2222-4222-8222-222222222222";
+    const { defaults, error } = campaignDefaultsFromForm({
+      campaign_type: "sample",
+      deal_by: dealBy,
+      pic_tap: picTap,
+    });
+    expect(error).toBeUndefined();
+    expect(defaults).toEqual({ campaign_type: "sample", deal_by: dealBy, pic_tap: picTap });
+  });
+
+  it("Deal by & PIC TAP kosong tidak masuk defaults (kolomnya tidak disentuh)", () => {
+    const { defaults } = campaignDefaultsFromForm({
+      campaign_type: "sample",
+      deal_by: "",
+      pic_tap: "",
+    });
+    expect(defaults).toEqual({ campaign_type: "sample" });
+  });
+
+  it("menolak Deal by / PIC TAP yang bukan id anggota tim", () => {
+    expect(campaignDefaultsFromForm({ campaign_type: "sample", deal_by: "Budi" }).error).toBeTruthy();
+    expect(campaignDefaultsFromForm({ campaign_type: "sample", pic_tap: "42" }).error).toBeTruthy();
+  });
+
   it("menolak tipe campaign yang tidak dikenal", () => {
     const { error } = campaignDefaultsFromForm({ campaign_type: "barter" });
     expect(error).toBeTruthy();

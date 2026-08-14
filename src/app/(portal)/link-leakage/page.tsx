@@ -290,7 +290,14 @@ export default async function LinkLeakagePage({
       )}
 
       <h2 className="mt-8 text-lg font-medium">Status Creator{latestWeek ? ` — minggu ${latestWeek}` : ""}</h2>
-      <CreatorStatusTable rows={statusRows} />
+      {latestWeek && (
+        <p className="mt-1 text-sm text-slate-500">
+          Tombol <strong>⤓ Detail bocor</strong> di tiap baris mengunduh detail produk bocor kreator
+          tersebut (per shop &amp; produk) untuk minggu {latestWeek} sebagai CSV — dibaca dari backup
+          analisa mingguan, tidak dihitung ulang. CPM hanya bisa mengunduh kreator yang dipegangnya.
+        </p>
+      )}
+      <CreatorStatusTable rows={statusRows} week={latestWeek} />
 
       <h2 className="mt-8 text-lg font-medium">Detail Produk Bocor</h2>
       <p className="mt-1 text-sm text-slate-500">

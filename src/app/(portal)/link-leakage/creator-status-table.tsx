@@ -9,6 +9,7 @@ import {
   type SortConfig,
 } from "@/components/table-controls";
 import { creatorClassLabel } from "@/lib/creators/creator-class";
+import { CreatorLeakDetailButton } from "./creator-leak-detail-button";
 
 /** Satu baris rollup kebocoran per kreator untuk minggu terakhir (sudah dihitung server). */
 export interface CreatorStatusRow {
@@ -117,7 +118,18 @@ const SORT: SortConfig<CreatorStatusRow> = {
  * di sini murni BACAAN rollup (creator_link_status) — tidak dihitung ulang di klien
  * (CLAUDE.md #4), dan tidak ada jalur edit manual (CLAUDE.md #3).
  */
-export function CreatorStatusTable({ rows }: { rows: CreatorStatusRow[] }) {
+export function CreatorStatusTable({
+  rows,
+  week,
+}: {
+  rows: CreatorStatusRow[];
+  /**
+   * Minggu rollup yang sedang ditampilkan. Tombol unduh detail per kreator butuh
+   * minggu yang PERSIS sama dengan barisnya — tanpa itu tombolnya tidak dirender,
+   * bukan mengunduh minggu tebakan.
+   */
+  week: string | null;
+}) {
   const controls = useTableControls<CreatorStatusRow>({
     rows,
     searchText: searchName,
@@ -147,6 +159,7 @@ export function CreatorStatusTable({ rows }: { rows: CreatorStatusRow[] }) {
                 <SortableTh controls={controls} sortKey="bocor">GMV Bocor</SortableTh>
                 <SortableTh controls={controls} sortKey="rasio">Rasio</SortableTh>
                 <SortableTh controls={controls} sortKey="status">Status</SortableTh>
+                {week && <th className="px-4 py-3">Detail</th>}
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
@@ -193,11 +206,23 @@ export function CreatorStatusTable({ rows }: { rows: CreatorStatusRow[] }) {
                       </span>
                     )}
                   </td>
+                  {week && (
+                    <td className="px-4 py-2">
+                      {/* Unduh detail produk bocor kreator ini (CSV). Sumber & aturan
+                          scope-nya sama dengan tombol Detail di CM Workspace — satu
+                          server action, bukan salinan kedua. */}
+                      <CreatorLeakDetailButton
+                        creatorId={r.creatorId}
+                        week={week}
+                        label="⤓ Detail bocor"
+                      />
+                    </td>
+                  )}
                 </tr>
               ))}
               {controls.visibleRows.length === 0 && (
                 <tr>
-                  <td colSpan={7} className="px-4 py-6 text-center text-slate-400">
+                  <td colSpan={week ? 8 : 7} className="px-4 py-6 text-center text-slate-400">
                     {rows.length === 0
                       ? "Belum ada rollup. Jalankan analisa kebocoran di atas atau upload mingguan lewat menu Upload Mingguan (Ingest)."
                       : "Tidak ada kreator yang cocok dengan filter."}

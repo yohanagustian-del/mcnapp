@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { creatorDayEmpty, slotFlags } from "@/lib/schedule/indicators";
 import { formatDayLabel } from "@/lib/schedule/week";
 import type { LiveScheduleSlot } from "@/lib/schedule/types";
-import { SlotForm, type DealOption, type RosterCreatorOption } from "./slot-form";
+import { SlotForm, type ShopDealOption, type RosterCreatorOption } from "./slot-form";
 import { useCreatorFilter } from "@/components/creator-filter";
 
 const btnSmall = "rounded-md px-2 py-1 text-xs font-medium";
@@ -89,13 +89,13 @@ function SlotBlock({ slot, todayIso }: { slot: LiveScheduleSlot; todayIso: strin
 export function ScheduleBoard({
   matrix,
   creators,
-  deals,
+  shops,
   todayIso,
   canEdit,
 }: {
   matrix: BoardWeekMatrix;
   creators: RosterCreatorOption[];
-  deals: DealOption[];
+  shops: ShopDealOption[];
   todayIso: string;
   canEdit: boolean;
 }) {
@@ -153,11 +153,14 @@ export function ScheduleBoard({
     <div className="space-y-3">
       {selected && (
         <SlotForm
+          // Kunci per slot/sel: tanpa ini, membuka slot lain selagi form terbuka
+          // mempertahankan isian slot sebelumnya (state & DOM tidak ter-reset).
+          key={selected.slot ? `slot-${selected.slot.id}` : `new-${selected.creatorId}-${selected.date}`}
           slot={selected.slot}
           creatorId={selected.creatorId}
           date={selected.date}
           creators={creators}
-          deals={deals}
+          shops={shops}
           onDone={close}
           onCancel={close}
         />

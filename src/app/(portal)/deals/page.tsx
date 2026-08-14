@@ -61,6 +61,10 @@ export default async function DealsPage({
   }
   const { data: shopSummary, error: shopError } = await shopQuery;
 
+  // Kolom Nama BD membuka identitas pemilik kartu — namanya TIDAK ikut dikirim ke
+  // role yang tidak berhak, bukan hanya disembunyikan di tabel (pola tab Produk TAP).
+  const canSeeOwner = hasPermission("products.view_owner_name", member.role);
+
   // deal_by / pic_tap disimpan sebagai uuid di kartu produk; namanya di-join di
   // aplikasi karena team_members cuma puluhan baris (pola yang sama dipakai
   // halaman Produk TAP).
@@ -101,6 +105,7 @@ export default async function DealsPage({
     campaign_types: (s.campaign_types as string[] | null) ?? [],
     deal_by_names: names(s.deal_by_ids),
     pic_tap_names: names(s.pic_tap_ids),
+    uploaded_by_names: canSeeOwner ? names(s.uploaded_by_ids) : [],
   }));
 
   const canRegister = hasPermission("deals.register", member.role);
@@ -181,8 +186,11 @@ export default async function DealsPage({
         per shop, sejajar dengan tabel deal di atas. Deal baru didaftarkan sebagai kartu produk,
         jadi di sinilah shop yang sedang berjalan terlihat. Jumlah kartu &amp; campaign dihitung,
         Ads Budget / Service Fee / GMV dijumlah, harga &amp; rate komisi dirata-rata, dan Exp Date
-        memakai masa berlaku terjauh. Kolom lain bisa dimunculkan lewat menu <strong>Kolom</strong>;
-        kotak pencarian di atas ikut menyaring tabel ini.
+        memakai masa berlaku terjauh. <strong>Ads Budget</strong> &amp; <strong>Service Fee</strong>{" "}
+        (jawaban Tipe Campaign berbayar saat registrasi/upload deal) beserta{" "}
+        <strong>Deal by</strong>, <strong>PIC TAP</strong>, dan <strong>Nama BD</strong> tampil di
+        tabel ini — tab Produk TAP kini fokus ke kolom export platform. Kolom lain bisa dimunculkan
+        lewat menu <strong>Kolom</strong>; kotak pencarian di atas ikut menyaring tabel ini.
       </p>
       {canEditShop && (
         <p className="mt-2 text-sm text-slate-500">
@@ -203,6 +211,7 @@ export default async function DealsPage({
         <ShopsTable
           rows={shopRows}
           canEdit={canEditShop}
+          canSeeOwner={canSeeOwner}
           emptyMessage={
             q
               ? `Tidak ada shop cocok dengan "${q}".`

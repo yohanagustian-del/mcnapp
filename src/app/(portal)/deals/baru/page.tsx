@@ -63,7 +63,9 @@ export default async function DealBaruPage() {
         tersimpan dengan tanda “perlu review”. Satu hal yang <strong>wajib</strong> dijawab di sini:{" "}
         <strong>Tipe Campaign</strong> — kolom itu tidak ada di file export TAP, jadi jawabannyalah
         yang mengisinya untuk semua kartu di file (dan <strong>Paid Campaign</strong> ikut
-        mewajibkan Ads Budget &amp; Service Fee).
+        mewajibkan Ads Budget &amp; Service Fee). <strong>Deal by</strong> dan{" "}
+        <strong>PIC TAP</strong> boleh ikut dijawab sekali di sini untuk seluruh file;{" "}
+        <strong>Nama BD</strong> terisi otomatis dari akun Anda.
       </p>
       <div className="mt-3">
         <UploadTutorial />
@@ -81,7 +83,10 @@ export default async function DealBaruPage() {
             Shop ID yang belum ketemu bisa diisi belakangan sekaligus se-shop lewat tombol Edit di
             tabel "Shop dari Produk TAP" (tab Deal Brand).'
         >
-          <UploadCampaignFields />
+          <UploadCampaignFields
+            picOptions={(picOptions ?? []) as MemberOption[]}
+            dealByOptions={dealByOptions}
+          />
         </CsvUploadForm>
       </div>
     </div>

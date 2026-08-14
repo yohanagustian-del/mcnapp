@@ -16,6 +16,12 @@ export interface LiveScheduleSlot {
   off_reason: string | null;
   brand_name: string | null;
   deal_id: string | null;
+  /**
+   * Shop dari tabel "Shop dari Produk TAP" (= products_tap.shop_key, migrasi 0045).
+   * Inilah tautan brand yang dipakai form slot sekarang; `deal_id` tetap ada untuk
+   * slot lama yang menunjuk brand_deals.
+   */
+  shop_key: string | null;
   deals_by: DealsBy | null;
   ads_payer: AdsPayer | null;
   ads_note: string | null;
@@ -50,6 +56,7 @@ export interface SlotInsert {
   off_reason: string | null;
   brand_name: string | null;
   deal_id: string | null;
+  shop_key: string | null;
   deals_by: DealsBy | null;
   ads_payer: AdsPayer | null;
   ads_note: string | null;

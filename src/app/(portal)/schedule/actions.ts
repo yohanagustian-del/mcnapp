@@ -66,6 +66,7 @@ interface SlotFields {
   off_reason: string | null;
   brand_name: string | null;
   deal_id: string | null;
+  shop_key: string | null;
   deals_by: DealsBy | null;
   ads_payer: AdsPayer | null;
   ads_note: string | null;
@@ -127,6 +128,8 @@ function parseSlotFields(fd: FormData): SlotFields {
     off_reason: str(fd, "off_reason"),
     brand_name: str(fd, "brand_name"),
     deal_id: str(fd, "deal_id"),
+    // Shop dari tabel "Shop dari Produk TAP" (products_tap.shop_key).
+    shop_key: str(fd, "shop_key"),
     deals_by: (deals_by as DealsBy | null) ?? null,
     ads_payer: (ads_payer as AdsPayer | null) ?? null,
     ads_note: str(fd, "ads_note"),
@@ -159,6 +162,33 @@ async function assertCreatorInScope(
   }
 }
 
+/**
+ * Shop yang ditautkan ke slot harus benar-benar ada di katalog Produk TAP.
+ *
+ * shop_key bukan foreign key (shop = hasil grouping kartu produk, bukan tabel), jadi
+ * database tidak bisa menolak kunci karangan/basi. Tanpa cek ini, slot bisa menunjuk
+ * shop yang namanya sudah diganti — dan notifikasi PIC TAP-nya diam-diam tidak
+ * pernah muncul.
+ */
+async function assertShopKeyExists(
+  admin: ReturnType<typeof createAdminClient>,
+  shopKey: string | null
+): Promise<void> {
+  if (!shopKey) return;
+  const { data, error } = await admin
+    .from("products_tap")
+    .select("shop_key")
+    .eq("shop_key", shopKey)
+    .limit(1)
+    .maybeSingle();
+  if (error) throw new Error(`Gagal memeriksa shop: ${error.message}`);
+  if (!data) {
+    throw new Error(
+      `Shop "${shopKey}" tidak ada di katalog Produk TAP — muat ulang halaman lalu pilih ulang shopnya.`
+    );
+  }
+}
+
 function revalidateSchedule(): void {
   revalidatePath("/schedule");
   revalidatePath("/workspace/cm");
@@ -184,6 +214,7 @@ export async function createSlotAction(formData: FormData): Promise<CreateSlotRe
     if (!creator?.live_roster) {
       throw new Error("Kreator belum ada di roster live — aktifkan dulu di kalender.");
     }
+    await assertShopKeyExists(admin, f.shop_key);
 
     const { data: inserted, error } = await admin
       .from("live_schedule_slots")
@@ -196,6 +227,7 @@ export async function createSlotAction(formData: FormData): Promise<CreateSlotRe
         off_reason: f.off_reason,
         brand_name: f.brand_name,
         deal_id: f.deal_id,
+        shop_key: f.shop_key,
         deals_by: f.deals_by,
         ads_payer: f.ads_payer,
         ads_note: f.ads_note,
@@ -250,6 +282,7 @@ export async function updateSlotAction(formData: FormData): Promise<ScheduleActi
     if (f.creator_id !== before.creator_id) {
       await assertCreatorInScope(admin, member, f.creator_id);
     }
+    await assertShopKeyExists(admin, f.shop_key);
 
     const { data: after, error } = await admin
       .from("live_schedule_slots")
@@ -262,6 +295,7 @@ export async function updateSlotAction(formData: FormData): Promise<ScheduleActi
         off_reason: f.off_reason,
         brand_name: f.brand_name,
         deal_id: f.deal_id,
+        shop_key: f.shop_key,
         deals_by: f.deals_by,
         ads_payer: f.ads_payer,
         ads_note: f.ads_note,

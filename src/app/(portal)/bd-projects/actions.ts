@@ -8,8 +8,10 @@ import { genId } from "@/lib/utils/id";
 import {
   bdProjectSchema,
   parseShopKeys,
+  PROJECT_PRODUCT_LIMIT,
   PROJECT_SHOP_LIMIT,
 } from "@/lib/deals/bd-project";
+import { parseProductRowKeys } from "@/lib/m10/product-keys";
 
 export interface ProjectFormState {
   ok: boolean;
@@ -148,6 +150,104 @@ export async function saveBdProject(
       ? `Project "${d.name}" tersimpan dengan ${shopKeys.length} shop.`
       : `Project ${projectId} diperbarui (${shopKeys.length} shop).`,
     projectId,
+  };
+}
+
+/**
+ * Simpan daftar kartu produk yang DIKERJASAMAKAN pada sebuah project.
+ *
+ * Shop project bisa punya ratusan kartu produk, dan hanya sebagian yang benar-benar
+ * masuk campaign. Centangan di tabel "Produk yang Dikerjasamakan" disimpan sebagai
+ * kunci (campaign_id, product_id) di `bd_project_products` — atribut produknya
+ * (harga, komisi, masa berlaku) tetap dibaca dari products_tap, tidak disalin
+ * (CLAUDE.md #4).
+ *
+ * Ditulis ulang utuh seperti daftar shop: form mengirim keadaan akhir yang
+ * diinginkan, jadi tidak ada perhitungan selisih yang bisa salah.
+ */
+export async function setProjectProducts(
+  _prev: ProjectFormState | null,
+  formData: FormData
+): Promise<ProjectFormState> {
+  const actor = await requirePermission("bd_project.manage");
+
+  const projectId = String(formData.get("project_id") ?? "").trim();
+  if (!projectId) return { ok: false, message: "Project tidak dikenali." };
+
+  let keys;
+  try {
+    keys = parseProductRowKeys(String(formData.get("product_keys") ?? "[]"));
+  } catch (e) {
+    return { ok: false, message: e instanceof Error ? e.message : "Daftar produk tidak terbaca" };
+  }
+  if (keys.length > PROJECT_PRODUCT_LIMIT) {
+    return {
+      ok: false,
+      message: `Maksimal ${PROJECT_PRODUCT_LIMIT} kartu produk per project (terpilih ${keys.length}).`,
+    };
+  }
+
+  const admin = createAdminClient();
+  const { data: project } = await admin
+    .from("bd_projects")
+    .select("id, name")
+    .eq("id", projectId)
+    .maybeSingle();
+  if (!project) return { ok: false, message: `Project ${projectId} tidak ditemukan.` };
+
+  const { data: before } = await admin
+    .from("bd_project_products")
+    .select("campaign_id, product_id")
+    .eq("project_id", projectId);
+
+  const { error: clearError } = await admin
+    .from("bd_project_products")
+    .delete()
+    .eq("project_id", projectId);
+  if (clearError) {
+    return { ok: false, message: `Gagal menyimpan daftar produk: ${clearError.message}` };
+  }
+
+  if (keys.length > 0) {
+    const { error } = await admin.from("bd_project_products").insert(
+      keys.map((k) => ({
+        project_id: projectId,
+        campaign_id: k.campaignId,
+        product_id: k.productId,
+        added_by: actor.id,
+      }))
+    );
+    // Foreign key gagal = kartu yang dicentang sudah tidak ada di katalog (dihapus
+    // dari tab Produk TAP setelah halaman dibuka). Pesannya disebut apa adanya.
+    if (error) {
+      return {
+        ok: false,
+        message:
+          `Gagal menyimpan daftar produk: ${error.message}. ` +
+          "Muat ulang halaman — kemungkinan ada kartu yang sudah dihapus dari katalog Produk TAP.",
+      };
+    }
+  }
+
+  await writeAudit({
+    actorId: actor.id,
+    action: "bd_project.set_products",
+    entityType: "bd_projects",
+    entityId: projectId,
+    before: { products: before ?? [] },
+    after: { products: keys },
+    // Menandai produk mana yang digarap tidak mengubah kartu produknya sama sekali
+    // → auto berlaku, tetap ter-log (CLAUDE.md #2).
+    type: "auto",
+  });
+
+  revalidatePath(`/bd-projects/${projectId}`);
+  return {
+    ok: true,
+    message:
+      keys.length === 0
+        ? "Daftar kerja sama dikosongkan — semua kartu shop project ini kembali dianggap belum dipilih."
+        : `${keys.length} kartu produk ditandai dikerjasamakan pada project ini.`,
   };
 }
 
