@@ -334,21 +334,27 @@ export interface ColumnPreference {
  * defaultnya preset "Ringkas" (kolom yang benar-benar dipakai harian) dan sisanya
  * tinggal dicentang lewat menu Kolom.
  *
- * Nilai awal SELALU `compactLabels` supaya render server & klien identik (tidak
- * hydration-mismatch); preferensi tersimpan baru dibaca setelah mount. Isi
- * localStorage disaring terhadap `allLabels`, jadi kolom yang sudah dihapus atau
- * diganti namanya di kode tidak bisa dihidupkan lagi oleh entri usang.
+ * Nilai awal SELALU konstan di render pertama (`defaultLabels`, bawaannya
+ * `compactLabels`) supaya render server & klien identik (tidak hydration-mismatch);
+ * preferensi tersimpan baru dibaca setelah mount. Isi localStorage disaring terhadap
+ * `allLabels`, jadi kolom yang sudah dihapus atau diganti namanya di kode tidak bisa
+ * dihidupkan lagi oleh entri usang.
+ *
+ * `defaultLabels` dipisah dari `compactLabels` untuk tabel yang ingin membuka semua
+ * kolom lebih dulu tapi tetap menyediakan preset "Ringkas" di menu Kolom.
  */
 export function useColumnPreference({
   storageKey,
   allLabels,
   compactLabels,
+  defaultLabels,
 }: {
   storageKey: string;
   allLabels: string[];
   compactLabels: string[];
+  defaultLabels?: string[];
 }): ColumnPreference {
-  const [shown, setShown] = useState<string[]>(compactLabels);
+  const [shown, setShown] = useState<string[]>(defaultLabels ?? compactLabels);
 
   useEffect(() => {
     try {

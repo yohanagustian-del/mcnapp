@@ -45,9 +45,11 @@ Platform internal MCN MEA (agency creator TikTok/Shopee). Menggabungkan tools te
 
 ### 6. Deal Registration Form (M8/BizDev) — cegah data kotor
 - Master deal internal lama = berantakan (alasan platform ini dibuat). Deal BARU wajib lewat FORM tervalidasi, bukan free-text sheet.
-- Field wajib: brand_name (sesuai display platform), shop_id, niche, exp_date (→ deal_end), komisi_kreator, komisi_mea, pic_tap, campaign_name.
-- Validasi form: shop_id numeric & unik; exp_date = date picker (bukan teks "19 February 2026"); komisi = number% (tolak "not found"/"error"/kosong; range "5-7%" → min & max terpisah); Rupiah → number murni.
-- exp_date deal → sinkron ke cooperating_shops.deal_end untuk alert kadaluarsa M4.
+- **Registrasi Deal = mendaftarkan KARTU PRODUK ke `products_tap`** (tab Produk TAP), bukan baris `brand_deals`. Pertanyaannya = header tabel Produk TAP (export TAP "Export link": Campaign ID, Product Name, Product ID, Sale Price, Shop Name, Shop ID, effective start/end, 4 rate komisi, Product Link) + Tipe Campaign, Ads Budget, Service Fee, Deal by, PIC TAP.
+- Field wajib HANYA `product_name`; Ads Budget & Service Fee wajib saat `campaign_type = extra_commission` (keputusan user 2026-08-14). Kolom lain boleh kosong — memaksa isian yang belum diketahui justru memancing data karangan.
+- Validasi form tetap ketat untuk yang DIISI: shop_id & product_id numeric; tanggal = date picker (bukan teks "19 February 2026"); komisi = number% 0–100; Rupiah → number murni. Aturan dipakai bersama server & klien lewat `lib/deals/product-card.ts` + `lib/deals/campaign-type.ts`.
+- Tanpa Product ID → dipakai ID internal `PRD-xxxxx` + `needs_review=true` (kartu tak bisa dicocokkan ke data TAP mingguan). Kombinasi (campaign_id, product_id) yang sudah ada DITOLAK, bukan ditimpa (migrasi 0040).
+- `brand_deals` (tab Deal Brand) tetap sumber deal lama: diisi Import Master Deal + form Edit deal, dan dari sanalah exp_date sinkron ke cooperating_shops.deal_end untuk alert kadaluarsa M4.
 
 ### 7. Data cleaning (ingest sheet lama) — WAJIB tangani
 - Rupiah campur: "Rp1,075,484,867" (koma=ribuan) DAN "Rp4.131.512.642" (titik=ribuan). parseRupiah deteksi keduanya → number.

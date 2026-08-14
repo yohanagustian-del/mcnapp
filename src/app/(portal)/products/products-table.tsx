@@ -1,10 +1,12 @@
 "use client";
 
-import type { ReactNode } from "react";
+import { useMemo, type ReactNode } from "react";
 import {
-  PAGE_SIZES_10_50_100, SortableTh, TableFilterBar, TablePagination, useTableControls,
+  ColumnPicker, PAGE_SIZES_10_50_100, SortableTh, TableFilterBar, TablePagination,
+  useColumnPreference, useTableControls,
   type SortConfig, type SortDir, type SortValue,
 } from "@/components/table-controls";
+import { CAMPAIGN_TYPE_LABEL } from "@/lib/deals/campaign-type";
 import { ProductEditButton } from "./product-edit-button";
 import { CopyLinkButton } from "./copy-link-button";
 
@@ -34,23 +36,23 @@ export interface ProductRow {
   campaign_name: string | null;
   effective_start: string | null;
   effective_end: string | null;
+  /** Dimensi kartu deal (form Registrasi Deal) — tidak ada di export platform. */
+  campaign_type: string | null;
+  ads_budget: number | null;
+  service_fee: number | null;
+  deal_by: string | null;
+  deal_by_name: string | null;
+  pic_tap: string | null;
+  pic_tap_name: string | null;
   source: string | null;
   active: boolean;
   needs_review: boolean;
-  /** Pemilik baris: akun yang meng-upload (null = hasil derive ingest mingguan). */
+  /** Pemilik baris: akun yang menginput (null = hasil derive ingest mingguan). */
   uploaded_by: string | null;
   /** Nama BD pemilik baris. Selalu null untuk role yang tidak boleh melihatnya. */
   uploader_name: string | null;
   uploader_team: string | null;
 }
-
-export const SEGMENT_LABEL: Record<string, string> = {
-  low: "Low (<180rb)",
-  entry: "Entry (180rb-800rb)",
-  sweet: "Sweet (800rb-3,6jt)",
-  high: "High (3,6jt-8jt)",
-  premium: "Premium (>8jt)",
-};
 
 /** Rupiah dipadatkan ("Rp1,2 jt") supaya kolom nominal tidak melebarkan tabel. */
 function rpShort(v: number | null): ReactNode {
@@ -80,6 +82,11 @@ interface TableColumn {
    * BizDev ke atas — lihat izin `products.view_owner_name`.
    */
   ownerOnly?: boolean;
+  /**
+   * Kolom kartu deal (isian form Registrasi Deal), bukan kolom export TAP. Dipakai
+   * memisahkan preset "Ringkas" = kolom yang persis ada di file export platform.
+   */
+  dealCard?: boolean;
   value?: (p: ProductRow) => SortValue;
   firstDir?: SortDir;
   cell: (p: ProductRow) => ReactNode;
@@ -87,12 +94,15 @@ interface TableColumn {
 }
 
 /**
- * Definisi kolom katalog — satu sumber untuk header, sel, dan pengurutan.
+ * Definisi kolom katalog — satu sumber untuk header, sel, pengurutan, dan menu Kolom.
  *
- * Daftar ini SENGAJA terkunci pada kolom export TAP "Export link" + Nama BD, dengan
- * urutan dan penamaan yang sama seperti di file export supaya baris di portal bisa
- * dicocokkan langsung dengan file aslinya. Tidak ada menu "Kolom": kolom lain
- * (metrik performa) tidak ditampilkan di tabel ini sama sekali.
+ * Isinya kolom export TAP "Export link" (nama & urutannya sengaja sama persis dengan
+ * file export supaya baris di portal bisa dicocokkan langsung) + kolom kartu deal
+ * dari form Registrasi Deal + Nama BD pemilik baris. Metrik performa tetap tidak
+ * ditampilkan di tabel ini sama sekali.
+ *
+ * Semuanya tampil secara bawaan; menu "Kolom" dipakai untuk menyembunyikan yang
+ * tidak diperlukan (preset "Ringkas" = kolom export TAP saja).
  */
 const COLUMNS: TableColumn[] = [
   {
@@ -135,6 +145,13 @@ const COLUMNS: TableColumn[] = [
     value: (p) => p.shop_name ?? p.shop_id,
     className: `${td} max-w-[14rem] truncate`,
     cell: (p) => <span title={p.shop_id ?? undefined}>{p.shop_name ?? p.shop_id ?? "—"}</span>,
+  },
+  {
+    label: "Shop ID",
+    dealCard: true,
+    value: (p) => p.shop_id,
+    className: `${td} font-mono text-[11px]`,
+    cell: (p) => p.shop_id ?? "—",
   },
   {
     label: "Product Effective Start Time",
@@ -207,7 +224,51 @@ const COLUMNS: TableColumn[] = [
       ),
   },
   {
-    // Nama BD pemilik baris — akun yang meng-upload campaign ini.
+    label: "Tipe Campaign",
+    dealCard: true,
+    value: (p) => p.campaign_type,
+    cell: (p) =>
+      p.campaign_type ? (
+        <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-700">
+          {CAMPAIGN_TYPE_LABEL[p.campaign_type] ?? p.campaign_type}
+        </span>
+      ) : (
+        "—"
+      ),
+  },
+  {
+    label: "Ads Budget",
+    dealCard: true,
+    value: (p) => p.ads_budget,
+    firstDir: "desc",
+    className: tdNum,
+    cell: (p) => rpShort(p.ads_budget),
+  },
+  {
+    label: "Service Fee",
+    dealCard: true,
+    value: (p) => p.service_fee,
+    firstDir: "desc",
+    className: tdNum,
+    cell: (p) => rpShort(p.service_fee),
+  },
+  {
+    // Yang menutup deal (CM/BizDev) — beda dari Nama BD (akun yang menginput baris).
+    label: "Deal by",
+    dealCard: true,
+    value: (p) => p.deal_by_name,
+    className: `${td} max-w-[12rem] truncate`,
+    cell: (p) => p.deal_by_name ?? "—",
+  },
+  {
+    label: "PIC TAP",
+    dealCard: true,
+    value: (p) => p.pic_tap_name,
+    className: `${td} max-w-[12rem] truncate`,
+    cell: (p) => p.pic_tap_name ?? "—",
+  },
+  {
+    // Nama BD pemilik baris — akun yang menginput campaign ini.
     label: "Nama BD",
     ownerOnly: true,
     value: (p) => p.uploader_name,
@@ -239,6 +300,12 @@ const COLUMNS: TableColumn[] = [
   },
 ];
 
+// Preset "Ringkas" = persis kolom yang ada di file export TAP "Export link".
+const COMPACT_LABELS = COLUMNS.filter((c) => !c.dealCard && !c.ownerOnly).map((c) => c.label);
+// Kunci dinaikkan tiap daftar kolom berubah — kalau tidak, browser yang sudah pernah
+// membuka halaman ini memulihkan pilihan lama dan kolom baru tidak pernah muncul.
+const COLUMN_PREF_KEY = "mcn.products.columns.v4";
+
 const SORT: SortConfig<ProductRow> = {
   columns: Object.fromEntries(
     COLUMNS.flatMap((c) =>
@@ -255,11 +322,12 @@ const SORT: SortConfig<ProductRow> = {
  * - Klik header untuk mengurutkan: naik → turun → urutan bawaan server.
  * - Paginasi 10/50/100 baris per halaman.
  * - Wild search satu kotak: Campaign ID, Product ID, Shop Name, Product Name.
+ * - Menu "Kolom": semua kolom tampil secara bawaan dan bisa disembunyikan satu per
+ *   satu; pilihannya tersimpan di localStorage browser masing-masing.
  *
- * Kolomnya tetap (mengikuti export TAP "Export link" + Nama BD); satu-satunya
- * kolom yang bisa hilang adalah Nama BD, yang hanya tampil untuk role BizDev ke
- * atas (`canSeeOwner`, sudah divalidasi di server — nama tidak ikut dikirim
- * untuk role lain).
+ * Kolom Nama BD hanya ada untuk role BizDev ke atas (`canSeeOwner`, sudah
+ * divalidasi di server — namanya tidak ikut dikirim untuk role lain), jadi ia juga
+ * tidak muncul di menu Kolom mereka.
  *
  * Pengurutan/paginasi/pencarian semuanya client-side atas baris yang sudah
  * dikirim server — mengetik atau klik header tidak memicu query Supabase baru.
@@ -285,7 +353,27 @@ export function ProductsTable({
     itemLabel: "produk",
   });
 
-  const visibleColumns = COLUMNS.filter((c) => !c.ownerOnly || canSeeOwner);
+  // Kolom yang boleh dilihat role ini; kolom Nama BD tidak sekadar disembunyikan,
+  // ia tidak masuk daftar pilihan sama sekali.
+  const allowedColumns = useMemo(
+    () => COLUMNS.filter((c) => !c.ownerOnly || canSeeOwner),
+    [canSeeOwner]
+  );
+  const allLabels = useMemo(() => allowedColumns.map((c) => c.label), [allowedColumns]);
+  const compactLabels = useMemo(
+    () => COMPACT_LABELS.filter((l) => allLabels.includes(l)),
+    [allLabels]
+  );
+
+  const columnPref = useColumnPreference({
+    storageKey: COLUMN_PREF_KEY,
+    allLabels,
+    compactLabels,
+    // Bawaannya SEMUA kolom: kolom kartu deal (tipe campaign, budget, deal by, PIC)
+    // baru ada gunanya kalau langsung kelihatan. "Ringkas" tetap tersedia di menu.
+    defaultLabels: allLabels,
+  });
+  const visibleColumns = allowedColumns.filter((c) => columnPref.isShown(c.label));
   const colCount = visibleColumns.length + (canEdit ? 1 : 0);
 
   return (
@@ -295,7 +383,10 @@ export function ProductsTable({
           controls={controls}
           searchPlaceholder="Cari Campaign ID / Product ID / Shop Name / Product Name…"
         />
-        <span className="ml-auto text-xs text-slate-400">Klik judul kolom untuk mengurutkan</span>
+        <ColumnPicker pref={columnPref} allLabels={allLabels} />
+        <span className="ml-auto text-xs text-slate-400">
+          Klik judul kolom untuk mengurutkan · pilihan kolom tersimpan di browser ini
+        </span>
       </div>
 
       <div className="overflow-x-auto">

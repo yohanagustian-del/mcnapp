@@ -13,33 +13,11 @@ import { parseRupiah } from "@/lib/utils/rupiah";
 import { parseCommission } from "@/lib/utils/commission";
 import { parseFlexibleDate } from "@/lib/utils/date";
 import { commissionRaw, dealReviewFlags } from "@/lib/deals/form";
+import { productCardIssues, productCardSchema } from "@/lib/deals/product-card";
+import { getConfig } from "@/lib/config";
+import { priceSegmentOf, type PriceBounds } from "@/lib/projection/gmv";
+import { NO_CAMPAIGN } from "@/lib/m10/products";
 import type { UploadReport } from "@/app/(portal)/tim/actions";
-
-/**
- * Deal Registration Form schema (CLAUDE.md #6 — strict validation, no dirty data):
- * shop_id numeric & unique; exp_date from date picker; komisi = clean numbers
- * (range handled as separate min/max); Rupiah fields = pure numbers.
- */
-const dealFormSchema = z.object({
-  brand_name: z.string().min(1, "Nama brand wajib (sesuai display platform)"),
-  shop_id: z.string().regex(/^\d+$/, "Shop ID harus angka"),
-  niche: z.string().min(1, "Niche wajib diisi"),
-  exp_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Exp date wajib dari date picker"),
-  komisi_kreator_min: z.coerce.number().min(0).max(100),
-  komisi_kreator_max: z.coerce.number().min(0).max(100).optional(),
-  komisi_mea_min: z.coerce.number().min(0).max(100),
-  komisi_mea_max: z.coerce.number().min(0).max(100).optional(),
-  pic_tap: z.string().uuid("PIC TAP wajib dipilih"),
-  campaign_name: z.string().min(1, "Campaign name wajib diisi"),
-  brand_link: z.string().url().optional().or(z.literal("")),
-  gmv_tap: z.coerce.number().nonnegative().optional(),
-  avg_price: z.coerce.number().nonnegative().optional(),
-  ads_budget: z.coerce.number().nonnegative().optional(),
-  service_fee: z.coerce.number().nonnegative().optional(),
-  // Campaign sample & komisi extra = non-berbayar (QA feedback BizDev)
-  campaign_type: z.enum(["paid", "sample", "extra_commission"]).default("paid"),
-  notes: z.string().optional(),
-});
 
 export interface DealFormState {
   ok: boolean;
@@ -47,13 +25,29 @@ export interface DealFormState {
   fieldErrors?: Record<string, string>;
 }
 
-export async function registerDeal(
+/**
+ * Registrasi Deal = mendaftarkan KARTU PRODUK ke katalog Produk TAP.
+ *
+ * Pertanyaan formnya mengikuti header tabel Produk TAP (export TAP "Export link")
+ * + dimensi komersial yang tidak dibawa export platform (tipe campaign, ads budget,
+ * service fee, deal by, PIC TAP), dan barisnya masuk ke `products_tap` — bukan tabel
+ * kartu tersendiri, supaya katalog produk tetap satu sumber (CLAUDE.md #4).
+ *
+ * Yang wajib hanya Product Name (plus Ads Budget & Service Fee saat tipe campaign =
+ * komisi extra). Kolom yang belum diketahui sengaja boleh kosong: memaksa mengisi
+ * shop_id/komisi yang belum ketemu justru memancing isian karangan — masalah persis
+ * yang membuat master deal lama berantakan (CLAUDE.md #6).
+ *
+ * Menulis lewat admin client karena RLS products_tap = service-role only (0019);
+ * izinnya tetap ditegakkan di server lewat requirePermission.
+ */
+export async function registerDealCard(
   _prev: DealFormState | null,
   formData: FormData
 ): Promise<DealFormState> {
   const actor = await requirePermission("deals.register");
 
-  const parsed = dealFormSchema.safeParse(Object.fromEntries(formData.entries()));
+  const parsed = productCardSchema.safeParse(Object.fromEntries(formData.entries()));
   if (!parsed.success) {
     const fieldErrors: Record<string, string> = {};
     for (const issue of parsed.error.issues) {
@@ -63,105 +57,90 @@ export async function registerDeal(
   }
   const d = parsed.data;
 
-  if (d.komisi_kreator_max != null && d.komisi_kreator_max < d.komisi_kreator_min) {
-    return { ok: false, message: "Komisi kreator max < min.", fieldErrors: { komisi_kreator_max: "Max harus ≥ min" } };
-  }
-  if (d.komisi_mea_max != null && d.komisi_mea_max < d.komisi_mea_min) {
-    return { ok: false, message: "Komisi MEA max < min.", fieldErrors: { komisi_mea_max: "Max harus ≥ min" } };
+  const issues = productCardIssues(d);
+  if (Object.keys(issues).length > 0) {
+    return { ok: false, message: "Periksa kembali isian form.", fieldErrors: issues };
   }
 
-  const supabase = await createClient();
+  // Product ID ikut primary key dan tidak boleh kosong, sementara form
+  // membolehkannya kosong. Baris tanpa Product ID asli dapat ID internal dan
+  // ditandai perlu review: tanpa Product ID platform, kartu ini tidak akan pernah
+  // ketemu data TAP mingguan.
+  const generatedProductId = d.product_id === undefined;
+  const productId = d.product_id ?? genId("PRD");
+  const campaignId = d.campaign_id ?? NO_CAMPAIGN;
 
-  // shop_id unique among registered deals
-  const { data: dupe } = await supabase
-    .from("brand_deals").select("id").eq("shop_id", d.shop_id).maybeSingle();
-  if (dupe) {
-    return { ok: false, message: `Shop ID ${d.shop_id} sudah terdaftar di deal ${dupe.id}.`, fieldErrors: { shop_id: "Shop ID sudah dipakai" } };
-  }
+  const price = d.price ?? null;
+  const bounds = await getConfig<PriceBounds>("segments.price_bounds");
 
-  const kreatorRaw = commissionRaw(d.komisi_kreator_min, d.komisi_kreator_max);
-  const meaRaw = commissionRaw(d.komisi_mea_min, d.komisi_mea_max);
-
-  const id = genId("DEAL");
   const record = {
-    id,
-    brand_name: d.brand_name.trim(),
-    shop_id: d.shop_id,
-    niche: d.niche.trim(),
-    exp_date: d.exp_date,
-    deal_end: d.exp_date, // deal_end = exp_date (BUILD_PLAN blocker resolution)
-    komisi_kreator_raw: kreatorRaw,
-    komisi_kreator_pct: d.komisi_kreator_min,
-    komisi_mea_raw: meaRaw,
-    komisi_mea_pct: d.komisi_mea_min,
-    pic_tap: d.pic_tap,
-    campaign_name: d.campaign_name.trim(),
-    brand_link: d.brand_link || null,
-    gmv_tap: d.gmv_tap ?? null,
-    avg_price: d.avg_price ?? null,
-    ads_budget: d.ads_budget || null,
-    service_fee: d.service_fee || null,
-    campaign_type: d.campaign_type,
-    notes: d.notes?.trim() || null,
-    created_by: actor.id,
+    campaign_id: campaignId,
+    product_id: productId,
+    product_name: d.product_name,
+    price,
+    // Segmen harga TIDAK diisi manual — dihitung dari harga memakai threshold
+    // app_config, sama seperti jalur upload & derive (CLAUDE.md konvensi kode).
+    price_segment: price !== null && price > 0 ? priceSegmentOf(price, bounds) : null,
+    shop_name: d.shop_name ?? null,
+    shop_id: d.shop_id ?? null,
+    effective_start: d.effective_start ?? null,
+    effective_end: d.effective_end ?? null,
+    commission_pct: d.commission_pct ?? null,
+    partner_commission_pct: d.partner_commission_pct ?? null,
+    creator_shop_ads_commission_pct: d.creator_shop_ads_commission_pct ?? null,
+    partner_shop_ads_commission_pct: d.partner_shop_ads_commission_pct ?? null,
+    product_link: d.product_link ?? null,
+    campaign_type: d.campaign_type ?? null,
+    ads_budget: d.ads_budget ?? null,
+    service_fee: d.service_fee ?? null,
+    deal_by: d.deal_by ?? null,
+    pic_tap: d.pic_tap ?? null,
+    source: "deal_register",
+    // Pemilik baris = akun yang mendaftarkan (kolom "Nama BD" di tabel Produk TAP).
+    uploaded_by: actor.id,
+    needs_review: generatedProductId,
+    first_seen: new Date().toISOString().slice(0, 10),
+    last_seen: new Date().toISOString().slice(0, 10),
+    updated_at: new Date().toISOString(),
   };
 
-  // Insert via user-scoped client so RLS enforces the bizdev/management write rule.
-  const { error } = await supabase.from("brand_deals").insert(record);
-  if (error) return { ok: false, message: `Gagal menyimpan deal: ${error.message}` };
-
-  // Sync exp_date → cooperating_shops.deal_end for the M4 expiry alert (service write).
   const admin = createAdminClient();
-  const { error: shopError } = await admin.from("cooperating_shops").upsert(
-    {
-      shop_id: d.shop_id,
-      deal_id: id,
-      deal_end: d.exp_date,
-      active_flag: d.exp_date >= new Date().toISOString().slice(0, 10),
-    },
-    { onConflict: "shop_id" }
-  );
-
-  // Daftar produk (1 brand → N produk): rows product_id[]/product_name[]/product_link[]
-  const productNames = formData.getAll("product_name[]").map((v) => String(v).trim());
-  const productIds = formData.getAll("product_id[]").map((v) => String(v).trim());
-  const productLinks = formData.getAll("product_link[]").map((v) => String(v).trim());
-  const productRows = productNames
-    .map((name, i) => ({
-      deal_id: id,
-      product_id: productIds[i] || null,
-      product_name: name,
-      product_link: productLinks[i] || null,
-      niche: d.niche.trim(),
-      exp_date: d.exp_date,
-      komisi_kreator_pct: d.komisi_kreator_min,
-      komisi_mea_pct: d.komisi_mea_min,
-      created_by: actor.id,
-    }))
-    .filter((p) => p.product_name);
-  let productError: string | null = null;
-  if (productRows.length > 0) {
-    const { error: pErr } = await admin.from("deal_products").insert(productRows);
-    if (pErr) productError = pErr.message;
+  // insert, BUKAN upsert: kalau (campaign_id, product_id) sudah ada, menimpanya
+  // diam-diam berarti menghapus kartu milik orang lain — persis yang dicegah
+  // migrasi 0040. Lebih baik ditolak dengan pesan jelas.
+  const { error } = await admin.from("products_tap").insert(record);
+  if (error) {
+    if (error.code === "23505") {
+      return {
+        ok: false,
+        message:
+          `Kartu untuk Product ID ${productId} di campaign ${campaignId} sudah ada. ` +
+          "Isi Campaign ID kalau ini campaign yang berbeda, atau perbaiki kartunya lewat tab Produk TAP.",
+        fieldErrors: { campaign_id: "Kombinasi Campaign ID + Product ID sudah terdaftar" },
+      };
+    }
+    return { ok: false, message: `Gagal menyimpan kartu produk: ${error.message}` };
   }
 
   await writeAudit({
     actorId: actor.id,
-    action: "brand_deal.register",
-    entityType: "brand_deals",
-    entityId: id,
-    after: { ...record, products: productRows.length },
-    type: "auto", // menambah income → auto berlaku, tetap ter-log (CLAUDE.md #2)
+    action: "products_tap.register",
+    entityType: "products_tap",
+    entityId: `${campaignId}|${productId}`,
+    after: record,
+    type: "auto", // menambah data/income → auto berlaku, tetap ter-log (CLAUDE.md #2)
   });
 
-  revalidatePath("/deals");
-  const extras: string[] = [];
-  if (shopError) extras.push(`sync cooperating_shops gagal: ${shopError.message}`);
-  if (productError) extras.push(`simpan produk gagal: ${productError}`);
-  else if (productRows.length > 0) extras.push(`${productRows.length} produk terdaftar`);
+  revalidatePath("/products");
+  const notes: string[] = [];
+  if (generatedProductId) {
+    notes.push(`Product ID belum diisi → dipakai ID internal ${productId} dan ditandai perlu review`);
+  }
   return {
     ok: true,
-    message: `Deal ${id} tersimpan.${extras.length ? ` ${extras.join("; ")}.` : ""}`,
+    message:
+      `Kartu produk "${d.product_name}" tersimpan di tab Produk TAP.` +
+      (notes.length ? ` ${notes.join("; ")}.` : ""),
   };
 }
 

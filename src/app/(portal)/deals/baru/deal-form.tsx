@@ -1,24 +1,47 @@
 "use client";
 
 import { useActionState, useState } from "react";
-import { registerDeal, type DealFormState } from "../actions";
+import { registerDealCard, type DealFormState } from "../actions";
+import { CAMPAIGN_TYPES, CAMPAIGN_TYPE_NEEDS_BUDGET } from "@/lib/deals/campaign-type";
 
-interface PicOption {
+export interface MemberOption {
   id: string;
   name: string;
+  /** Divisi untuk optgroup ("CM" / "BizDev"); kosong = tanpa pengelompokan. */
+  group?: string;
 }
 
-export function DealForm({ picOptions }: { picOptions: PicOption[] }) {
+/**
+ * Form Registrasi Deal = kartu produk untuk tab Produk TAP.
+ *
+ * Pertanyaannya sengaja memakai nama kolom export TAP "Export link" persis seperti
+ * yang tampil di tabel Produk TAP, supaya BizDev bisa menyalin isian langsung dari
+ * file/room campaign tanpa menerjemahkan istilah.
+ *
+ * Hanya Product Name yang wajib. Ads Budget & Service Fee baru muncul (dan baru
+ * wajib) saat Tipe Campaign = komisi extra — aturan yang sama divalidasi ulang di
+ * server lewat productCardIssues, bukan hanya di sini.
+ */
+export function DealForm({
+  picOptions,
+  dealByOptions,
+}: {
+  picOptions: MemberOption[];
+  dealByOptions: MemberOption[];
+}) {
   const [state, formAction, pending] = useActionState<DealFormState | null, FormData>(
-    registerDeal,
+    registerDealCard,
     null
   );
-  const [productRows, setProductRows] = useState(1);
+  const [campaignType, setCampaignType] = useState("");
 
   const err = (field: string) => state?.fieldErrors?.[field];
+  const needsBudget = campaignType === CAMPAIGN_TYPE_NEEDS_BUDGET;
+
+  const dealByGroups = [...new Set(dealByOptions.map((o) => o.group ?? ""))];
 
   return (
-    <form action={formAction} className="max-w-2xl space-y-5">
+    <form action={formAction} className="max-w-3xl space-y-5">
       {state && (
         <p
           className={`rounded-md p-3 text-sm ${
@@ -29,138 +52,123 @@ export function DealForm({ picOptions }: { picOptions: PicOption[] }) {
         </p>
       )}
 
-      <Field label="Nama Brand (sesuai display platform)" error={err("brand_name")}>
-        <input name="brand_name" required className={inputCls} placeholder="cth: Skintific Official Store" />
-      </Field>
-
-      <div className="grid grid-cols-2 gap-4">
-        <Field label="Shop ID (angka)" error={err("shop_id")}>
-          <input name="shop_id" required inputMode="numeric" pattern="\d+" className={inputCls} placeholder="7495123456789" />
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+        <Field label="Campaign ID" error={err("campaign_id")}>
+          <input name="campaign_id" className={inputCls} placeholder="7662920044527912724" />
         </Field>
-        <Field label="Niche" error={err("niche")}>
-          <input name="niche" required className={inputCls} placeholder="Beauty / FMCG / Fashion..." />
+        <Field label="Product Name *" error={err("product_name")}>
+          <input name="product_name" required className={inputCls} placeholder="Serum Vit C 30ml" />
+        </Field>
+        <Field label="Product ID" error={err("product_id")}>
+          <input name="product_id" inputMode="numeric" className={inputCls} placeholder="1729859716545022432" />
+        </Field>
+        <Field label="Sale Price (Rp, angka murni)" error={err("price")}>
+          <input name="price" type="number" min="0" step="1" className={inputCls} placeholder="231000" />
+        </Field>
+        <Field label="Shop Name" error={err("shop_name")}>
+          <input name="shop_name" className={inputCls} placeholder="Skintific Official Store" />
+        </Field>
+        <Field label="Shop ID" error={err("shop_id")}>
+          <input name="shop_id" inputMode="numeric" className={inputCls} placeholder="7495123456789" />
+        </Field>
+        <Field label="Product Effective Start Time" error={err("effective_start")}>
+          <input name="effective_start" type="date" className={inputCls} />
+        </Field>
+        <Field label="Product Effective End Time" error={err("effective_end")}>
+          <input name="effective_end" type="date" className={inputCls} />
         </Field>
       </div>
 
-      <div className="grid grid-cols-2 gap-4">
-        <Field label="Exp Date (durasi deal → deal_end)" error={err("exp_date")}>
-          <input name="exp_date" type="date" required className={inputCls} />
+      <fieldset className="rounded-md border border-slate-200 p-4">
+        <legend className="px-1 text-sm font-medium">Commission Rate (%)</legend>
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <Field label="Creator Commission Rate" error={err("commission_pct")}>
+            <input name="commission_pct" type="number" step="0.1" min="0" max="100" className={inputCls} />
+          </Field>
+          <Field label="Affiliate Partner Commission Rate" error={err("partner_commission_pct")}>
+            <input name="partner_commission_pct" type="number" step="0.1" min="0" max="100" className={inputCls} />
+          </Field>
+          <Field label="Creator Shop Ads Commission Rate" error={err("creator_shop_ads_commission_pct")}>
+            <input name="creator_shop_ads_commission_pct" type="number" step="0.1" min="0" max="100" className={inputCls} />
+          </Field>
+          <Field label="Affiliate Partner Shop Ads Commission Rate" error={err("partner_shop_ads_commission_pct")}>
+            <input name="partner_shop_ads_commission_pct" type="number" step="0.1" min="0" max="100" className={inputCls} />
+          </Field>
+        </div>
+      </fieldset>
+
+      <Field label="Product Link" error={err("product_link")}>
+        <input name="product_link" type="url" className={inputCls} placeholder="https://..." />
+      </Field>
+
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+        <Field label="Tipe Campaign" error={err("campaign_type")}>
+          <select
+            name="campaign_type"
+            value={campaignType}
+            onChange={(e) => setCampaignType(e.target.value)}
+            className={inputCls}
+          >
+            <option value="">Pilih tipe campaign…</option>
+            {CAMPAIGN_TYPES.map((t) => (
+              <option key={t.value} value={t.value}>
+                {t.label}
+              </option>
+            ))}
+          </select>
         </Field>
-        <Field label="PIC TAP" error={err("pic_tap")}>
-          <select name="pic_tap" required className={inputCls} defaultValue="">
-            <option value="" disabled>Pilih PIC…</option>
-            {picOptions.map((p) => (
-              <option key={p.id} value={p.id}>{p.name}</option>
+        <Field label="Deal by" error={err("deal_by")}>
+          <select name="deal_by" defaultValue="" className={inputCls}>
+            <option value="">Pilih nama…</option>
+            {dealByGroups.map((g) => (
+              <optgroup key={g} label={g || "Lainnya"}>
+                {dealByOptions
+                  .filter((o) => (o.group ?? "") === g)
+                  .map((o) => (
+                    <option key={o.id} value={o.id}>
+                      {o.name}
+                    </option>
+                  ))}
+              </optgroup>
             ))}
           </select>
         </Field>
       </div>
 
-      <fieldset className="rounded-md border border-slate-200 p-4">
-        <legend className="px-1 text-sm font-medium">Komisi Kreator (%)</legend>
-        <div className="grid grid-cols-2 gap-4">
-          <Field label="Min" error={err("komisi_kreator_min")}>
-            <input name="komisi_kreator_min" type="number" step="0.1" min="0" max="100" required className={inputCls} />
-          </Field>
-          <Field label="Max (kosongkan bila bukan range)" error={err("komisi_kreator_max")}>
-            <input name="komisi_kreator_max" type="number" step="0.1" min="0" max="100" className={inputCls} />
-          </Field>
-        </div>
-      </fieldset>
+      {/* Ads Budget & Service Fee hanya relevan untuk komisi extra — pertanyaannya
+          tidak dirender sama sekali di tipe lain, jadi nilainya tidak ikut terkirim. */}
+      {needsBudget && (
+        <fieldset className="rounded-md border border-amber-200 bg-amber-50 p-4">
+          <legend className="px-1 text-sm font-medium">Wajib untuk komisi extra (non-berbayar)</legend>
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <Field label="Ads Budget (Rp, angka murni) *" error={err("ads_budget")}>
+              <input name="ads_budget" type="number" min="0" required className={inputCls} placeholder="50000000" />
+            </Field>
+            <Field label="Service Fee (Rp, angka murni) *" error={err("service_fee")}>
+              <input name="service_fee" type="number" min="0" required className={inputCls} placeholder="5000000" />
+            </Field>
+          </div>
+        </fieldset>
+      )}
 
-      <fieldset className="rounded-md border border-slate-200 p-4">
-        <legend className="px-1 text-sm font-medium">Komisi MEA (%)</legend>
-        <div className="grid grid-cols-2 gap-4">
-          <Field label="Min" error={err("komisi_mea_min")}>
-            <input name="komisi_mea_min" type="number" step="0.1" min="0" max="100" required className={inputCls} />
-          </Field>
-          <Field label="Max (kosongkan bila bukan range)" error={err("komisi_mea_max")}>
-            <input name="komisi_mea_max" type="number" step="0.1" min="0" max="100" className={inputCls} />
-          </Field>
-        </div>
-      </fieldset>
-
-      <div className="grid grid-cols-2 gap-4">
-        <Field label="Campaign Name" error={err("campaign_name")}>
-          <input name="campaign_name" required className={inputCls} />
-        </Field>
-        <Field label="Tipe Campaign" error={err("campaign_type")}>
-          <select name="campaign_type" className={inputCls} defaultValue="paid">
-            <option value="paid">Paid campaign</option>
-            <option value="sample">Campaign sample (non-berbayar)</option>
-            <option value="extra_commission">Komisi extra (non-berbayar)</option>
-          </select>
-        </Field>
-      </div>
-
-      <div className="grid grid-cols-2 gap-4">
-        <Field label="Ads Budget (Rp, angka murni — opsional)" error={err("ads_budget")}>
-          <input name="ads_budget" type="number" min="0" className={inputCls} placeholder="50000000" />
-        </Field>
-        <Field label="Service Fee (Rp, angka murni — opsional)" error={err("service_fee")}>
-          <input name="service_fee" type="number" min="0" className={inputCls} />
-        </Field>
-      </div>
-
-      <fieldset className="rounded-md border border-slate-200 p-4">
-        <legend className="px-1 text-sm font-medium">
-          Daftar Produk (1 brand boleh mendaftarkan &gt;1 produk)
-        </legend>
-        <div className="space-y-3">
-          {Array.from({ length: productRows }).map((_, i) => (
-            <div key={i} className="grid grid-cols-3 gap-3">
-              <Field label={i === 0 ? "Product ID" : ""}>
-                <input name="product_id[]" className={inputCls} placeholder="1729384756" />
-              </Field>
-              <Field label={i === 0 ? "Nama Produk" : ""}>
-                <input name="product_name[]" className={inputCls} placeholder="Serum Vit C 30ml" />
-              </Field>
-              <Field label={i === 0 ? "Link Produk" : ""}>
-                <input name="product_link[]" type="url" className={inputCls} placeholder="https://..." />
-              </Field>
-            </div>
+      <Field label="PIC TAP" error={err("pic_tap")}>
+        <select name="pic_tap" defaultValue="" className={inputCls}>
+          <option value="">Pilih PIC…</option>
+          {picOptions.map((p) => (
+            <option key={p.id} value={p.id}>
+              {p.name}
+            </option>
           ))}
-        </div>
-        <div className="mt-2 flex gap-2">
-          <button
-            type="button"
-            onClick={() => setProductRows((n) => n + 1)}
-            className="rounded-md bg-slate-100 px-3 py-1.5 text-xs hover:bg-slate-200"
-          >
-            + Tambah produk
-          </button>
-          {productRows > 1 && (
-            <button
-              type="button"
-              onClick={() => setProductRows((n) => Math.max(1, n - 1))}
-              className="rounded-md bg-slate-100 px-3 py-1.5 text-xs hover:bg-slate-200"
-            >
-              − Hapus baris terakhir
-            </button>
-          )}
-        </div>
-        <p className="mt-2 text-xs text-slate-500">
-          Produk mewarisi niche, exp date & komisi deal. Bulk banyak produk? Pakai upload
-          excel di bawah form.
-        </p>
-      </fieldset>
-
-      <div className="grid grid-cols-2 gap-4">
-        <Field label="GMV TAP (Rp, angka murni — opsional)" error={err("gmv_tap")}>
-          <input name="gmv_tap" type="number" min="0" className={inputCls} placeholder="1075484867" />
-        </Field>
-        <Field label="Avg Harga (Rp, angka murni — opsional)" error={err("avg_price")}>
-          <input name="avg_price" type="number" min="0" className={inputCls} />
-        </Field>
-      </div>
-
-      <Field label="Link Brand (opsional)" error={err("brand_link")}>
-        <input name="brand_link" type="url" className={inputCls} placeholder="https://..." />
+        </select>
       </Field>
 
-      <Field label="Catatan (opsional)">
-        <textarea name="notes" rows={3} className={inputCls} />
-      </Field>
+      <p className="rounded-md bg-slate-50 p-3 text-xs text-slate-500">
+        Hanya <strong>Product Name</strong> yang wajib diisi; sisanya boleh menyusul dan bisa
+        diperbaiki lewat tombol Edit di tab Produk TAP. Kolom <strong>Nama BD</strong> terisi
+        otomatis dari akun Anda, dan <strong>Segmen Harga</strong> dihitung server dari Sale Price
+        memakai threshold app_config. Kartu tanpa Product ID tetap tersimpan, tapi ditandai
+        &ldquo;perlu review&rdquo; karena tidak bisa dicocokkan dengan data TAP mingguan.
+      </p>
 
       <button
         type="submit"
