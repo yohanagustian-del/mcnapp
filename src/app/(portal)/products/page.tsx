@@ -1,9 +1,11 @@
 import { redirect } from "next/navigation";
-import { requireMember, hasPermission, canAccessNav, NAV_ITEMS } from "@/lib/rbac";
+import {
+  requireMember, hasPermission, canAccessNav, BIZDEV_ROLES, CM_ROLES, NAV_ITEMS, type Role,
+} from "@/lib/rbac";
 import { createClient } from "@/lib/supabase/server";
 import { CsvUploadForm } from "@/components/csv-upload-form";
 import { uploadMasterProducts } from "./actions";
-import { ProductsTable, type ProductRow } from "./products-table";
+import { ProductsTable, type MemberOption, type ProductRow } from "./products-table";
 import { UploadTutorial } from "./upload-tutorial";
 
 export const dynamic = "force-dynamic";
@@ -33,6 +35,7 @@ export default async function ProductsPage() {
   if (navItem && !canAccessNav(navItem, member.role)) redirect("/dashboard");
   const canUpload = hasPermission("products.upload_master", member.role);
   const canEdit = hasPermission("products.edit", member.role);
+  const canDelete = hasPermission("products.delete", member.role);
   // Tabelnya sendiri terbuka untuk semua role yang lolos guard nav di atas; hanya
   // kolom Nama BD yang dibatasi BizDev ke atas.
   const canSeeOwner = hasPermission("products.view_owner_name", member.role);
@@ -44,13 +47,25 @@ export default async function ProductsPage() {
   // lebih tahan perubahan nama constraint FK) daripada tiga embed sekaligus.
   const { data: memberRows } = await supabase
     .from("team_members")
-    .select("id, name, team_group");
+    .select("id, name, team_group, role, active")
+    .order("name");
   const memberById = new Map(
     (memberRows ?? []).map((m) => [
       m.id as string,
       { name: m.name as string, team: m.team_group as string },
     ])
   );
+
+  // Dropdown Deal by / PIC TAP / Nama BD di form edit. Hanya anggota AKTIF yang
+  // ditawarkan (nama anggota nonaktif tetap tampil di baris lama lewat memberById,
+  // supaya riwayat tidak berubah jadi "—" hanya karena orangnya sudah keluar).
+  const memberOptions: MemberOption[] = (memberRows ?? [])
+    .filter((m) => m.active)
+    .map((m) => ({
+      id: m.id as string,
+      name: m.name as string,
+      canDealBy: ([...CM_ROLES, ...BIZDEV_ROLES] as Role[]).includes(m.role as Role),
+    }));
 
   const { data: products, error } = await supabase
     .from("products_tap")
@@ -95,6 +110,14 @@ export default async function ProductsPage() {
         campaign muncul sebagai baris terpisah per campaign, jadi input satu tim tidak pernah
         menimpa milik tim lain. Kolom yang ditampilkan bisa dipilih lewat menu{" "}
         <strong>Kolom</strong>.
+        {canEdit && (
+          <>
+            {" "}
+            Centang baris untuk menyeragamkan <strong>Shop ID / Shop Name</strong> sekaligus
+            {canDelete ? " atau menghapusnya massal" : ""}; pilihan tetap terjaga saat berpindah
+            halaman.
+          </>
+        )}
         {canSeeOwner && (
           <>
             {" "}
@@ -135,7 +158,13 @@ export default async function ProductsPage() {
       )}
 
       <div className="mt-6">
-        <ProductsTable rows={rows} canEdit={canEdit} canSeeOwner={canSeeOwner} />
+        <ProductsTable
+          rows={rows}
+          canEdit={canEdit}
+          canDelete={canDelete}
+          canSeeOwner={canSeeOwner}
+          members={memberOptions}
+        />
       </div>
     </div>
   );

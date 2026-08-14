@@ -1,14 +1,24 @@
 "use client";
 
-import { useMemo, type ReactNode } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import {
   ColumnPicker, PAGE_SIZES_10_50_100, SortableTh, TableFilterBar, TablePagination,
   useColumnPreference, useTableControls,
   type SortConfig, type SortDir, type SortValue,
 } from "@/components/table-controls";
 import { CAMPAIGN_TYPE_LABEL } from "@/lib/deals/campaign-type";
+import { productRowKey } from "@/lib/m10/product-keys";
+import { BulkActionBar } from "./bulk-actions";
 import { ProductEditButton } from "./product-edit-button";
 import { CopyLinkButton } from "./copy-link-button";
+
+/** Anggota tim untuk dropdown Deal by / PIC TAP / Nama BD di form edit. */
+export interface MemberOption {
+  id: string;
+  name: string;
+  /** Boleh dipilih sebagai "Deal by" (role CM atau BizDev). */
+  canDealBy: boolean;
+}
 
 /**
  * Satu baris katalog Produk TAP.
@@ -324,6 +334,9 @@ const SORT: SortConfig<ProductRow> = {
  * - Wild search satu kotak: Campaign ID, Product ID, Shop Name, Product Name.
  * - Menu "Kolom": semua kolom tampil secara bawaan dan bisa disembunyikan satu per
  *   satu; pilihannya tersimpan di localStorage browser masing-masing.
+ * - Centang baris untuk edit massal (Shop ID / Shop Name) atau hapus massal.
+ *   Pilihan bertahan lintas halaman & pengurutan karena disimpan sebagai kunci
+ *   (campaign_id, product_id), bukan indeks baris.
  *
  * Kolom Nama BD hanya ada untuk role BizDev ke atas (`canSeeOwner`, sudah
  * divalidasi di server — namanya tidak ikut dikirim untuk role lain), jadi ia juga
@@ -335,11 +348,15 @@ const SORT: SortConfig<ProductRow> = {
 export function ProductsTable({
   rows,
   canEdit,
+  canDelete,
   canSeeOwner,
+  members,
 }: {
   rows: ProductRow[];
   canEdit: boolean;
+  canDelete: boolean;
   canSeeOwner: boolean;
+  members: MemberOption[];
 }) {
   const controls = useTableControls<ProductRow>({
     rows,
@@ -374,10 +391,69 @@ export function ProductsTable({
     defaultLabels: allLabels,
   });
   const visibleColumns = allowedColumns.filter((c) => columnPref.isShown(c.label));
-  const colCount = visibleColumns.length + (canEdit ? 1 : 0);
+
+  // Pilihan disimpan sebagai kunci (campaign_id, product_id), bukan indeks baris:
+  // baris bisa berpindah halaman/urutan setelah sort atau setelah data di-refresh,
+  // dan indeks yang basi berarti menghapus produk yang salah.
+  const [selected, setSelected] = useState<ReadonlySet<string>>(() => new Set());
+  // Hasil aksi massal terakhir; baris aksinya sendiri ikut hilang setelah selesai.
+  const [notice, setNotice] = useState<string | null>(null);
+  const selectable = canEdit || canDelete;
+  const pageKeys = controls.visibleRows.map((p) => productRowKey(p.campaign_id, p.product_id));
+  const allPageSelected = pageKeys.length > 0 && pageKeys.every((k) => selected.has(k));
+
+  function toggleRow(key: string) {
+    setNotice(null);
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (!next.delete(key)) next.add(key);
+      return next;
+    });
+  }
+
+  function togglePage() {
+    setNotice(null);
+    setSelected((prev) => {
+      const next = new Set(prev);
+      // Semua baris di halaman ini sudah tercentang → klik berikutnya melepas
+      // halaman ini saja, pilihan di halaman lain tidak ikut hilang.
+      for (const k of pageKeys) {
+        if (allPageSelected) next.delete(k);
+        else next.add(k);
+      }
+      return next;
+    });
+  }
+
+  const colCount = visibleColumns.length + (canEdit ? 1 : 0) + (selectable ? 1 : 0);
 
   return (
     <div className="rounded-lg border border-slate-200 bg-white">
+      {selectable && selected.size > 0 && (
+        <BulkActionBar
+          selectedKeys={[...selected]}
+          canEdit={canEdit}
+          canDelete={canDelete}
+          onCleared={(message) => {
+            setSelected(new Set());
+            setNotice(message ?? null);
+          }}
+        />
+      )}
+
+      {notice && (
+        <p className="flex items-center gap-2 border-b border-green-200 bg-green-50 px-3 py-2 text-sm text-green-800">
+          {notice}
+          <button
+            type="button"
+            onClick={() => setNotice(null)}
+            className="ml-auto rounded px-2 py-0.5 text-xs text-green-700 hover:bg-green-100"
+          >
+            Tutup
+          </button>
+        </p>
+      )}
+
       <div className="flex flex-wrap items-center gap-2 border-b border-slate-200 px-3 py-2">
         <TableFilterBar
           controls={controls}
@@ -393,6 +469,17 @@ export function ProductsTable({
         <table className="min-w-full text-xs sm:text-sm">
           <thead className="bg-slate-50 text-left text-xs uppercase text-slate-500">
             <tr>
+              {selectable && (
+                <th className={`${th} w-8`}>
+                  <input
+                    type="checkbox"
+                    checked={allPageSelected}
+                    onChange={togglePage}
+                    aria-label="Pilih semua produk di halaman ini"
+                    className="h-4 w-4 rounded border-slate-300"
+                  />
+                </th>
+              )}
               {visibleColumns.map((col) =>
                 col.value ? (
                   <SortableTh key={col.label} controls={controls} sortKey={col.label} className={th}>
@@ -406,25 +493,46 @@ export function ProductsTable({
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
-            {controls.visibleRows.map((p) => (
+            {controls.visibleRows.map((p) => {
               // Kunci baris ikut campaign: satu product_id bisa muncul di beberapa
               // campaign, jadi product_id saja akan bentrok sebagai React key.
-              <tr
-                key={`${p.campaign_id ?? "-"}|${p.product_id}`}
-                className={p.needs_review ? "bg-amber-50" : "hover:bg-slate-50"}
-              >
-                {visibleColumns.map((col) => (
-                  <td key={col.label} className={col.className ?? td}>
-                    {col.cell(p)}
-                  </td>
-                ))}
-                {canEdit && (
-                  <td className={td}>
-                    <ProductEditButton product={p} />
-                  </td>
-                )}
-              </tr>
-            ))}
+              const key = productRowKey(p.campaign_id, p.product_id);
+              const checked = selected.has(key);
+              return (
+                <tr
+                  key={key}
+                  className={
+                    checked
+                      ? "bg-blue-50"
+                      : p.needs_review
+                        ? "bg-amber-50"
+                        : "hover:bg-slate-50"
+                  }
+                >
+                  {selectable && (
+                    <td className={td}>
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={() => toggleRow(key)}
+                        aria-label={`Pilih ${p.product_name ?? p.product_id}`}
+                        className="h-4 w-4 rounded border-slate-300"
+                      />
+                    </td>
+                  )}
+                  {visibleColumns.map((col) => (
+                    <td key={col.label} className={col.className ?? td}>
+                      {col.cell(p)}
+                    </td>
+                  ))}
+                  {canEdit && (
+                    <td className={td}>
+                      <ProductEditButton product={p} members={members} canSeeOwner={canSeeOwner} />
+                    </td>
+                  )}
+                </tr>
+              );
+            })}
             {controls.visibleRows.length === 0 && (
               <tr>
                 <td colSpan={colCount} className="px-4 py-6 text-center text-slate-400">

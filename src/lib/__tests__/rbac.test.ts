@@ -55,6 +55,13 @@ describe("Phase 5.0 — RBAC foundation", () => {
     }
   });
 
+  // Hapus katalog Produk TAP (termasuk hapus massal) mengikuti products.edit —
+  // dan od_viewer tetap nol seperti seluruh matriks di atas.
+  it("hapus Produk TAP dipegang role yang sama dengan yang boleh mengedit", () => {
+    expect(PERMISSIONS["products.delete"]).toEqual(PERMISSIONS["products.edit"]);
+    expect(hasPermission("products.delete", "campaign_external")).toBe(false);
+  });
+
   // M12 §2.7 — retention/purge is Director-only; management does not get it implicitly.
   it("non-director management cannot set retention policy or purge", () => {
     for (const role of MANAGEMENT_ROLES.filter((r) => r !== "director") as Role[]) {

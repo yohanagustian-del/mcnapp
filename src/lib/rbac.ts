@@ -163,6 +163,12 @@ export const PERMISSIONS: Record<string, Role[]> = {
   // Sama dengan yang boleh mengunggah master: memperbaiki baris hasil upload kotor
   // tidak lebih berisiko daripada mengunggah ulang seluruh file.
   "products.edit": [...MANAGEMENT_ROLES, ...CM_ROLES, ...BIZDEV_ROLES],
+  // Hapus baris katalog Produk TAP (termasuk hapus massal dari tabel). Sengaja
+  // sama dengan products.edit — yang boleh memperbaiki katalog juga yang
+  // membersihkannya — dan risikonya ditahan dengan cara lain: konfirmasi terpisah
+  // di UI, batas jumlah per operasi, dan SELURUH isi baris yang dihapus ditulis ke
+  // audit_logs sehingga masih bisa dikembalikan (CLAUDE.md #2).
+  "products.delete": [...MANAGEMENT_ROLES, ...CM_ROLES, ...BIZDEV_ROLES],
   // Melihat kolom "Nama BD" (identitas peng-upload) di katalog Produk TAP. Tabelnya
   // sendiri terbuka untuk semua role yang bisa membuka /products; yang dibatasi hanya
   // identitas pemilik data: BizDev ke atas (sejajar deals.register). Role lain tetap

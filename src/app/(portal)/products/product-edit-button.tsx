@@ -1,8 +1,9 @@
 "use client";
 
 import { useActionState, useEffect, useState } from "react";
+import { CAMPAIGN_TYPES } from "@/lib/deals/campaign-type";
 import { updateProduct, type ProductEditState } from "./actions";
-import type { ProductRow } from "./products-table";
+import type { MemberOption, ProductRow } from "./products-table";
 
 const inputClass = "mt-1 w-full rounded-md border border-slate-300 px-2 py-1.5 text-sm";
 
@@ -28,21 +29,66 @@ function Field({
   );
 }
 
+/** Dropdown anggota tim; "" = kosongkan kolomnya. */
+function MemberSelect({
+  label,
+  name,
+  defaultValue,
+  options,
+  hint,
+}: {
+  label: string;
+  name: string;
+  defaultValue: string;
+  options: MemberOption[];
+  hint?: string;
+}) {
+  return (
+    <label className="block">
+      <span className="text-xs font-medium text-slate-600">{label}</span>
+      <select name={name} defaultValue={defaultValue} className={inputClass}>
+        <option value="">— kosongkan —</option>
+        {options.map((o) => (
+          <option key={o.id} value={o.id}>
+            {o.name}
+          </option>
+        ))}
+      </select>
+      {hint && <span className="mt-0.5 block text-[11px] text-slate-400">{hint}</span>}
+    </label>
+  );
+}
+
 /**
  * Modal edit satu baris Produk TAP.
  *
- * Hanya atribut MASTER yang bisa diubah (nama, shop, kategori, harga, rate komisi,
- * link, aktif) — metrik performa hasil upload sengaja tidak ada di form ini, karena
- * satu-satunya sumbernya adalah file export platform. Segmen harga tidak diisi
- * manual: server menghitungnya ulang dari harga memakai threshold app_config.
+ * Yang bisa diubah: atribut MASTER produk (nama, shop, kategori, harga, rate komisi,
+ * link, aktif) + dimensi kartu deal (tipe campaign, Deal by, PIC TAP, dan — khusus
+ * role BizDev ke atas — Nama BD pemilik baris). Metrik performa hasil upload sengaja
+ * tidak ada di form ini, karena satu-satunya sumbernya adalah file export platform.
+ * Segmen harga tidak diisi manual: server menghitungnya ulang dari harga memakai
+ * threshold app_config.
  */
-export function ProductEditButton({ product }: { product: ProductRow }) {
+export function ProductEditButton({
+  product,
+  members,
+  canSeeOwner,
+}: {
+  product: ProductRow;
+  /** Anggota tim aktif untuk dropdown Deal by / PIC TAP / Nama BD. */
+  members: MemberOption[];
+  canSeeOwner: boolean;
+}) {
   const [open, setOpen] = useState(false);
   const [state, formAction, pending] = useActionState<ProductEditState, FormData>(updateProduct, null);
 
   useEffect(() => {
     if (state?.ok) setOpen(false);
   }, [state]);
+
+  // "Deal by" dibatasi CM & BizDev (yang menutup deal); PIC TAP & Nama BD boleh
+  // siapa saja yang aktif — pembatasan divisinya sudah ditentukan server.
+  const dealByOptions = members.filter((m) => m.canDealBy);
 
   return (
     <>
@@ -118,6 +164,50 @@ export function ProductEditButton({ product }: { product: ProductRow }) {
                   <Field label="Link produk" name="product_link" defaultValue={product.product_link ?? ""} />
                 </div>
               </div>
+
+              <fieldset className="mt-4 rounded-md border border-slate-200 p-3">
+                <legend className="px-1 text-xs font-medium text-slate-600">Kartu deal</legend>
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  <label className="block">
+                    <span className="text-xs font-medium text-slate-600">Tipe Campaign</span>
+                    <select
+                      name="campaign_type"
+                      defaultValue={product.campaign_type ?? ""}
+                      className={inputClass}
+                    >
+                      <option value="">— kosongkan —</option>
+                      {CAMPAIGN_TYPES.map((t) => (
+                        <option key={t.value} value={t.value}>
+                          {t.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <MemberSelect
+                    label="Deal by"
+                    name="deal_by"
+                    defaultValue={product.deal_by ?? ""}
+                    options={dealByOptions}
+                  />
+                  <MemberSelect
+                    label="PIC TAP"
+                    name="pic_tap"
+                    defaultValue={product.pic_tap ?? ""}
+                    options={members}
+                  />
+                  {/* Nama BD = pemilik baris. Hanya role yang boleh melihat kolomnya
+                      yang boleh memindahkannya; server menolak isian dari role lain. */}
+                  {canSeeOwner && (
+                    <MemberSelect
+                      label="Nama BD (pemilik baris)"
+                      name="uploaded_by"
+                      defaultValue={product.uploaded_by ?? ""}
+                      options={members}
+                      hint="Ganti hanya kalau baris ini memang dipegang akun lain."
+                    />
+                  )}
+                </div>
+              </fieldset>
 
               <label className="mt-3 flex items-center gap-2 text-sm text-slate-700">
                 <input type="checkbox" name="active" defaultChecked={product.active} className="h-4 w-4" />
