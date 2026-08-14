@@ -2,7 +2,12 @@ import { redirect } from "next/navigation";
 import { requireMember, hasPermission, BIZDEV_ROLES, CM_ROLES, type Role } from "@/lib/rbac";
 import { createClient } from "@/lib/supabase/server";
 import { CsvUploadForm } from "@/components/csv-upload-form";
-import { uploadDealProducts } from "../actions";
+// Upload massal di halaman ini memakai PARSER YANG SAMA dengan tab Produk TAP
+// (export TAP "Export link"/"Custom report" → products_tap), bukan importer
+// deal_products tersendiri: satu format file, satu tujuan tabel, satu perilaku
+// (CLAUDE.md #4). Tutorial unduh filenya pun tutorial yang sama.
+import { uploadMasterProducts } from "@/app/(portal)/products/actions";
+import { UploadTutorial } from "@/app/(portal)/products/upload-tutorial";
 import { DealForm, type MemberOption } from "./deal-form";
 
 export default async function DealBaruPage() {
@@ -39,7 +44,8 @@ export default async function DealBaruPage() {
         Isian form ini mengikuti kolom tabel <strong>Produk TAP</strong> (export TAP “Export
         link”), ditambah Tipe Campaign, Ads Budget, Service Fee, Deal by, dan PIC TAP. Setelah
         disimpan, kartunya langsung muncul sebagai baris di tab Produk TAP. Hanya Product Name
-        yang wajib; Ads Budget &amp; Service Fee wajib khusus untuk tipe komisi extra.
+        yang wajib; Ads Budget &amp; Service Fee wajib khusus untuk tipe{" "}
+        <strong>Paid Campaign</strong>.
       </p>
       <div className="mt-6">
         <DealForm picOptions={(picOptions ?? []) as MemberOption[]} dealByOptions={dealByOptions} />
@@ -47,15 +53,28 @@ export default async function DealBaruPage() {
 
       <h2 className="mt-10 text-lg font-semibold">Upload Produk Deal Lama via Excel</h2>
       <p className="mt-1 text-sm text-slate-500">
-        Bulk daftar produk untuk deal brand yang sudah terdaftar di tab Deal Brand (tabel deal
-        lama). Untuk mengisi katalog Produk TAP secara massal, pakai “Upload Master Product List”
-        di tab Produk TAP.
+        Versi massal dari form di atas: satu baris file = satu kartu produk. Sistemnya sama persis
+        dengan <strong>Upload Master Product List</strong> di tab Produk TAP — file export TAP
+        diunggah apa adanya, barisnya masuk ke katalog <strong>Produk TAP</strong> dengan kunci
+        (Campaign ID + Product ID), dan baris yang sudah ada ikut diperbarui alih-alih
+        digandakan. Kolom yang belum diketahui boleh kosong; baris berharga/komisi kotor tetap
+        tersimpan dengan tanda “perlu review”.
       </p>
       <div className="mt-3">
+        <UploadTutorial />
+      </div>
+      <div className="mt-3">
         <CsvUploadForm
-          action={uploadDealProducts}
+          action={uploadMasterProducts}
           buttonLabel="Upload Produk"
-          helpText="Kolom (xlsx/csv): deal_id ATAU shop_id (resolve brand), product_id, product_name, product_link, niche, exp_date, komisi_kreator, komisi_mea, ads_budget, service_fee, status (running|hold|done)."
+          helpText='Terima langsung file export TAP "Export link" (Campaign ID, product name,
+            Product ID, Sale price, Shop name, masa berlaku produk, rate komisi kreator & partner
+            termasuk versi Shop Ads, Product link) MAUPUN export "Custom report" Partner Compass
+            yang membawa metrik performa. Kolom Shop ID dan kategori opsional. Rupiah campur
+            (titik/koma ribuan), harga rentang varian, dan komisi kotor ("not found", "5-7%")
+            ditangani otomatis dengan flag "perlu review", tidak crash. Baris "Summary" dilewati.
+            Tipe Campaign, Ads Budget, dan Service Fee tidak ada di file export — lengkapi lewat
+            tombol Edit di tab Produk TAP.'
         />
       </div>
     </div>

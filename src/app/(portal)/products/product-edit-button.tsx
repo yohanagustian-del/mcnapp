@@ -1,7 +1,11 @@
 "use client";
 
 import { useActionState, useEffect, useState } from "react";
-import { CAMPAIGN_TYPES } from "@/lib/deals/campaign-type";
+import {
+  CAMPAIGN_TYPES,
+  CAMPAIGN_TYPE_NEEDS_BUDGET,
+  CAMPAIGN_TYPE_NEEDS_BUDGET_LABEL,
+} from "@/lib/deals/campaign-type";
 import { updateProduct, type ProductEditState } from "./actions";
 import type { MemberOption, ProductRow } from "./products-table";
 
@@ -13,17 +17,29 @@ function Field({
   defaultValue,
   placeholder,
   hint,
+  type,
+  required,
 }: {
   label: string;
   name: string;
   defaultValue: string;
   placeholder?: string;
   hint?: string;
+  type?: string;
+  required?: boolean;
 }) {
   return (
     <label className="block">
       <span className="text-xs font-medium text-slate-600">{label}</span>
-      <input name={name} defaultValue={defaultValue} placeholder={placeholder} className={inputClass} />
+      <input
+        name={name}
+        type={type}
+        min={type === "number" ? 0 : undefined}
+        required={required}
+        defaultValue={defaultValue}
+        placeholder={placeholder}
+        className={inputClass}
+      />
       {hint && <span className="mt-0.5 block text-[11px] text-slate-400">{hint}</span>}
     </label>
   );
@@ -63,8 +79,11 @@ function MemberSelect({
  * Modal edit satu baris Produk TAP.
  *
  * Yang bisa diubah: atribut MASTER produk (nama, shop, kategori, harga, rate komisi,
- * link, aktif) + dimensi kartu deal (tipe campaign, Deal by, PIC TAP, dan — khusus
- * role BizDev ke atas — Nama BD pemilik baris). Metrik performa hasil upload sengaja
+ * link, aktif) + dimensi kartu deal (tipe campaign, Ads Budget, Service Fee, Deal by,
+ * PIC TAP, dan — khusus role BizDev ke atas — Nama BD pemilik baris). Ads Budget &
+ * Service Fee wajib saat Tipe Campaign = Paid Campaign; aturannya sama persis dengan
+ * form Registrasi Deal dan divalidasi ulang server lewat productCardIssues, jadi
+ * `required` di bawah hanya mempercepat umpan balik. Metrik performa hasil upload sengaja
  * tidak ada di form ini, karena satu-satunya sumbernya adalah file export platform.
  * Segmen harga tidak diisi manual: server menghitungnya ulang dari harga memakai
  * threshold app_config.
@@ -80,7 +99,11 @@ export function ProductEditButton({
   canSeeOwner: boolean;
 }) {
   const [open, setOpen] = useState(false);
+  // Tipe campaign dipegang di state karena dua isian di bawahnya (Ads Budget &
+  // Service Fee) ikut wajib/tidak mengikuti pilihannya.
+  const [campaignType, setCampaignType] = useState(product.campaign_type ?? "");
   const [state, formAction, pending] = useActionState<ProductEditState, FormData>(updateProduct, null);
+  const needsBudget = campaignType === CAMPAIGN_TYPE_NEEDS_BUDGET;
 
   useEffect(() => {
     if (state?.ok) setOpen(false);
@@ -94,7 +117,12 @@ export function ProductEditButton({
     <>
       <button
         type="button"
-        onClick={() => setOpen(true)}
+        onClick={() => {
+          // Kembalikan ke nilai tersimpan: modal yang pernah dibatalkan tidak boleh
+          // membuka lagi dengan pilihan tipe campaign yang tidak jadi disimpan.
+          setCampaignType(product.campaign_type ?? "");
+          setOpen(true);
+        }}
         className="rounded bg-slate-100 px-2 py-1 text-xs font-medium text-slate-700 hover:bg-slate-200"
       >
         Edit
@@ -172,7 +200,8 @@ export function ProductEditButton({
                     <span className="text-xs font-medium text-slate-600">Tipe Campaign</span>
                     <select
                       name="campaign_type"
-                      defaultValue={product.campaign_type ?? ""}
+                      value={campaignType}
+                      onChange={(e) => setCampaignType(e.target.value)}
                       className={inputClass}
                     >
                       <option value="">— kosongkan —</option>
@@ -183,6 +212,27 @@ export function ProductEditButton({
                       ))}
                     </select>
                   </label>
+                  {/* Selalu dirender (bukan hanya saat wajib) supaya nominal yang
+                      sudah terlanjur terisi bisa DIKOSONGKAN saat tipe campaign
+                      dipindah ke non-berbayar. */}
+                  <Field
+                    label={`Ads Budget (Rp)${needsBudget ? " *" : ""}`}
+                    name="ads_budget"
+                    type="number"
+                    required={needsBudget}
+                    defaultValue={product.ads_budget != null ? String(product.ads_budget) : ""}
+                    placeholder="50000000"
+                    hint={needsBudget ? `Wajib untuk ${CAMPAIGN_TYPE_NEEDS_BUDGET_LABEL}.` : undefined}
+                  />
+                  <Field
+                    label={`Service Fee (Rp)${needsBudget ? " *" : ""}`}
+                    name="service_fee"
+                    type="number"
+                    required={needsBudget}
+                    defaultValue={product.service_fee != null ? String(product.service_fee) : ""}
+                    placeholder="5000000"
+                    hint={needsBudget ? `Wajib untuk ${CAMPAIGN_TYPE_NEEDS_BUDGET_LABEL}.` : undefined}
+                  />
                   <MemberSelect
                     label="Deal by"
                     name="deal_by"

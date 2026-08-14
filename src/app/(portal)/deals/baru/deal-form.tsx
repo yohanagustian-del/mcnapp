@@ -2,7 +2,11 @@
 
 import { useActionState, useState } from "react";
 import { registerDealCard, type DealFormState } from "../actions";
-import { CAMPAIGN_TYPES, CAMPAIGN_TYPE_NEEDS_BUDGET } from "@/lib/deals/campaign-type";
+import {
+  CAMPAIGN_TYPES,
+  CAMPAIGN_TYPE_NEEDS_BUDGET,
+  CAMPAIGN_TYPE_NEEDS_BUDGET_LABEL,
+} from "@/lib/deals/campaign-type";
 
 export interface MemberOption {
   id: string;
@@ -19,7 +23,7 @@ export interface MemberOption {
  * file/room campaign tanpa menerjemahkan istilah.
  *
  * Hanya Product Name yang wajib. Ads Budget & Service Fee baru muncul (dan baru
- * wajib) saat Tipe Campaign = komisi extra — aturan yang sama divalidasi ulang di
+ * wajib) saat Tipe Campaign = Paid Campaign — aturan yang sama divalidasi ulang di
  * server lewat productCardIssues, bukan hanya di sini.
  */
 export function DealForm({
@@ -135,11 +139,13 @@ export function DealForm({
         </Field>
       </div>
 
-      {/* Ads Budget & Service Fee hanya relevan untuk komisi extra — pertanyaannya
+      {/* Ads Budget & Service Fee hanya relevan untuk campaign berbayar — pertanyaannya
           tidak dirender sama sekali di tipe lain, jadi nilainya tidak ikut terkirim. */}
       {needsBudget && (
         <fieldset className="rounded-md border border-amber-200 bg-amber-50 p-4">
-          <legend className="px-1 text-sm font-medium">Wajib untuk komisi extra (non-berbayar)</legend>
+          <legend className="px-1 text-sm font-medium">
+            Wajib untuk {CAMPAIGN_TYPE_NEEDS_BUDGET_LABEL}
+          </legend>
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <Field label="Ads Budget (Rp, angka murni) *" error={err("ads_budget")}>
               <input name="ads_budget" type="number" min="0" required className={inputCls} placeholder="50000000" />

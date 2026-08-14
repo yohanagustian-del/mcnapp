@@ -1,5 +1,9 @@
 import { z } from "zod";
-import { CAMPAIGN_TYPE_NEEDS_BUDGET, CAMPAIGN_TYPE_VALUES } from "@/lib/deals/campaign-type";
+import {
+  CAMPAIGN_TYPE_NEEDS_BUDGET,
+  CAMPAIGN_TYPE_NEEDS_BUDGET_LABEL,
+  CAMPAIGN_TYPE_VALUES,
+} from "@/lib/deals/campaign-type";
 
 /**
  * Aturan form "Registrasi Deal" (kartu produk) — dipisah dari server action supaya
@@ -67,8 +71,11 @@ export type ProductCardInput = z.infer<typeof productCardSchema>;
 
 /**
  * Aturan yang tidak bisa dinyatakan per-field: Ads Budget & Service Fee wajib
- * HANYA saat tipe campaign = komisi extra (non-berbayar). Dikembalikan sebagai
- * peta fieldErrors supaya pesannya menempel di input yang bersangkutan.
+ * HANYA saat tipe campaign = Paid Campaign. Dikembalikan sebagai peta fieldErrors
+ * supaya pesannya menempel di input yang bersangkutan.
+ *
+ * Dipakai dua jalur tulis kartu produk: registrasi (registerDealCard) dan form Edit
+ * di tab Produk TAP (updateProduct) — aturannya satu, bukan disalin per form.
  */
 export function productCardIssues(d: {
   campaign_type?: string;
@@ -80,8 +87,9 @@ export function productCardIssues(d: {
   const errors: Record<string, string> = {};
 
   if (d.campaign_type === CAMPAIGN_TYPE_NEEDS_BUDGET) {
-    if (d.ads_budget === undefined) errors.ads_budget = "Wajib diisi untuk komisi extra";
-    if (d.service_fee === undefined) errors.service_fee = "Wajib diisi untuk komisi extra";
+    const wajib = `Wajib diisi untuk ${CAMPAIGN_TYPE_NEEDS_BUDGET_LABEL}`;
+    if (d.ads_budget === undefined) errors.ads_budget = wajib;
+    if (d.service_fee === undefined) errors.service_fee = wajib;
   }
 
   // Masa berlaku terbalik hampir selalu salah ketik, dan diam-diam merusak alert

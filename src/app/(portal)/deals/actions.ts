@@ -330,84 +330,12 @@ export async function updateDeal(
 }
 
 /**
- * Bulk upload produk deal via Excel (xlsx utama, csv fallback).
- * Kolom: deal_id ATAU shop_id (resolve brand), product_id, product_name, product_link,
- * niche, exp_date, komisi_kreator, komisi_mea, ads_budget, service_fee, status.
+ * Catatan: upload massal produk deal TIDAK lagi punya importer sendiri.
+ * "Upload Produk Deal Lama via Excel" di halaman Registrasi Deal kini memakai
+ * `uploadProductMasterList` (tab Produk TAP) — satu format file export TAP, satu
+ * tabel tujuan (`products_tap`), satu perilaku upsert per (campaign_id, product_id).
+ * Tabel `deal_products` tetap dibaca halaman detail deal untuk data lama.
  */
-export async function uploadDealProducts(formData: FormData): Promise<UploadReport> {
-  const actor = await requirePermission("deals.register");
-  const file = formData.get("file");
-  if (!(file instanceof File)) throw new Error("File Excel (.xlsx) atau CSV wajib diunggah");
-
-  const { rows, errors } = await parseSheet(file);
-  const report: UploadReport = { inserted: 0, skipped: errors.map((e) => ({ row: -1, reason: e })) };
-  const admin = createAdminClient();
-
-  // Resolve deal by deal_id or shop_id per row (cache lookups).
-  const byShop = new Map<string, string>();
-  const dealIds = new Set<string>();
-  {
-    const { data: allDeals } = await admin.from("brand_deals").select("id, shop_id");
-    for (const dl of allDeals ?? []) {
-      dealIds.add(dl.id);
-      if (dl.shop_id) byShop.set(dl.shop_id, dl.id);
-    }
-  }
-
-  for (const [i, raw] of rows.entries()) {
-    const rowNum = i + 2;
-    if (isSummaryRow(raw)) continue;
-
-    const name = (raw.product_name ?? raw.nama_produk ?? "").trim();
-    if (!name) {
-      report.skipped.push({ row: rowNum, reason: "product_name kosong" });
-      continue;
-    }
-    const dealRef = (raw.deal_id ?? "").trim();
-    const shopRef = (raw.shop_id ?? "").trim();
-    const dealId = dealRef && dealIds.has(dealRef) ? dealRef : shopRef ? byShop.get(shopRef) : undefined;
-    if (!dealId) {
-      report.skipped.push({ row: rowNum, reason: `deal tidak ditemukan (deal_id "${dealRef}" / shop_id "${shopRef}")` });
-      continue;
-    }
-
-    const komisiKreator = parseCommission((raw.komisi_kreator ?? "").trim());
-    const komisiMea = parseCommission((raw.komisi_mea ?? "").trim());
-    const expDate = parseFlexibleDate((raw.exp_date ?? "").trim());
-
-    const { error } = await admin.from("deal_products").insert({
-      deal_id: dealId,
-      product_id: (raw.product_id ?? "").trim() || null,
-      product_name: name,
-      product_link: (raw.product_link ?? raw.link_produk ?? "").trim() || null,
-      niche: raw.niche?.trim() || null,
-      exp_date: expDate,
-      komisi_kreator_pct: komisiKreator?.min ?? null,
-      komisi_mea_pct: komisiMea?.min ?? null,
-      ads_budget: parseRupiah(raw.ads_budget),
-      service_fee: parseRupiah(raw.service_fee),
-      status: normalizeChoice(raw.status, ["running", "hold", "done"]) ?? "running",
-      created_by: actor.id,
-    });
-    if (error) {
-      report.skipped.push({ row: rowNum, reason: error.message });
-      continue;
-    }
-    report.inserted++;
-  }
-
-  await writeAudit({
-    actorId: actor.id,
-    action: "deal_products.bulk_upload",
-    entityType: "deal_products",
-    entityId: null,
-    after: { rows: report.inserted, file: file.name },
-    type: "auto",
-  });
-
-  revalidatePath("/deals");
-  return report;
-}
 
 /**
  * Legacy "Master Deal Internal" importer (CLAUDE.md #7 — tolerant parser, flag dirty rows):

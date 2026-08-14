@@ -56,9 +56,12 @@ describe("form kartu produk (Registrasi Deal)", () => {
     expect(nol.commission_pct).toBe(0);
   });
 
-  it("Ads Budget & Service Fee wajib HANYA untuk komisi extra", () => {
-    const extra = productCardSchema.parse(form({ campaign_type: CAMPAIGN_TYPE_NEEDS_BUDGET }));
-    expect(productCardIssues(extra)).toEqual({
+  it("Ads Budget & Service Fee wajib HANYA untuk Paid Campaign", () => {
+    // Satu-satunya tipe berbayar → kedua nominalnya memang selalu ada saat deal ditutup.
+    expect(CAMPAIGN_TYPE_NEEDS_BUDGET).toBe("paid");
+
+    const paid = productCardSchema.parse(form({ campaign_type: CAMPAIGN_TYPE_NEEDS_BUDGET }));
+    expect(productCardIssues(paid)).toEqual({
       ads_budget: expect.any(String),
       service_fee: expect.any(String),
     });
@@ -71,7 +74,7 @@ describe("form kartu produk (Registrasi Deal)", () => {
     // Ads budget 0 adalah jawaban yang sah dan tidak boleh dianggap kosong.
     expect(lengkap.service_fee).toBe(0);
 
-    for (const tipe of ["paid", "sample"]) {
+    for (const tipe of ["sample", "extra_commission"]) {
       const lain = productCardSchema.parse(form({ campaign_type: tipe }));
       expect(productCardIssues(lain)).toEqual({});
     }
@@ -104,6 +107,6 @@ describe("form kartu produk (Registrasi Deal)", () => {
       "Campaign Sample (non-berbayar)",
       "Komisi extra (non-berbayar)",
     ]);
-    expect(CAMPAIGN_TYPE_LABEL[CAMPAIGN_TYPE_NEEDS_BUDGET]).toBe("Komisi extra (non-berbayar)");
+    expect(CAMPAIGN_TYPE_LABEL[CAMPAIGN_TYPE_NEEDS_BUDGET]).toBe("Paid Campaign");
   });
 });

@@ -10,7 +10,9 @@ import {
   BULK_LIMIT, groupKeysByCampaign, parseProductRowKeys,
 } from "@/lib/m10/product-keys";
 import { CAMPAIGN_TYPE_VALUES } from "@/lib/deals/campaign-type";
+import { productCardIssues } from "@/lib/deals/product-card";
 import { parseCommission } from "@/lib/utils/commission";
+import { parseRupiah } from "@/lib/utils/rupiah";
 import { priceSegmentOf, type PriceBounds } from "@/lib/projection/gmv";
 import type { UploadReport } from "@/app/(portal)/tim/actions";
 
@@ -46,6 +48,11 @@ const EDITABLE_TEXT = [
  * `segments.price_bounds` (CLAUDE.md: threshold tidak pernah di-hardcode), dan
  * `needs_review` otomatis lepas begitu harga + rate komisi sudah terisi bersih.
  * Setiap perubahan ditulis ke audit_logs.
+ *
+ * Aturan kartu deal ditegakkan lewat `productCardIssues()` yang sama dengan form
+ * Registrasi Deal — Ads Budget & Service Fee wajib saat tipe campaign = Paid
+ * Campaign — supaya baris tidak bisa dibuat lengkap lewat registrasi lalu dikosongkan
+ * lewat Edit.
  */
 export async function updateProduct(
   _prev: ProductEditState,
@@ -64,7 +71,7 @@ export async function updateProduct(
     const { data: before } = await admin
       .from("products_tap")
       .select(
-        "product_id, campaign_id, product_name, shop_id, shop_name, level1_category, level2_category, price, price_segment, commission_pct, commission_note, partner_commission_pct, product_link, active, needs_review, campaign_type, deal_by, pic_tap, uploaded_by"
+        "product_id, campaign_id, product_name, shop_id, shop_name, level1_category, level2_category, price, price_segment, commission_pct, commission_note, partner_commission_pct, product_link, active, needs_review, campaign_type, ads_budget, service_fee, deal_by, pic_tap, uploaded_by"
       )
       .eq("product_id", productId)
       .eq("campaign_id", campaignId)
@@ -92,6 +99,31 @@ export async function updateProduct(
       const raw = formData.get(field);
       if (raw === null) continue;
       patch[field] = memberIdOrNull(String(raw), field);
+    }
+
+    // Ads Budget & Service Fee: Rupiah murni, kosong = "tidak relevan/belum tahu"
+    // (null), BUKAN 0 — 0 adalah nilai sah yang artinya "tidak ada budget sama sekali".
+    for (const field of ["ads_budget", "service_fee"] as const) {
+      const raw = formData.get(field);
+      if (raw === null) continue;
+      patch[field] = moneyOrNull(String(raw), MONEY_LABEL[field]);
+    }
+
+    // Aturan lintas-field yang sama dengan form Registrasi Deal (satu sumber).
+    // Nilai EFEKTIF setelah patch yang dipakai, bukan isian mentah: field yang tidak
+    // dirender form tidak ikut berubah, jadi nilainya tetap yang tersimpan.
+    const after = { ...before, ...patch } as Record<string, unknown>;
+    const issues = productCardIssues({
+      campaign_type: (after.campaign_type as string | null) ?? undefined,
+      ads_budget: (after.ads_budget as number | null) ?? undefined,
+      service_fee: (after.service_fee as number | null) ?? undefined,
+    });
+    if (Object.keys(issues).length > 0) {
+      throw new Error(
+        Object.entries(issues)
+          .map(([field, message]) => `${MONEY_LABEL[field] ?? field}: ${message}`)
+          .join("; ")
+      );
     }
     // Nama BD = pemilik baris. Hanya role yang memang boleh MELIHAT kolom itu yang
     // boleh memindahkannya; kalau tidak, isian diabaikan tanpa mengubah apa pun.
@@ -154,6 +186,27 @@ export async function updateProduct(
   } catch (e) {
     return { ok: false, message: e instanceof Error ? e.message : "Gagal menyimpan produk" };
   }
+}
+
+/** Label kolom nominal untuk pesan error — form memakai istilah yang sama. */
+const MONEY_LABEL: Record<string, string> = {
+  ads_budget: "Ads Budget",
+  service_fee: "Service Fee",
+};
+
+/**
+ * Nominal Rupiah dari form edit; "" = kosongkan kolomnya (null), BUKAN 0.
+ * parseRupiah dipakai supaya tempelan "Rp50.000.000" dari sheet lama ikut terbaca
+ * (CLAUDE.md #7), bukan hanya angka murni dari input type=number.
+ */
+function moneyOrNull(raw: string, label: string): number | null {
+  const value = raw.trim();
+  if (!value) return null;
+  const parsed = parseRupiah(value);
+  if (parsed === null || parsed < 0) {
+    throw new Error(`${label} "${value}" tidak terbaca sebagai angka Rupiah`);
+  }
+  return parsed;
 }
 
 /** uuid anggota tim dari dropdown; "" = kosongkan kolomnya. */
