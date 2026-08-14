@@ -163,6 +163,11 @@ export const PERMISSIONS: Record<string, Role[]> = {
   // Sama dengan yang boleh mengunggah master: memperbaiki baris hasil upload kotor
   // tidak lebih berisiko daripada mengunggah ulang seluruh file.
   "products.edit": [...MANAGEMENT_ROLES, ...CM_ROLES, ...BIZDEV_ROLES],
+  // Melihat kolom "Nama BD" (identitas peng-upload) di katalog Produk TAP. Tabelnya
+  // sendiri terbuka untuk semua role yang bisa membuka /products; yang dibatasi hanya
+  // identitas pemilik data: BizDev ke atas (sejajar deals.register). Role lain tetap
+  // bisa menyaring per tim, tapi nama orangnya tidak dikirim ke browser mereka.
+  "products.view_owner_name": [...MANAGEMENT_ROLES, "bizdev_lead", "bizdev"],
   // M6 §2.5: alat milik BizDev (+ management). CPM tidak menjalankan.
   "m6.run": [...MANAGEMENT_ROLES, "bizdev_lead", "bizdev"],
   // M7 §2.7: buat/edit project & kelola peserta/man power = management + lead terkait + PM (campaign_ops)

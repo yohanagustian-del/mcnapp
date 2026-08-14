@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { redirect } from "next/navigation";
 import { requireMember, hasPermission, canAccessNav, NAV_ITEMS } from "@/lib/rbac";
 import { createClient } from "@/lib/supabase/server";
@@ -8,23 +9,21 @@ import { UploadTutorial } from "./upload-tutorial";
 
 export const dynamic = "force-dynamic";
 
-/** Kolom yang dibaca tabel — sama persis dengan ProductRow, satu daftar saja. */
+/**
+ * Kolom yang dibaca tabel — sama persis dengan ProductRow, satu daftar saja.
+ *
+ * Hanya atribut master export TAP "Export link" + yang dibutuhkan form edit dan
+ * wild search. Metrik performa (GMV, orders, komisi nominal, dst.) tetap ada di
+ * `products_tap` tapi tidak ikut ditarik: tabel tidak menampilkannya, dan 1.000
+ * baris × puluhan kolom angka adalah payload yang percuma dikirim ke browser.
+ */
 const SELECT_COLUMNS = [
   "product_id", "product_name", "shop_id", "shop_name",
-  "level1_category", "level2_category", "price", "price_segment",
+  "level1_category", "level2_category", "price",
   "commission_pct", "commission_note", "partner_commission_pct",
   "creator_shop_ads_commission_pct", "partner_shop_ads_commission_pct", "product_link",
-  "campaign_id", "campaign_name", "campaign_count", "period_start", "period_end",
-  "effective_start", "effective_end",
-  "affiliate_gmv", "affiliate_video_gmv", "affiliate_live_gmv",
-  "settled_gmv", "gmv_refund", "revenue_showcase",
-  "orders", "items_sold",
-  "collaborated_creators", "creators_with_posts", "creators_with_sales",
-  "est_partner_commission", "actual_partner_commission",
-  "est_creator_commission", "actual_creator_commission",
-  "link_gmv", "link_items_sold", "link_orders",
-  "source", "active", "needs_review", "first_seen", "last_seen",
-  "uploaded_by",
+  "campaign_id", "campaign_name", "effective_start", "effective_end",
+  "source", "active", "needs_review", "uploaded_by",
 ].join(", ");
 
 /** Tim yang bisa dipakai menyaring katalog (nilai enum team_group_t). */
@@ -54,8 +53,12 @@ export default async function ProductsPage({
   if (navItem && !canAccessNav(navItem, member.role)) redirect("/dashboard");
   const canUpload = hasPermission("products.upload_master", member.role);
   const canEdit = hasPermission("products.edit", member.role);
+  // Tabelnya sendiri terbuka untuk semua role yang lolos guard nav di atas; hanya
+  // kolom Nama BD yang dibatasi BizDev ke atas.
+  const canSeeOwner = hasPermission("products.view_owner_name", member.role);
 
   const { level2, segment, review, team } = await searchParams;
+  const filterActive = Boolean(level2 || segment || team || review === "1");
 
   const supabase = await createClient();
 
@@ -110,7 +113,14 @@ export default async function ProductsPage({
 
   const rows = ((products ?? []) as unknown as ProductRow[]).map((p) => {
     const owner = p.uploaded_by ? memberById.get(p.uploaded_by) : undefined;
-    return { ...p, uploader_name: owner?.name ?? null, uploader_team: owner?.team ?? null };
+    return {
+      ...p,
+      // Batas kolom Nama BD ditegakkan di sini, bukan cuma dengan menyembunyikan
+      // kolomnya di klien: untuk role di bawah BizDev namanya tidak pernah ikut
+      // terkirim, jadi tidak bisa dibaca dari payload halaman.
+      uploader_name: canSeeOwner ? (owner?.name ?? null) : null,
+      uploader_team: canSeeOwner ? (owner?.team ?? null) : null,
+    };
   });
 
   return (
@@ -120,9 +130,16 @@ export default async function ProductsPage({
         Katalog produk TAP MEA — gabungan upload master product list (export TAP “Export link”) +
         derive otomatis dari file TAP mingguan (/ingest). Dipakai untuk Product×Creator Matching
         (rule-based, 0 token AI): cocokkan segmen harga kemampuan jual kreator dengan produk di
-        segmen sama. Tiap baris tercatat atas nama akun yang meng-upload-nya (kolom{" "}
-        <strong>Nama</strong>); satu produk yang dipakai di beberapa campaign muncul sebagai baris
-        terpisah per campaign, jadi upload satu tim tidak pernah menimpa milik tim lain.
+        segmen sama. Kolom tabel mengikuti export TAP “Export link” apa adanya; satu produk yang
+        dipakai di beberapa campaign muncul sebagai baris terpisah per campaign, jadi upload satu
+        tim tidak pernah menimpa milik tim lain.
+        {canSeeOwner && (
+          <>
+            {" "}
+            Kolom <strong>Nama BD</strong> menunjukkan akun yang meng-upload baris itu dan hanya
+            tampil untuk BizDev ke atas.
+          </>
+        )}
       </p>
 
       {canUpload && (
@@ -196,6 +213,25 @@ export default async function ProductsPage({
         <button type="submit" className="rounded-md bg-slate-900 px-4 py-1.5 text-sm text-white hover:bg-slate-700">
           Filter
         </button>
+        {/* Hapus filter = kembali ke /products tanpa query. Sengaja <Link>, bukan tombol
+            reset form: reset hanya mengembalikan isi input ke nilai terakhir yang
+            dikirim server, katalognya sendiri tetap tersaring. */}
+        {filterActive ? (
+          <Link
+            href="/products"
+            className="rounded-md border border-slate-200 px-4 py-1.5 text-sm text-slate-600 hover:bg-slate-50"
+          >
+            Hapus Filter
+          </Link>
+        ) : (
+          <span
+            aria-disabled="true"
+            title="Belum ada filter yang aktif"
+            className="cursor-not-allowed rounded-md border border-slate-200 px-4 py-1.5 text-sm text-slate-300"
+          >
+            Hapus Filter
+          </span>
+        )}
       </form>
 
       {error && (
@@ -205,7 +241,7 @@ export default async function ProductsPage({
       )}
 
       <div className="mt-6">
-        <ProductsTable rows={rows} canEdit={canEdit} />
+        <ProductsTable rows={rows} canEdit={canEdit} canSeeOwner={canSeeOwner} />
       </div>
     </div>
   );

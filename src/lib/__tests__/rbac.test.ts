@@ -41,6 +41,20 @@ describe("Phase 5.0 — RBAC foundation", () => {
     expect(ADS_ROLES).toEqual(["campaign_ops", "ads_support"]);
   });
 
+  // Produk TAP: the catalog itself is open to every role that can reach /products
+  // (CM included) — only the "Nama BD" owner column is restricted to BizDev and above.
+  it("kolom Nama BD katalog Produk TAP hanya untuk BizDev ke atas", () => {
+    for (const role of [...MANAGEMENT_ROLES, "bizdev_lead", "bizdev"] as Role[]) {
+      expect(hasPermission("products.view_owner_name", role)).toBe(true);
+    }
+    // Roles that DO see the catalog but must not see who uploaded each row.
+    for (const role of ["cm_lead", "cpm", "campaign_ops", "bd_admin"] as Role[]) {
+      expect(hasPermission("products.view_owner_name", role)).toBe(false);
+      // ...while the catalog page itself stays reachable for them.
+      expect(hasPermission("products.upload_master", role)).toBe(true);
+    }
+  });
+
   // M12 §2.7 — retention/purge is Director-only; management does not get it implicitly.
   it("non-director management cannot set retention policy or purge", () => {
     for (const role of MANAGEMENT_ROLES.filter((r) => r !== "director") as Role[]) {
