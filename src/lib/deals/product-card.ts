@@ -3,6 +3,7 @@ import {
   CAMPAIGN_TYPE_NEEDS_BUDGET,
   CAMPAIGN_TYPE_NEEDS_BUDGET_LABEL,
   CAMPAIGN_TYPE_VALUES,
+  type CampaignType,
 } from "@/lib/deals/campaign-type";
 
 /**
@@ -99,4 +100,73 @@ export function productCardIssues(d: {
   }
 
   return errors;
+}
+
+/** Nama kolom → label yang dipakai UI, supaya pesan error memakai istilah form. */
+export const PRODUCT_CARD_FIELD_LABEL: Record<string, string> = {
+  campaign_type: "Tipe Campaign",
+  ads_budget: "Ads Budget",
+  service_fee: "Service Fee",
+  effective_end: "Product Effective End Time",
+};
+
+/** Peta fieldErrors → satu kalimat berlabel, untuk jalur yang tidak punya form per-field. */
+export function productCardIssueMessage(issues: Record<string, string>): string {
+  return Object.entries(issues)
+    .map(([field, message]) => `${PRODUCT_CARD_FIELD_LABEL[field] ?? field}: ${message}`)
+    .join("; ");
+}
+
+/**
+ * Jawaban Tipe Campaign pada UPLOAD MASSAL kartu produk ("Upload Produk Deal Lama
+ * via Excel" di halaman Registrasi Deal).
+ *
+ * File export TAP tidak membawa tipe campaign, ads budget, maupun service fee —
+ * ketiganya dimensi komersial MEA. Ditanyakan sekali di form upload lalu diisikan
+ * ke SETIAP kartu di file itu, dengan aturan Paid Campaign yang sama seperti form
+ * satuan (CLAUDE.md #6): satu file = satu campaign, jadi satu jawaban.
+ */
+export const uploadCampaignSchema = z.object({
+  campaign_type: z.preprocess(blankToUndefined, z.enum(CAMPAIGN_TYPE_VALUES).optional()),
+  ads_budget: optionalNumber(),
+  service_fee: optionalNumber(),
+});
+
+export interface CampaignDefaults {
+  campaign_type?: CampaignType;
+  ads_budget?: number;
+  service_fee?: number;
+}
+
+/**
+ * Membaca & memvalidasi jawaban tipe campaign dari FormData upload.
+ *
+ * Mengembalikan pesan (bukan melempar) karena pemanggilnya adalah importer yang
+ * melaporkan kegagalan lewat `UploadReport.error` — throw dari server action sudah
+ * disensor Next.js di production sehingga pesannya tidak sampai ke user.
+ *
+ * Tanpa jawaban tipe campaign, `defaults` kosong dan importer tidak menyentuh
+ * ketiga kolom itu sama sekali — itulah perilaku "Upload Master Product List" di
+ * tab Produk TAP, yang memang tidak menanyakannya.
+ */
+export function campaignDefaultsFromForm(raw: {
+  campaign_type?: unknown;
+  ads_budget?: unknown;
+  service_fee?: unknown;
+}): { defaults: CampaignDefaults; error?: string } {
+  const parsed = uploadCampaignSchema.safeParse(raw);
+  if (!parsed.success) {
+    return {
+      defaults: {},
+      error: productCardIssueMessage(
+        Object.fromEntries(parsed.error.issues.map((i) => [String(i.path[0]), i.message]))
+      ),
+    };
+  }
+
+  const issues = productCardIssues(parsed.data);
+  if (Object.keys(issues).length > 0) {
+    return { defaults: {}, error: productCardIssueMessage(issues) };
+  }
+  return { defaults: parsed.data };
 }

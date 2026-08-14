@@ -13,10 +13,22 @@ import { parseRupiah } from "@/lib/utils/rupiah";
 import { parseCommission } from "@/lib/utils/commission";
 import { parseFlexibleDate } from "@/lib/utils/date";
 import { commissionRaw, dealReviewFlags } from "@/lib/deals/form";
-import { productCardIssues, productCardSchema } from "@/lib/deals/product-card";
+import {
+  PRODUCT_CARD_FIELD_LABEL,
+  productCardIssues,
+  productCardSchema,
+} from "@/lib/deals/product-card";
+import {
+  planShopCardEdit,
+  shopEditSchema,
+  SHOP_CARD_LIMIT,
+  type ShopCardRow,
+} from "@/lib/deals/shop-edit";
+import { CAMPAIGN_TYPE_LABEL } from "@/lib/deals/campaign-type";
 import { getConfig } from "@/lib/config";
 import { priceSegmentOf, type PriceBounds } from "@/lib/projection/gmv";
-import { NO_CAMPAIGN } from "@/lib/m10/products";
+import { NO_CAMPAIGN, uploadProductMasterList } from "@/lib/m10/products";
+import { groupKeysByCampaign } from "@/lib/m10/product-keys";
 import type { UploadReport } from "@/app/(portal)/tim/actions";
 
 export interface DealFormState {
@@ -142,6 +154,171 @@ export async function registerDealCard(
       `Kartu produk "${d.product_name}" tersimpan di tab Produk TAP.` +
       (notes.length ? ` ${notes.join("; ")}.` : ""),
   };
+}
+
+/**
+ * Edit satu baris tabel "Shop dari Produk TAP" (tab Deal Brand).
+ *
+ * Baris itu adalah RINGKASAN kartu produk, jadi mengeditnya menulis ke seluruh
+ * kartu shop tersebut di `products_tap`: Shop ID yang diisi di sini terisi ke semua
+ * produk shop itu di tab Produk TAP, begitu pula Tipe Campaign. Dua kolom itu saja
+ * — harga, komisi, dan masa berlaku berbeda per produk.
+ *
+ * Anggota grup diambil lewat kolom generated `shop_key` (migrasi 0043), yaitu kunci
+ * yang SAMA dengan yang dipakai view ringkasan untuk mengelompokkan — bukan salinan
+ * ekspresi group by di sisi aplikasi (CLAUDE.md #4).
+ *
+ * Aturan "Paid Campaign wajib Ads Budget & Service Fee" dibaca dari
+ * `productCardIssues()` yang sama dengan Registrasi Deal & Edit kartu; kalau ada
+ * kartu yang belum memenuhinya, SELURUH edit dibatalkan (tidak ada shop yang
+ * setengah terisi) dan formnya meminta nominal untuk mengisi kartu yang kosong.
+ *
+ * Menulis lewat admin client karena RLS products_tap = service-role only (0019);
+ * izinnya tetap ditegakkan server lewat requirePermission("products.edit").
+ */
+export async function updateShopCards(
+  _prev: DealFormState | null,
+  formData: FormData
+): Promise<DealFormState> {
+  const actor = await requirePermission("products.edit");
+
+  const parsed = shopEditSchema.safeParse(Object.fromEntries(formData.entries()));
+  if (!parsed.success) {
+    const fieldErrors: Record<string, string> = {};
+    for (const issue of parsed.error.issues) fieldErrors[String(issue.path[0])] = issue.message;
+    return { ok: false, message: "Periksa kembali isian form.", fieldErrors };
+  }
+  const { shop_key: shopKey, ...values } = parsed.data;
+
+  if (values.shop_id === undefined && values.campaign_type === undefined) {
+    return {
+      ok: false,
+      message: "Isi Shop ID dan/atau pilih Tipe Campaign yang mau diterapkan ke shop ini.",
+    };
+  }
+
+  const admin = createAdminClient();
+  const { data: rows, error: readError } = await admin
+    .from("products_tap")
+    .select("campaign_id, product_id, shop_id, campaign_type, ads_budget, service_fee")
+    .eq("shop_key", shopKey);
+  if (readError) return { ok: false, message: `Gagal membaca kartu shop: ${readError.message}` };
+  if (!rows || rows.length === 0) {
+    return { ok: false, message: `Tidak ada kartu produk untuk shop "${shopKey}".` };
+  }
+  if (rows.length > SHOP_CARD_LIMIT) {
+    return {
+      ok: false,
+      message:
+        `Shop ini punya ${rows.length} kartu — di atas batas ${SHOP_CARD_LIMIT} sekali edit. ` +
+        "Perbaiki lewat pilih baris + edit massal di tab Produk TAP.",
+    };
+  }
+
+  const plan = planShopCardEdit(rows as ShopCardRow[], values);
+  if (plan.blocked.length > 0) {
+    const fields = [...new Set(plan.blocked.flatMap((b) => b.fields))];
+    const labels = fields.map((f) => PRODUCT_CARD_FIELD_LABEL[f] ?? f).join(" & ");
+    return {
+      ok: false,
+      message:
+        `${plan.blocked.length} kartu shop ini belum punya ${labels}, padahal ` +
+        `${CAMPAIGN_TYPE_LABEL[values.campaign_type ?? ""]} mewajibkannya. Isi nominalnya di form ` +
+        "ini — nilainya hanya diisikan ke kartu yang masih kosong, kartu yang sudah terisi tidak ditimpa.",
+      fieldErrors: Object.fromEntries(fields.map((f) => [f, "Wajib diisi untuk shop ini"])),
+    };
+  }
+  if (plan.updates.length === 0) {
+    return { ok: true, message: "Tidak ada yang berubah — kartu shop ini sudah sesuai." };
+  }
+
+  // Kartu dikelompokkan per patch yang IDENTIK lalu ditulis per campaign: jumlah
+  // round-trip mengikuti variasi patch (paling banyak beberapa), bukan jumlah kartu.
+  const byPatch = new Map<string, { patch: Record<string, unknown>; keys: typeof plan.updates }>();
+  for (const u of plan.updates) {
+    const signature = JSON.stringify(u.patch);
+    const group = byPatch.get(signature) ?? { patch: u.patch, keys: [] };
+    group.keys.push(u);
+    byPatch.set(signature, group);
+  }
+
+  const changed = new Set(plan.updates.map((u) => `${u.campaign_id}|${u.product_id}`));
+  const before = rows.filter((r) => changed.has(`${r.campaign_id}|${r.product_id}`));
+
+  const now = new Date().toISOString();
+  let updated = 0;
+  for (const group of byPatch.values()) {
+    const byCampaign = groupKeysByCampaign(
+      group.keys.map((k) => ({ campaignId: k.campaign_id, productId: k.product_id }))
+    );
+    for (const [campaignId, productIds] of byCampaign) {
+      const { data, error } = await admin
+        .from("products_tap")
+        .update({ ...group.patch, updated_at: now })
+        .eq("campaign_id", campaignId)
+        .in("product_id", productIds)
+        .select("product_id");
+      if (error) {
+        return {
+          ok: false,
+          message: `Gagal menyimpan (${updated} kartu sudah tersimpan): ${error.message}`,
+        };
+      }
+      updated += data?.length ?? 0;
+    }
+  }
+
+  // Memperbaiki data master (mengisi Shop ID, menegaskan tipe campaign) tidak
+  // merugikan → auto berlaku, tetap terekam penuh before/after (CLAUDE.md #2).
+  await writeAudit({
+    actorId: actor.id,
+    action: "products_tap.shop_update",
+    entityType: "products_tap",
+    entityId: shopKey,
+    before,
+    after: { shop_key: shopKey, values, rows: updated },
+    type: "auto",
+  });
+
+  revalidatePath("/deals");
+  revalidatePath("/products");
+
+  const done: string[] = [];
+  if (values.shop_id !== undefined) done.push(`Shop ID ${values.shop_id}`);
+  if (values.campaign_type !== undefined) {
+    done.push(`Tipe Campaign ${CAMPAIGN_TYPE_LABEL[values.campaign_type]}`);
+  }
+  return {
+    ok: true,
+    message: `${done.join(" & ")} diterapkan ke ${updated} kartu produk shop ini.`,
+  };
+}
+
+/**
+ * Upload massal kartu produk di halaman Registrasi Deal ("Upload Produk Deal Lama
+ * via Excel").
+ *
+ * Parser & tabel tujuannya sama persis dengan "Upload Master Product List" di tab
+ * Produk TAP (CLAUDE.md #6 — satu importer). Bedanya HANYA satu: di jalur ini Tipe
+ * Campaign wajib dijawab, karena yang diunggah adalah deal — dan file export TAP
+ * tidak membawa kolom itu. Jawabannya (plus Ads Budget & Service Fee untuk Paid
+ * Campaign) diisikan ke setiap kartu di file.
+ */
+export async function uploadDealProducts(formData: FormData): Promise<UploadReport> {
+  if (!String(formData.get("campaign_type") ?? "").trim()) {
+    return {
+      inserted: 0,
+      skipped: [],
+      error:
+        "Tipe Campaign wajib dipilih sebelum upload — kolom itu tidak ada di file export TAP, " +
+        "jadi jawabannya di form inilah yang mengisi kolom Tipe Campaign semua kartu di file.",
+    };
+  }
+
+  const report = await uploadProductMasterList(formData);
+  revalidatePath("/products");
+  revalidatePath("/deals");
+  return report;
 }
 
 /**

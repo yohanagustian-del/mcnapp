@@ -10,7 +10,11 @@ import {
   BULK_LIMIT, groupKeysByCampaign, parseProductRowKeys,
 } from "@/lib/m10/product-keys";
 import { CAMPAIGN_TYPE_VALUES } from "@/lib/deals/campaign-type";
-import { productCardIssues } from "@/lib/deals/product-card";
+import {
+  PRODUCT_CARD_FIELD_LABEL,
+  productCardIssueMessage,
+  productCardIssues,
+} from "@/lib/deals/product-card";
 import { parseCommission } from "@/lib/utils/commission";
 import { parseRupiah } from "@/lib/utils/rupiah";
 import { priceSegmentOf, type PriceBounds } from "@/lib/projection/gmv";
@@ -106,7 +110,7 @@ export async function updateProduct(
     for (const field of ["ads_budget", "service_fee"] as const) {
       const raw = formData.get(field);
       if (raw === null) continue;
-      patch[field] = moneyOrNull(String(raw), MONEY_LABEL[field]);
+      patch[field] = moneyOrNull(String(raw), PRODUCT_CARD_FIELD_LABEL[field]);
     }
 
     // Aturan lintas-field yang sama dengan form Registrasi Deal (satu sumber).
@@ -118,13 +122,7 @@ export async function updateProduct(
       ads_budget: (after.ads_budget as number | null) ?? undefined,
       service_fee: (after.service_fee as number | null) ?? undefined,
     });
-    if (Object.keys(issues).length > 0) {
-      throw new Error(
-        Object.entries(issues)
-          .map(([field, message]) => `${MONEY_LABEL[field] ?? field}: ${message}`)
-          .join("; ")
-      );
-    }
+    if (Object.keys(issues).length > 0) throw new Error(productCardIssueMessage(issues));
     // Nama BD = pemilik baris. Hanya role yang memang boleh MELIHAT kolom itu yang
     // boleh memindahkannya; kalau tidak, isian diabaikan tanpa mengubah apa pun.
     const ownerRaw = formData.get("uploaded_by");
@@ -187,12 +185,6 @@ export async function updateProduct(
     return { ok: false, message: e instanceof Error ? e.message : "Gagal menyimpan produk" };
   }
 }
-
-/** Label kolom nominal untuk pesan error — form memakai istilah yang sama. */
-const MONEY_LABEL: Record<string, string> = {
-  ads_budget: "Ads Budget",
-  service_fee: "Service Fee",
-};
 
 /**
  * Nominal Rupiah dari form edit; "" = kosongkan kolomnya (null), BUKAN 0.

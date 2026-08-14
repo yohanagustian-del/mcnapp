@@ -7,6 +7,7 @@ import {
   type SortConfig, type SortDir, type SortValue,
 } from "@/components/table-controls";
 import { CAMPAIGN_TYPE_LABEL } from "@/lib/deals/campaign-type";
+import { ShopEditButton } from "./shop-edit-button";
 
 /**
  * Satu SHOP hasil ringkasan kartu Produk TAP (view products_tap_shop_summary).
@@ -21,6 +22,8 @@ export interface ShopSummaryRow {
   shop_id: string | null;
   /** >1 = satu nama shop dipakai beberapa Shop ID (biasanya salah ketik saat input). */
   shop_id_count: number;
+  /** Kartu yang Shop ID-nya masih kosong — yang diisi tombol Edit. */
+  shop_id_missing: number;
   product_count: number;
   active_count: number;
   needs_review_count: number;
@@ -28,6 +31,9 @@ export interface ShopSummaryRow {
   campaign_types: string[];
   ads_budget: number | null;
   service_fee: number | null;
+  /** Kartu yang nominalnya masih kosong — menentukan wajib/tidaknya isian di modal Edit. */
+  ads_budget_missing: number;
+  service_fee_missing: number;
   gmv_tap: number | null;
   avg_price: number | null;
   avg_commission_pct: number | null;
@@ -113,7 +119,15 @@ const COLUMNS: TableColumn[] = [
     compact: true,
     value: (s) => s.shop_id,
     className: `${td} font-mono text-xs`,
-    cell: (s) => s.shop_id ?? "—",
+    cell: (s) =>
+      s.shop_id ? (
+        <span title={s.shop_id_missing > 0 ? `${s.shop_id_missing} kartu belum punya Shop ID` : undefined}>
+          {s.shop_id}
+          {s.shop_id_missing > 0 && <span className="ml-1 text-amber-600">·{s.shop_id_missing}</span>}
+        </span>
+      ) : (
+        "—"
+      ),
   },
   {
     label: "Produk",
@@ -260,13 +274,18 @@ const SORT: SortConfig<ShopSummaryRow> = {
  *
  * Perilakunya mengikuti tabel Deal Brand: preset kolom "Ringkas", klik header untuk
  * urut naik → turun → urutan bawaan, paginasi 10/20/50/100 — semuanya client-side
- * atas baris yang sudah diagregasi server.
+ * atas baris yang sudah diagregasi server, plus tombol Edit per baris untuk yang
+ * punya izin. Edit-nya menulis ke SELURUH kartu produk shop itu (lihat
+ * ShopEditButton), bukan ke baris ringkasan — baris ringkasan tidak punya wujud
+ * sendiri di database.
  */
 export function ShopsTable({
   rows,
+  canEdit,
   emptyMessage,
 }: {
   rows: ShopSummaryRow[];
+  canEdit: boolean;
   emptyMessage: string;
 }) {
   const controls = useTableControls<ShopSummaryRow>({
@@ -282,6 +301,7 @@ export function ShopsTable({
     compactLabels: COMPACT_LABELS,
   });
   const visibleColumns = COLUMNS.filter((c) => columnPref.isShown(c.label));
+  const colCount = visibleColumns.length + (canEdit ? 1 : 0);
 
   return (
     <div className="rounded-lg border border-slate-200 bg-white">
@@ -305,6 +325,7 @@ export function ShopsTable({
                   <th key={col.label} className={th}>{col.label}</th>
                 )
               )}
+              {canEdit && <th className={th}>Aksi</th>}
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
@@ -315,11 +336,16 @@ export function ShopsTable({
                     {col.cell(s)}
                   </td>
                 ))}
+                {canEdit && (
+                  <td className={td}>
+                    <ShopEditButton shop={s} />
+                  </td>
+                )}
               </tr>
             ))}
             {controls.visibleRows.length === 0 && (
               <tr>
-                <td colSpan={visibleColumns.length} className="px-4 py-6 text-center text-slate-400">
+                <td colSpan={colCount} className="px-4 py-6 text-center text-slate-400">
                   {emptyMessage}
                 </td>
               </tr>

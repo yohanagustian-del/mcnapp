@@ -4,7 +4,11 @@ import {
   CAMPAIGN_TYPE_LABEL,
   CAMPAIGN_TYPE_NEEDS_BUDGET,
 } from "@/lib/deals/campaign-type";
-import { productCardIssues, productCardSchema } from "@/lib/deals/product-card";
+import {
+  campaignDefaultsFromForm,
+  productCardIssues,
+  productCardSchema,
+} from "@/lib/deals/product-card";
 
 /** Isian form apa adanya: FormData selalu mengirim string, termasuk string kosong. */
 function form(over: Record<string, string> = {}) {
@@ -99,6 +103,48 @@ describe("form kartu produk (Registrasi Deal)", () => {
       form({ effective_start: "2026-02-01", effective_end: "2026-03-01" })
     );
     expect(productCardIssues(ok)).toEqual({});
+  });
+
+  it("tanpa jawaban tipe campaign, upload tidak menyentuh ketiga kolom itu", () => {
+    // Perilaku "Upload Master Product List" di tab Produk TAP, yang memang tidak
+    // menanyakan tipe campaign.
+    const { defaults, error } = campaignDefaultsFromForm({
+      campaign_type: "",
+      ads_budget: "",
+      service_fee: "",
+    });
+    expect(error).toBeUndefined();
+    expect(defaults).toEqual({});
+  });
+
+  it("upload Paid Campaign wajib membawa Ads Budget & Service Fee", () => {
+    const kurang = campaignDefaultsFromForm({ campaign_type: CAMPAIGN_TYPE_NEEDS_BUDGET });
+    expect(kurang.error).toMatch(/Ads Budget/);
+    expect(kurang.error).toMatch(/Service Fee/);
+    expect(kurang.defaults).toEqual({});
+
+    const lengkap = campaignDefaultsFromForm({
+      campaign_type: CAMPAIGN_TYPE_NEEDS_BUDGET,
+      ads_budget: "50000000",
+      service_fee: "0",
+    });
+    expect(lengkap.error).toBeUndefined();
+    expect(lengkap.defaults).toEqual({
+      campaign_type: "paid",
+      ads_budget: 50_000_000,
+      service_fee: 0,
+    });
+  });
+
+  it("upload tipe non-berbayar cukup tipe campaign saja", () => {
+    const { defaults, error } = campaignDefaultsFromForm({ campaign_type: "sample" });
+    expect(error).toBeUndefined();
+    expect(defaults).toEqual({ campaign_type: "sample" });
+  });
+
+  it("menolak tipe campaign yang tidak dikenal", () => {
+    const { error } = campaignDefaultsFromForm({ campaign_type: "barter" });
+    expect(error).toBeTruthy();
   });
 
   it("tiga tipe campaign dengan label yang dipakai UI", () => {

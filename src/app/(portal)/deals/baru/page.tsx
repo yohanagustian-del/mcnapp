@@ -5,10 +5,12 @@ import { CsvUploadForm } from "@/components/csv-upload-form";
 // Upload massal di halaman ini memakai PARSER YANG SAMA dengan tab Produk TAP
 // (export TAP "Export link"/"Custom report" → products_tap), bukan importer
 // deal_products tersendiri: satu format file, satu tujuan tabel, satu perilaku
-// (CLAUDE.md #4). Tutorial unduh filenya pun tutorial yang sama.
-import { uploadMasterProducts } from "@/app/(portal)/products/actions";
+// (CLAUDE.md #4). Tutorial unduh filenya pun tutorial yang sama. Bedanya cuma satu:
+// di jalur deal, Tipe Campaign wajib dijawab — karena itu lewat uploadDealProducts.
+import { uploadDealProducts } from "../actions";
 import { UploadTutorial } from "@/app/(portal)/products/upload-tutorial";
 import { DealForm, type MemberOption } from "./deal-form";
+import { UploadCampaignFields } from "./upload-campaign-fields";
 
 export default async function DealBaruPage() {
   const member = await requireMember();
@@ -58,14 +60,17 @@ export default async function DealBaruPage() {
         diunggah apa adanya, barisnya masuk ke katalog <strong>Produk TAP</strong> dengan kunci
         (Campaign ID + Product ID), dan baris yang sudah ada ikut diperbarui alih-alih
         digandakan. Kolom yang belum diketahui boleh kosong; baris berharga/komisi kotor tetap
-        tersimpan dengan tanda “perlu review”.
+        tersimpan dengan tanda “perlu review”. Satu hal yang <strong>wajib</strong> dijawab di sini:{" "}
+        <strong>Tipe Campaign</strong> — kolom itu tidak ada di file export TAP, jadi jawabannyalah
+        yang mengisinya untuk semua kartu di file (dan <strong>Paid Campaign</strong> ikut
+        mewajibkan Ads Budget &amp; Service Fee).
       </p>
       <div className="mt-3">
         <UploadTutorial />
       </div>
       <div className="mt-3">
         <CsvUploadForm
-          action={uploadMasterProducts}
+          action={uploadDealProducts}
           buttonLabel="Upload Produk"
           helpText='Terima langsung file export TAP "Export link" (Campaign ID, product name,
             Product ID, Sale price, Shop name, masa berlaku produk, rate komisi kreator & partner
@@ -73,9 +78,11 @@ export default async function DealBaruPage() {
             yang membawa metrik performa. Kolom Shop ID dan kategori opsional. Rupiah campur
             (titik/koma ribuan), harga rentang varian, dan komisi kotor ("not found", "5-7%")
             ditangani otomatis dengan flag "perlu review", tidak crash. Baris "Summary" dilewati.
-            Tipe Campaign, Ads Budget, dan Service Fee tidak ada di file export — lengkapi lewat
-            tombol Edit di tab Produk TAP.'
-        />
+            Shop ID yang belum ketemu bisa diisi belakangan sekaligus se-shop lewat tombol Edit di
+            tabel "Shop dari Produk TAP" (tab Deal Brand).'
+        >
+          <UploadCampaignFields />
+        </CsvUploadForm>
       </div>
     </div>
   );

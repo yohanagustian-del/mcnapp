@@ -85,12 +85,15 @@ export default async function DealsPage({
   const shopRows: ShopSummaryRow[] = (shopSummary ?? []).map((s) => ({
     ...s,
     shop_id_count: numeric(s.shop_id_count) ?? 0,
+    shop_id_missing: numeric(s.shop_id_missing) ?? 0,
     product_count: numeric(s.product_count) ?? 0,
     active_count: numeric(s.active_count) ?? 0,
     needs_review_count: numeric(s.needs_review_count) ?? 0,
     campaign_count: numeric(s.campaign_count) ?? 0,
     ads_budget: numeric(s.ads_budget),
     service_fee: numeric(s.service_fee),
+    ads_budget_missing: numeric(s.ads_budget_missing) ?? 0,
+    service_fee_missing: numeric(s.service_fee_missing) ?? 0,
     gmv_tap: numeric(s.gmv_tap),
     avg_price: numeric(s.avg_price),
     avg_commission_pct: numeric(s.avg_commission_pct),
@@ -102,6 +105,9 @@ export default async function DealsPage({
 
   const canRegister = hasPermission("deals.register", member.role);
   const canEdit = hasPermission("deals.edit", member.role);
+  // Tabel shop mengedit KARTU PRODUK (products_tap), bukan brand_deals — izinnya
+  // karena itu products.edit, sama dengan tombol Edit di tab Produk TAP.
+  const canEditShop = hasPermission("products.edit", member.role);
 
   const rows: DealRow[] = (deals ?? []).map((d) => ({
     ...d,
@@ -178,6 +184,14 @@ export default async function DealsPage({
         memakai masa berlaku terjauh. Kolom lain bisa dimunculkan lewat menu <strong>Kolom</strong>;
         kotak pencarian di atas ikut menyaring tabel ini.
       </p>
+      {canEditShop && (
+        <p className="mt-2 text-sm text-slate-500">
+          Tombol <strong>Edit</strong> di tiap baris menulis ke <em>semua kartu produk</em> shop
+          tersebut sekaligus: Shop ID yang diisi di sini terisi ke seluruh produknya di tab Produk
+          TAP, begitu juga <strong>Tipe Campaign</strong>. Kolom lain berbeda per produk, jadi
+          perbaikannya tetap lewat tombol Edit di tab Produk TAP.
+        </p>
+      )}
 
       {shopError && (
         <p className="mt-3 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">
@@ -188,6 +202,7 @@ export default async function DealsPage({
       <div className="mt-2">
         <ShopsTable
           rows={shopRows}
+          canEdit={canEditShop}
           emptyMessage={
             q
               ? `Tidak ada shop cocok dengan "${q}".`
