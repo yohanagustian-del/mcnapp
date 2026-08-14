@@ -3,7 +3,13 @@ import { notFound, redirect } from "next/navigation";
 import { requireMember, canAccessNav, hasPermission, NAV_ITEMS } from "@/lib/rbac";
 import { createClient } from "@/lib/supabase/server";
 import { CsvUploadForm } from "@/components/csv-upload-form";
-import { addDealSession, uploadDealSessions, uploadCreatorProposals } from "./report-actions";
+// Pipeline report campaign BD dipakai bersama halaman ini dan detail Project BD —
+// satu parser, satu tabel, pemiliknya saja yang berbeda (deal_id / project_id).
+import {
+  addReportSession,
+  uploadReportSessions,
+  uploadReportCreators,
+} from "@/lib/deals/report-actions";
 
 function formatRp(v: number | null | undefined): string {
   return v ? `Rp${Number(v).toLocaleString("id-ID")}` : "—";
@@ -177,14 +183,14 @@ export default async function DealDetailPage({
       {canReport && (
         <div className="mt-4 grid gap-4 lg:grid-cols-2">
           <CsvUploadForm
-            action={uploadDealSessions}
+            action={uploadReportSessions}
             buttonLabel="Upload Report Performance"
             helpText="Format contoh 'Report Performance' (xlsx/csv): id, Brand, Nama Creator, Tanggal Session Live, Event, Support Ads, Ads Spending, IDR, SS Dashboard (link), GMV, ROAS. Baris BULK-xxx di atas header & baris TOTAL otomatis dilewati. Re-upload = replace."
           >
             <input type="hidden" name="deal_id" value={deal.id} />
           </CsvUploadForm>
           <CsvUploadForm
-            action={uploadCreatorProposals}
+            action={uploadReportCreators}
             buttonLabel="Upload Creator TC & Celeb"
             helpText="Daftar usulan creator campaign (format contoh 'Creator TC & Celeb'): Username, Creator Manager, Tipe Kreator, Channel, GMV L30D, Ratecard, Approval brand/creator, Status pengiriman."
           >
@@ -282,7 +288,7 @@ export default async function DealDetailPage({
       {canReport && (
         <details className="mt-3 rounded-lg border border-slate-200 bg-white p-4">
           <summary className="cursor-pointer text-sm font-medium">+ Input manual satu sesi live</summary>
-          <form action={addDealSession} className="mt-3 grid gap-2 sm:grid-cols-3">
+          <form action={addReportSession} className="mt-3 grid gap-2 sm:grid-cols-3">
             <input type="hidden" name="deal_id" value={deal.id} />
             <input name="creator_name" required placeholder="Nama creator (username)" className={input} />
             <input type="date" name="session_date" required className={input} />

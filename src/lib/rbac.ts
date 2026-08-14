@@ -79,6 +79,9 @@ export const NAV_ITEMS: NavItem[] = [
 
   { href: "/deals", label: "Deal Brand", roles: [...MANAGEMENT_ROLES, ...BIZDEV_ROLES, "finance"], group: "BizDev & Deal" },
   { href: "/deals/baru", label: "Registrasi Deal", roles: [...MANAGEMENT_ROLES, "bizdev_lead", "bizdev"], group: "BizDev & Deal" },
+  // Project BD: beberapa shop/brand digarap sebagai satu campaign. Pemirsanya sama
+  // dengan Deal Brand — isinya memang pandangan lain atas data yang sama.
+  { href: "/bd-projects", label: "Project BD", roles: [...MANAGEMENT_ROLES, ...BIZDEV_ROLES, "finance"], group: "BizDev & Deal" },
   { href: "/deals/import", label: "Import Master Deal", roles: [...MANAGEMENT_ROLES, "bizdev_lead", "bd_admin"], group: "BizDev & Deal" },
   { href: "/workspace/bizdev", label: "BizDev Workspace", roles: [...MANAGEMENT_ROLES, ...BIZDEV_ROLES], group: "BizDev & Deal" },
   { href: "/matching", label: "Matching (M5)", roles: [...MANAGEMENT_ROLES, ...CM_ROLES, "bizdev_lead", "bizdev"], group: "BizDev & Deal" },
@@ -200,6 +203,11 @@ export const PERMISSIONS: Record<string, Role[]> = {
   // Kelola pipeline deal & report brand: management + BizDev
   "m8.pipeline": [...MANAGEMENT_ROLES, "bizdev_lead", "bizdev"],
   "m8.brand_report": [...MANAGEMENT_ROLES, "bizdev_lead", "bizdev"],
+  // Buat & ubah Project BD (pengelompokan beberapa shop jadi satu campaign).
+  // Sejajar dengan deals.register: yang menutup deal juga yang menyusun projectnya.
+  // Menghapus project TIDAK menyentuh kartu produk mana pun — project cuma
+  // pengelompokan — jadi izinnya sama, tanpa gerbang khusus management.
+  "bd_project.manage": [...MANAGEMENT_ROLES, "bizdev_lead", "bizdev"],
   // E-sign kontrak TC/Celeb: management + CM Lead + CPM (creator sendiri)
   "m8.esign": [...MANAGEMENT_ROLES, ...CM_ROLES],
   // Tracking closing & referral: management + Akuisisi

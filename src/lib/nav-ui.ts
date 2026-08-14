@@ -23,6 +23,8 @@ export const NAV_ICON_PATHS: Record<string, string> = {
   "/deals": "M3 8l9-5 9 5-9 5zM3 12l9 5 9-5M3 16l9 5 9-5",
   "/deals/baru": "M12 5v14M5 12h14",
   "/deals/import": "M12 3v10m0 0l-4-4m4 4l4-4M4 17v3h16v-3",
+  // Project BD: beberapa kotak (brand) yang diikat jadi satu papan project.
+  "/bd-projects": "M4 5h6v6H4zM14 5h6v6h-6zM4 15h6v4H4zM14 15h6v4h-6zM10 8h4M10 17h4",
   "/workspace/bizdev": "M3 20h18M6 20V9M11 20V4M16 20v-8M21 20v-5",
   "/matching":
     "M8 7a3 3 0 100-6 3 3 0 000 6zM8 23a3 3 0 100-6 3 3 0 000 6zM19 15a3 3 0 100-6 3 3 0 000 6zM11 5.5h3a2 2 0 012 2V9M11 18.5h3a2 2 0 002-2V15",
