@@ -17,6 +17,8 @@ import {
   isEmptyProductCard,
   productCardIssues,
   productCardSchema,
+  productCardTarget,
+  type ProductCardInput,
 } from "@/lib/deals/product-card";
 import {
   planShopCardEdit,
@@ -38,19 +40,28 @@ export interface DealFormState {
 }
 
 /**
- * Registrasi Deal = mendaftarkan KARTU PRODUK ke katalog Produk TAP.
+ * Registrasi Deal — satu form, dua kemungkinan tujuan simpan.
  *
- * Pertanyaan formnya mengikuti header tabel Produk TAP (export TAP "Export link")
- * + dimensi komersial yang tidak dibawa export platform (tipe campaign, ads budget,
- * service fee, deal by, PIC TAP), dan barisnya masuk ke `products_tap` — bukan tabel
- * kartu tersendiri, supaya katalog produk tetap satu sumber (CLAUDE.md #4).
+ * Pertanyaan formnya mengikuti header tabel Produk TAP (export TAP "Export link") +
+ * dua dimensi yang tidak dibawa export platform (Deal by, PIC TAP). SEMUA pertanyaan
+ * opsional: kolom yang belum diketahui sengaja boleh kosong, karena memaksa mengisi
+ * nama/shop_id/komisi yang belum ketemu justru memancing isian karangan — masalah
+ * persis yang membuat master deal lama berantakan (CLAUDE.md #6).
  *
- * SEMUA pertanyaan opsional; satu-satunya kewajiban yang tersisa bersifat kondisional
- * (Ads Budget & Service Fee saat tipe campaign = Paid Campaign). Kolom yang belum
- * diketahui sengaja boleh kosong: memaksa mengisi nama/shop_id/komisi yang belum
- * ketemu justru memancing isian karangan — masalah persis yang membuat master deal
- * lama berantakan (CLAUDE.md #6). Yang ditolak hanya form yang kosong SELURUHNYA,
- * karena kartu tanpa satu pun isian tidak menyimpan informasi apa pun.
+ * Karena itu tujuan simpannya ditentukan dari isian, bukan ditanyakan (productCardTarget):
+ *
+ *  - Ada Product Name / Product ID → KARTU PRODUK di `products_tap` (tab Produk TAP),
+ *    supaya katalog produk tetap satu sumber (CLAUDE.md #4).
+ *  - Belum ada keduanya tapi Shop Name / Shop ID terisi → DEAL SHOP di `brand_deals`
+ *    (tab Deal Brand). Kartu produk sengaja BELUM dibuat: baris katalog tanpa nama
+ *    maupun ID produk tidak bisa dikenali orang dan tidak akan pernah cocok dengan
+ *    data TAP mingguan. Deal-nya sendiri sudah nyata, jadi ia dicatat sebagai shop dan
+ *    kartunya menyusul setelah produknya turun.
+ *  - Tidak ada identitas produk maupun shop → tidak ada yang bisa disimpan.
+ *
+ * Tipe Campaign, Ads Budget & Service Fee tidak lagi ditanyakan: kedua nominal itu
+ * milik pasangan (project, shop) di tab Project BD, jadi mengisinya di sini hanya
+ * melahirkan angka yang bertabrakan dengan angka project.
  *
  * Menulis lewat admin client karena RLS products_tap = service-role only (0019);
  * izinnya tetap ditegakkan di server lewat requirePermission.
@@ -75,8 +86,8 @@ export async function registerDealCard(
     return {
       ok: false,
       message:
-        "Form masih kosong. Isi minimal satu kolom (mis. Product Name atau Product ID) " +
-        "supaya kartunya bisa dikenali di tab Produk TAP.",
+        "Form masih kosong. Isi minimal Shop Name (deal-nya masuk tab Deal Brand) atau " +
+        "Product Name / Product ID (kartunya masuk tab Produk TAP).",
     };
   }
 
@@ -85,6 +96,26 @@ export async function registerDealCard(
     return { ok: false, message: "Periksa kembali isian form.", fieldErrors: issues };
   }
 
+  const target = productCardTarget(d);
+  if (target === "unidentified") {
+    return {
+      ok: false,
+      message:
+        "Isian yang ada belum menyebut produk maupun shop, jadi belum ada yang bisa didaftarkan. " +
+        "Isi Shop Name (deal-nya masuk tab Deal Brand) atau Product Name / Product ID " +
+        "(kartunya masuk tab Produk TAP).",
+      fieldErrors: { shop_name: "Isi Shop Name, atau lengkapi Product Name / Product ID" },
+    };
+  }
+
+  const admin = createAdminClient();
+
+  // ---------- Deal shop: produknya belum diketahui ----------
+  if (target === "brand_deal") {
+    return registerShopDeal(d, actor.id, admin);
+  }
+
+  // ---------- Kartu produk ----------
   // Product ID ikut primary key dan tidak boleh kosong, sementara form
   // membolehkannya kosong. Baris tanpa Product ID asli dapat ID internal dan
   // ditandai perlu review: tanpa Product ID platform, kartu ini tidak akan pernah
@@ -113,9 +144,6 @@ export async function registerDealCard(
     creator_shop_ads_commission_pct: d.creator_shop_ads_commission_pct ?? null,
     partner_shop_ads_commission_pct: d.partner_shop_ads_commission_pct ?? null,
     product_link: d.product_link ?? null,
-    campaign_type: d.campaign_type ?? null,
-    ads_budget: d.ads_budget ?? null,
-    service_fee: d.service_fee ?? null,
     deal_by: d.deal_by ?? null,
     pic_tap: d.pic_tap ?? null,
     source: "deal_register",
@@ -130,7 +158,6 @@ export async function registerDealCard(
     updated_at: new Date().toISOString(),
   };
 
-  const admin = createAdminClient();
   // insert, BUKAN upsert: kalau (campaign_id, product_id) sudah ada, menimpanya
   // diam-diam berarti menghapus kartu milik orang lain — persis yang dicegah
   // migrasi 0040. Lebih baik ditolak dengan pesan jelas.
@@ -158,6 +185,7 @@ export async function registerDealCard(
   });
 
   revalidatePath("/products");
+  revalidatePath("/deals");
   const notes: string[] = [];
   if (generatedProductId) {
     notes.push(`Product ID belum diisi → dipakai ID internal ${productId} dan ditandai perlu review`);
@@ -174,21 +202,167 @@ export async function registerDealCard(
 }
 
 /**
- * Edit satu baris tabel "Shop dari Produk TAP" (tab Deal Brand).
+ * Deal yang produknya BELUM diketahui → satu baris `brand_deals`, tabel yang sama
+ * dengan deal lama hasil Import Master Deal.
  *
- * Baris itu adalah RINGKASAN kartu produk, jadi mengeditnya menulis ke seluruh
- * kartu shop tersebut di `products_tap`: Shop ID yang diisi di sini terisi ke semua
- * produk shop itu di tab Produk TAP, begitu pula Tipe Campaign. Dua kolom itu saja
- * — harga, komisi, dan masa berlaku berbeda per produk.
+ * Kolom yang bisa dipetakan langsung dari form dipetakan (Shop Name → brand_name,
+ * masa berlaku → deal_start/exp_date, rate komisi kreator & partner → komisi_kreator /
+ * komisi_mea); sisanya dibiarkan kosong, bukan diisi nilai bawaan. Termasuk
+ * `campaign_type`: kolomnya punya default 'paid' di database, dan membiarkan default
+ * itu jalan berarti mengarang tipe campaign yang tidak pernah ditanyakan — jadi
+ * nilainya ditulis null secara eksplisit.
  *
- * Anggota grup diambil lewat kolom generated `shop_key` (migrasi 0043), yaitu kunci
- * yang SAMA dengan yang dipakai view ringkasan untuk mengelompokkan — bukan salinan
- * ekspresi group by di sisi aplikasi (CLAUDE.md #4).
+ * exp_date ikut disinkron ke `cooperating_shops.deal_end` seperti di form Edit deal:
+ * dari sanalah alert kadaluarsa M4 dihitung (CLAUDE.md #5, #6).
+ */
+async function registerShopDeal(
+  d: ProductCardInput,
+  actorId: string,
+  admin: ReturnType<typeof createAdminClient>
+): Promise<DealFormState> {
+  const shopId = d.shop_id ?? null;
+  const expDate = d.effective_end ?? null;
+
+  // Satu shop = satu deal aktif, invarian yang sama dengan form Edit deal. Tanpa
+  // pemeriksaan ini satu shop bisa punya dua baris deal yang saling bertabrakan saat
+  // sinkron ke cooperating_shops.
+  //
+  // limit(1), BUKAN maybeSingle(): master deal lama bisa memuat beberapa baris dengan
+  // shop_id yang sama, dan maybeSingle() akan error di situ — lalu error itu terbaca
+  // sebagai "tidak ada duplikat" dan barisnya justru ikut bertambah.
+  if (shopId) {
+    const { data: dupes, error: dupeError } = await admin
+      .from("brand_deals")
+      .select("id, brand_name")
+      .eq("shop_id", shopId)
+      .limit(1);
+    // Error dibaca, tidak diabaikan: kalau pemeriksaannya sendiri gagal, kita tidak
+    // tahu ada duplikat atau tidak — menyimpan tetap berarti menebak.
+    if (dupeError) {
+      return { ok: false, message: `Gagal memeriksa Shop ID: ${dupeError.message}` };
+    }
+    const dupe = dupes?.[0];
+    if (dupe) {
+      return {
+        ok: false,
+        message:
+          `Shop ID ${shopId} sudah terdaftar di deal ${dupe.id} (${dupe.brand_name}). ` +
+          "Perbaiki deal itu lewat tab Deal Brand, atau daftarkan kartu produknya " +
+          "(isi Product Name / Product ID) kalau ini produk baru di shop yang sama.",
+        fieldErrors: { shop_id: "Shop ID sudah dipakai deal lain" },
+      };
+    }
+  }
+
+  // Kolom form yang TIDAK punya tempat di brand_deals (Product Link & dua rate Shop
+  // Ads adalah atribut produk; Deal by tidak ada kolomnya di tabel deal lama). Daripada
+  // hilang diam-diam, isiannya dicatat di notes — terbaca manusia di detail deal, dan
+  // bisa dipindahkan ke kartu produk begitu produknya turun.
+  const titipan: string[] = [];
+  if (d.product_link) titipan.push(`Product Link: ${d.product_link}`);
+  if (d.creator_shop_ads_commission_pct !== undefined) {
+    titipan.push(`Creator Shop Ads commission: ${d.creator_shop_ads_commission_pct}%`);
+  }
+  if (d.partner_shop_ads_commission_pct !== undefined) {
+    titipan.push(`Affiliate partner Shop Ads commission: ${d.partner_shop_ads_commission_pct}%`);
+  }
+
+  const dealId = genId("DEAL");
+  const record = {
+    id: dealId,
+    // brand_name = "Shop Name" di form. Kolomnya not null; kalau Shop Name belum
+    // diisi (hanya Shop ID yang ada), namanya diturunkan dari Shop ID supaya barisnya
+    // tetap bisa dikenali dan dikelompokkan sama seperti di tabel shop.
+    brand_name: d.shop_name ?? `#${shopId}`,
+    shop_id: shopId,
+    campaign_id: d.campaign_id ?? null,
+    // Tipe campaign tidak ditanyakan lagi → jangan biarkan default 'paid' terpasang.
+    campaign_type: null,
+    komisi_kreator_raw: commissionRaw(d.commission_pct, null),
+    komisi_kreator_pct: d.commission_pct ?? null,
+    komisi_mea_raw: commissionRaw(d.partner_commission_pct, null),
+    komisi_mea_pct: d.partner_commission_pct ?? null,
+    // brand_deals menyimpan harga sebagai avg_price (rata-rata harga deal); Sale Price
+    // satu produk adalah nilai yang wajar untuk itu saat produknya belum terdaftar.
+    avg_price: d.price ?? null,
+    deal_start: d.effective_start ?? null,
+    exp_date: expDate,
+    deal_end: expDate, // deal_end = exp_date, sama seperti jalur import & Edit deal
+    pic_tap: d.pic_tap ?? null,
+    status: "running", // deal yang baru ditutup memang sedang berjalan
+    notes:
+      "Didaftarkan lewat Registrasi Deal; produknya belum diketahui." +
+      (titipan.length ? ` ${titipan.join("; ")}.` : ""),
+    review_flags: dealReviewFlags({ shopId, expDate }),
+    created_by: actorId,
+  };
+
+  const { error } = await admin.from("brand_deals").insert(record);
+  if (error) return { ok: false, message: `Gagal menyimpan deal: ${error.message}` };
+
+  const extras: string[] = [];
+  // Sinkron exp_date → cooperating_shops.deal_end untuk alert kadaluarsa M4.
+  if (shopId) {
+    const today = new Date().toISOString().slice(0, 10);
+    const { error: shopError } = await admin.from("cooperating_shops").upsert(
+      {
+        shop_id: shopId,
+        deal_id: dealId,
+        deal_end: expDate,
+        active_flag: expDate ? expDate >= today : true,
+      },
+      { onConflict: "shop_id" }
+    );
+    if (shopError) extras.push(`sync cooperating_shops gagal: ${shopError.message}`);
+  }
+
+  await writeAudit({
+    actorId,
+    action: "brand_deal.register",
+    entityType: "brand_deals",
+    entityId: dealId,
+    // `submitted` = isian form apa adanya. Beberapa kolom (Deal by, rate Shop Ads,
+    // Product Link) tidak punya kolom di brand_deals; merekamnya di sini berarti tidak
+    // ada isian user yang hilang tanpa jejak.
+    after: { ...record, submitted: d },
+    type: "auto", // menambah data/income → auto berlaku, tetap ter-log (CLAUDE.md #2)
+  });
+
+  revalidatePath("/deals");
+  return {
+    ok: true,
+    message:
+      `Deal "${record.brand_name}" tersimpan di tab Deal Brand (${dealId}) — belum ada kartu di ` +
+      "Produk TAP karena Product Name & Product ID belum diisi. Ads Budget & Service Fee-nya " +
+      "diisi setelah shop ini dimasukkan ke sebuah project (tab Project BD)." +
+      (titipan.length || d.deal_by
+        ? " Isian yang belum punya tempat di baris deal (Product Link, rate Shop Ads, Deal by) " +
+          "dicatat di catatan deal & audit log — isikan ke kartunya saat produknya didaftarkan."
+        : "") +
+      (record.review_flags.length ? ` Perlu dilengkapi: ${record.review_flags.join("; ")}.` : "") +
+      (extras.length ? ` ${extras.join("; ")}.` : ""),
+  };
+}
+
+/**
+ * Edit satu baris tabel "Shop" (tab Deal Brand).
  *
- * Ads Budget & Service Fee TIDAK diisi dari sini lagi — keduanya dikelola per shop
- * di tab Project BD. Karena itu aturan "Paid Campaign wajib nominal" juga tidak
- * ditegakkan di jalur ini: kalau ditegakkan, Tipe Campaign paid tidak akan pernah
- * bisa dipilih untuk shop yang kartunya belum berisi nominal.
+ * Baris itu RINGKASAN, jadi mengeditnya menulis ke semua yang membentuknya:
+ *
+ *  - seluruh kartu shop itu di `products_tap` (Shop ID & Tipe Campaign), dan
+ *  - seluruh baris deal shop itu di `brand_deals` — termasuk shop yang BELUM punya
+ *    kartu sama sekali (deal terdaftar lewat Registrasi Deal tanpa identitas produk).
+ *    Tanpa cabang ini, Shop ID sebuah deal shop tidak bisa diisi dari mana pun.
+ *
+ * Dua kolom itu saja — harga, komisi, dan masa berlaku berbeda per produk.
+ *
+ * Anggota grup diambil lewat kolom generated `shop_key` di KEDUA tabel (products_tap
+ * 0043, brand_deals 0047), yaitu kunci yang SAMA dengan yang dipakai view ringkasan
+ * untuk mengelompokkan — bukan salinan ekspresi group by di sisi aplikasi (CLAUDE.md #4).
+ *
+ * Ads Budget & Service Fee TIDAK diisi dari sini — keduanya nominal per (project, shop)
+ * yang dikelola di tab Project BD. Karena nominalnya tak lagi bisa diisi di form ini,
+ * aturan "Paid Campaign wajib nominal" juga tidak ditegakkan di jalur ini.
  *
  * Menulis lewat admin client karena RLS products_tap = service-role only (0019);
  * izinnya tetap ditegakkan server lewat requirePermission("products.edit").
@@ -215,26 +389,51 @@ export async function updateShopCards(
   }
 
   const admin = createAdminClient();
-  const { data: rows, error: readError } = await admin
-    .from("products_tap")
-    .select("campaign_id, product_id, shop_id, campaign_type")
-    .eq("shop_key", shopKey);
+  const [
+    { data: rows, error: readError },
+    { data: dealRows, error: dealReadError },
+  ] = await Promise.all([
+    admin
+      .from("products_tap")
+      .select("campaign_id, product_id, shop_id, campaign_type")
+      .eq("shop_key", shopKey),
+    // Baris deal shop yang sama (kunci generated yang sama, 0047).
+    admin.from("brand_deals").select("id, shop_id, campaign_type").eq("shop_key", shopKey),
+  ]);
   if (readError) return { ok: false, message: `Gagal membaca kartu shop: ${readError.message}` };
-  if (!rows || rows.length === 0) {
-    return { ok: false, message: `Tidak ada kartu produk untuk shop "${shopKey}".` };
+  if (dealReadError) {
+    return { ok: false, message: `Gagal membaca deal shop: ${dealReadError.message}` };
   }
-  if (rows.length > SHOP_CARD_LIMIT) {
+  if ((rows?.length ?? 0) === 0 && (dealRows?.length ?? 0) === 0) {
     return {
       ok: false,
       message:
-        `Shop ini punya ${rows.length} kartu — di atas batas ${SHOP_CARD_LIMIT} sekali edit. ` +
+        `Tidak ada kartu produk maupun deal untuk shop "${shopKey}". ` +
+        "Muat ulang halaman — kemungkinan Shop Name-nya baru berubah.",
+    };
+  }
+  const cards = rows ?? [];
+  const deals = dealRows ?? [];
+  if (cards.length > SHOP_CARD_LIMIT) {
+    return {
+      ok: false,
+      message:
+        `Shop ini punya ${cards.length} kartu — di atas batas ${SHOP_CARD_LIMIT} sekali edit. ` +
         "Perbaiki lewat pilih baris + edit massal di tab Produk TAP.",
     };
   }
 
-  const plan = planShopCardEdit(rows as ShopCardRow[], values);
-  if (plan.updates.length === 0) {
-    return { ok: true, message: "Tidak ada yang berubah — kartu shop ini sudah sesuai." };
+  // Baris deal yang nilainya belum sesuai. Aturannya sama dengan kartu: yang sudah
+  // sesuai tidak ditulis ulang, jadi jejak audit hanya memuat yang benar-benar berubah.
+  const dealUpdates = deals.filter(
+    (d) =>
+      (values.shop_id !== undefined && d.shop_id !== values.shop_id) ||
+      (values.campaign_type !== undefined && d.campaign_type !== values.campaign_type)
+  );
+
+  const plan = planShopCardEdit(cards as ShopCardRow[], values);
+  if (plan.updates.length === 0 && dealUpdates.length === 0) {
+    return { ok: true, message: "Tidak ada yang berubah — shop ini sudah sesuai." };
   }
 
   // Kartu dikelompokkan per patch yang IDENTIK lalu ditulis per campaign: jumlah
@@ -248,7 +447,7 @@ export async function updateShopCards(
   }
 
   const changed = new Set(plan.updates.map((u) => `${u.campaign_id}|${u.product_id}`));
-  const before = rows.filter((r) => changed.has(`${r.campaign_id}|${r.product_id}`));
+  const before = cards.filter((r) => changed.has(`${r.campaign_id}|${r.product_id}`));
 
   const now = new Date().toISOString();
   let updated = 0;
@@ -273,6 +472,30 @@ export async function updateShopCards(
     }
   }
 
+  // Baris deal shop yang sama ikut dirapikan. Patch-nya identik untuk semua baris,
+  // jadi cukup satu update — Shop ID di brand_deals juga menentukan sinkron ke
+  // cooperating_shops, karena itu deal_end/exp_date tidak disentuh di sini.
+  let dealsUpdated = 0;
+  if (dealUpdates.length > 0) {
+    const dealPatch: Record<string, unknown> = {};
+    if (values.shop_id !== undefined) dealPatch.shop_id = values.shop_id;
+    if (values.campaign_type !== undefined) dealPatch.campaign_type = values.campaign_type;
+
+    const { data, error } = await admin
+      .from("brand_deals")
+      .update(dealPatch)
+      .in("id", dealUpdates.map((d) => d.id as string))
+      .select("id");
+    if (error) {
+      return {
+        ok: false,
+        message:
+          `Kartu produk tersimpan (${updated}), tapi baris deal shop gagal diperbarui: ${error.message}`,
+      };
+    }
+    dealsUpdated = data?.length ?? 0;
+  }
+
   // Memperbaiki data master (mengisi Shop ID, menegaskan tipe campaign) tidak
   // merugikan → auto berlaku, tetap terekam penuh before/after (CLAUDE.md #2).
   await writeAudit({
@@ -280,8 +503,8 @@ export async function updateShopCards(
     action: "products_tap.shop_update",
     entityType: "products_tap",
     entityId: shopKey,
-    before,
-    after: { shop_key: shopKey, values, rows: updated },
+    before: { cards: before, deals: dealUpdates },
+    after: { shop_key: shopKey, values, rows: updated, deals: dealsUpdated },
     type: "auto",
   });
 
@@ -293,9 +516,13 @@ export async function updateShopCards(
   if (values.campaign_type !== undefined) {
     done.push(`Tipe Campaign ${CAMPAIGN_TYPE_LABEL[values.campaign_type]}`);
   }
+  const sasaran = [
+    updated > 0 ? `${updated} kartu produk` : null,
+    dealsUpdated > 0 ? `${dealsUpdated} baris deal` : null,
+  ].filter(Boolean);
   return {
     ok: true,
-    message: `${done.join(" & ")} diterapkan ke ${updated} kartu produk shop ini.`,
+    message: `${done.join(" & ")} diterapkan ke ${sasaran.join(" & ")} shop ini.`,
   };
 }
 
@@ -304,22 +531,12 @@ export async function updateShopCards(
  * via Excel").
  *
  * Parser & tabel tujuannya sama persis dengan "Upload Master Product List" di tab
- * Produk TAP (CLAUDE.md #6 — satu importer). Bedanya HANYA satu: di jalur ini Tipe
- * Campaign wajib dijawab, karena yang diunggah adalah deal — dan file export TAP
- * tidak membawa kolom itu. Jawabannya (plus Ads Budget & Service Fee untuk Paid
- * Campaign) diisikan ke setiap kartu di file.
+ * Produk TAP (CLAUDE.md #6 — satu importer); bedanya cuma pertanyaan Deal by & PIC TAP
+ * yang ikut dikirim form ini dan diisikan ke setiap kartu di file. Tidak ada lagi
+ * pertanyaan Tipe Campaign / Ads Budget / Service Fee di jalur ini: kedua nominal itu
+ * milik pasangan (project, shop) di tab Project BD.
  */
 export async function uploadDealProducts(formData: FormData): Promise<UploadReport> {
-  if (!String(formData.get("campaign_type") ?? "").trim()) {
-    return {
-      inserted: 0,
-      skipped: [],
-      error:
-        "Tipe Campaign wajib dipilih sebelum upload — kolom itu tidak ada di file export TAP, " +
-        "jadi jawabannya di form inilah yang mengisi kolom Tipe Campaign semua kartu di file.",
-    };
-  }
-
   const report = await uploadProductMasterList(formData);
   revalidatePath("/products");
   revalidatePath("/deals");

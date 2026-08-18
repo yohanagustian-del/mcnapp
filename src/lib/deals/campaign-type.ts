@@ -23,15 +23,11 @@ export const CAMPAIGN_TYPE_LABEL: Record<string, string> = Object.fromEntries(
   CAMPAIGN_TYPES.map((t) => [t.value, t.label])
 );
 
-/**
- * Tipe campaign yang mewajibkan Ads Budget & Service Fee: Paid Campaign — satu-satunya
- * tipe berbayar, jadi kedua angka itu memang selalu ada saat dealnya ditutup. Di tipe
- * non-berbayar pertanyaannya tidak ditampilkan sama sekali, jadi nilainya tetap null.
- *
- * Dipakai bersama form Registrasi Deal, form Edit di tab Produk TAP, dan validasi
- * server lewat productCardIssues() — satu aturan, bukan tiga salinan (CLAUDE.md #4).
+/*
+ * CATATAN: dulu ada CAMPAIGN_TYPE_NEEDS_BUDGET di sini — tipe campaign yang mewajibkan
+ * Ads Budget & Service Fee. Aturan itu hilang bersama pertanyaannya: kedua nominal
+ * bukan lagi atribut kartu produk melainkan milik pasangan (project, shop) di tab
+ * Project BD, jadi tidak ada tipe campaign yang bisa mewajibkan pengisiannya di form
+ * registrasi/upload. Tipe campaign sendiri tetap dipakai (kolom di tabel Produk TAP &
+ * tombol Edit shop di tab Deal Brand).
  */
-export const CAMPAIGN_TYPE_NEEDS_BUDGET: CampaignType = "paid";
-
-/** Label tipe campaign yang mewajibkan budget — dipakai di pesan error & legend form. */
-export const CAMPAIGN_TYPE_NEEDS_BUDGET_LABEL = CAMPAIGN_TYPE_LABEL[CAMPAIGN_TYPE_NEEDS_BUDGET];

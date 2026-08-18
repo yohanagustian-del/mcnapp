@@ -4,6 +4,12 @@ import { requireMember, canAccessNav, NAV_ITEMS, hasPermission } from "@/lib/rba
 import { createClient } from "@/lib/supabase/server";
 import { ShopsTable, type ShopSummaryRow } from "./shops-table";
 
+/**
+ * Batas baris shop yang ditarik sekali muat. Bukan paginasi sungguhan: kalau batasnya
+ * kena, halaman MENGATAKANNYA (di bawah tabel) alih-alih diam-diam memotong daftar.
+ */
+const SHOP_ROW_LIMIT = 500;
+
 export default async function DealsPage({
   searchParams,
 }: {
@@ -16,14 +22,22 @@ export default async function DealsPage({
   const { q } = await searchParams;
   const supabase = await createClient();
 
-  // Deal baru tidak lagi masuk brand_deals melainkan jadi kartu produk (0041), dan
-  // ringkasannya per shop dikerjakan view products_tap_shop_summary (SQL, bukan JS):
+  // Satu tabel, satu view: `deal_shop_summary` meringkas kartu Produk TAP per shop DAN
+  // membawa shop yang deal-nya sudah terdaftar tapi kartunya belum (Registrasi Deal
+  // berisi Shop Name saja → baris brand_deals). Ads Budget & Service Fee di dalamnya =
+  // TOTAL nominal shop itu lintas Project BD (0046). Agregasinya SQL, bukan JS:
   // halaman ini cuma membaca baris yang sudah jadi.
+  // Urutan bawaan: kartu terbanyak dulu, lalu shop yang punya baris deal. Tanpa
+  // pengurutan kedua, SEMUA shop yang baru terdaftar (0 kartu) menumpuk di ekor dan
+  // jadi yang pertama terpotong batas di bawah — persis baris yang paling butuh
+  // dilihat setelah didaftarkan.
   let shopQuery = supabase
-    .from("products_tap_shop_summary")
+    .from("deal_shop_summary")
     .select("*")
     .order("product_count", { ascending: false })
-    .limit(200);
+    .order("deal_count", { ascending: false })
+    .order("shop_key", { ascending: true })
+    .limit(SHOP_ROW_LIMIT);
   if (q?.trim()) {
     const term = `%${q.trim()}%`;
     // shop_key sudah berisi Shop Name (atau "#shop_id" untuk baris tanpa nama), jadi
@@ -65,10 +79,10 @@ export default async function DealsPage({
     active_count: numeric(s.active_count) ?? 0,
     needs_review_count: numeric(s.needs_review_count) ?? 0,
     campaign_count: numeric(s.campaign_count) ?? 0,
+    deal_count: numeric(s.deal_count) ?? 0,
+    deal_id: (s.deal_id as string | null) ?? null,
     ads_budget: numeric(s.ads_budget),
     service_fee: numeric(s.service_fee),
-    ads_budget_missing: numeric(s.ads_budget_missing) ?? 0,
-    service_fee_missing: numeric(s.service_fee_missing) ?? 0,
     gmv_tap: numeric(s.gmv_tap),
     avg_price: numeric(s.avg_price),
     avg_commission_pct: numeric(s.avg_commission_pct),
@@ -90,8 +104,9 @@ export default async function DealsPage({
         <div>
           <h1 className="text-2xl font-semibold">Deal Brand</h1>
           <p className="mt-1 text-sm text-slate-500">
-            Shop kerjasama yang sedang berjalan, diringkas dari kartu Produk TAP. Registrasi deal
-            baru jadi kartu produk yang otomatis muncul di sini.
+            Shop kerjasama yang sedang berjalan. Registrasi deal yang sudah menyebut produk jadi
+            kartu Produk TAP; yang baru menyebut Shop Name tercatat sebagai deal shop — keduanya
+            muncul di tabel yang sama di bawah.
           </p>
         </div>
         {canRegister && (
@@ -125,24 +140,28 @@ export default async function DealsPage({
         )}
       </form>
 
-      <h2 className="mt-8 text-lg font-semibold">Shop dari Produk TAP</h2>
+      <h2 className="mt-8 text-lg font-semibold">Shop</h2>
       <p className="mt-1 text-sm text-slate-500">
-        Isi tabel <strong>Produk TAP</strong> diringkas per <strong>Shop Name</strong> — satu baris
-        per shop. Deal baru didaftarkan sebagai kartu produk, jadi di sinilah shop yang sedang
-        berjalan terlihat. Jumlah kartu &amp; campaign dihitung, Ads Budget / Service Fee / GMV
-        dijumlah, harga &amp; rate komisi dirata-rata, dan Exp Date memakai masa berlaku terjauh.{" "}
-        <strong>Ads Budget</strong> &amp; <strong>Service Fee</strong> beserta <strong>Deal by</strong>,{" "}
-        <strong>PIC TAP</strong>, dan <strong>Nama BD</strong> tampil di tabel ini. Kolom lain bisa
-        dimunculkan lewat menu <strong>Kolom</strong>; kotak pencarian di atas ikut menyaring tabel
-        ini.
+        Satu baris per <strong>Shop Name</strong>: kartu <strong>Produk TAP</strong> shop itu
+        diringkas (jumlah kartu &amp; campaign dihitung, GMV dijumlah, harga &amp; rate komisi
+        dirata-rata, Exp Date memakai masa berlaku terjauh), ditambah shop yang{" "}
+        <strong>deal-nya sudah didaftarkan tapi produknya belum</strong> — baris seperti itu tampil
+        dengan 0 kartu dan bertanda <strong>deal</strong>. <strong>Ads Budget</strong> &amp;{" "}
+        <strong>Service Fee</strong> di sini adalah <strong>total lintas project</strong>:
+        penjumlahan nominal yang diinput per shop di tiap <strong>Project BD</strong> (mis. DVARA di
+        project A + DVARA di project B). Kolom lain bisa dimunculkan lewat menu{" "}
+        <strong>Kolom</strong>; kotak pencarian di atas ikut menyaring tabel ini.
       </p>
       {canEditShop && (
         <p className="mt-2 text-sm text-slate-500">
           Tombol <strong>Edit</strong> di tiap baris menulis ke <em>semua kartu produk</em> shop
-          tersebut sekaligus: Shop ID yang diisi di sini terisi ke seluruh produknya di tab Produk
-          TAP, begitu juga <strong>Tipe Campaign</strong>. Ads Budget &amp; Service Fee diatur per
-          shop di tab <strong>Project BD</strong>; kolom lain berbeda per produk, jadi perbaikannya
-          tetap lewat tombol Edit di tab Produk TAP.
+          tersebut sekaligus — dan ke baris <em>deal</em>-nya, sehingga Shop ID shop yang produknya
+          belum turun pun bisa diisi dari sini. Yang bisa diseragamkan: Shop ID dan{" "}
+          <strong>Tipe Campaign</strong>. <strong>Ads Budget</strong> &amp;{" "}
+          <strong>Service Fee</strong> tidak bisa diedit dari sini — keduanya diisi per shop{" "}
+          <em>di dalam project</em> lewat tab <strong>Project BD</strong>, karena satu shop bisa
+          punya nominal berbeda di project yang berbeda. Kolom lain berbeda per produk, jadi
+          perbaikannya tetap lewat tombol Edit di tab Produk TAP.
         </p>
       )}
 
@@ -160,10 +179,16 @@ export default async function DealsPage({
           emptyMessage={
             q
               ? `Tidak ada shop cocok dengan "${q}".`
-              : "Belum ada kartu produk. Daftarkan lewat Registrasi Deal atau upload master product list."
+              : "Belum ada shop. Daftarkan lewat Registrasi Deal atau upload master product list."
           }
         />
       </div>
+      {shopRows.length >= SHOP_ROW_LIMIT && (
+        <p className="mt-2 text-xs text-amber-700">
+          Ditampilkan {SHOP_ROW_LIMIT} shop pertama (kartu terbanyak dulu). Pakai kotak pencarian di
+          atas untuk menemukan shop yang tidak terlihat di daftar ini.
+        </p>
+      )}
     </div>
   );
 }

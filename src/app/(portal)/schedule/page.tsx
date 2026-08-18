@@ -123,7 +123,7 @@ export default async function SchedulePage({
       allCreatorsPromise,
       supabase.from("team_members").select("id, name").eq("role", "cpm"),
       supabase
-        .from("products_tap_shop_summary")
+        .from("deal_shop_summary")
         .select("shop_key, shop_name, shop_id, pic_tap_ids, product_count")
         .order("product_count", { ascending: false })
         .limit(500),

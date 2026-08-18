@@ -7,18 +7,20 @@ import {
   PAGE_SIZES_10_20_50_100, SortableTh, TablePagination, useTableControls,
   type SortConfig, type SortDir, type SortValue,
 } from "@/components/table-controls";
-import { PROJECT_STATUS_LABEL } from "@/lib/deals/bd-project";
+import { PAYMENT_STATUS_LABEL, PROJECT_STATUS_LABEL } from "@/lib/deals/bd-project";
 
 /**
- * Satu Project BD siap tampil: identitasnya dari `bd_projects`, angkanya hasil
- * penjumlahan baris ringkasan shop (products_tap_shop_summary) yang dikerjakan
- * server. Komponen ini tidak menghitung apa pun — hanya menampilkan, mengurutkan,
- * dan memaginasi.
+ * Satu Project BD siap tampil: identitasnya dari `bd_projects`, angka kartunya hasil
+ * penjumlahan baris ringkasan shop (view `deal_shop_summary`), dan Ads Budget /
+ * Service Fee hasil penjumlahan nominal `bd_project_shop_budgets` PROJECT INI —
+ * semuanya dikerjakan server. Komponen ini tidak menghitung apa pun; hanya
+ * menampilkan, mengurutkan, dan memaginasi.
  */
 export interface ProjectRow {
   id: string;
   name: string;
   status: string | null;
+  status_payment: string | null;
   created_at: string | null;
   created_by_name: string | null;
   /** Nama shop anggota project (yang masih ada di katalog), untuk kolom Brand/Shop. */
@@ -63,6 +65,14 @@ const STATUS_CLASS: Record<string, string> = {
   done: "bg-slate-200 text-slate-700",
 };
 
+// Status payment: hijau hanya untuk "done"; dua status "proses" dibedakan warnanya
+// supaya barisnya bisa dipilah cepat tanpa membaca teksnya.
+const PAYMENT_CLASS: Record<string, string> = {
+  done: "bg-green-100 text-green-800",
+  proses_finance_payment: "bg-blue-100 text-blue-800",
+  proses_finance_brand: "bg-violet-100 text-violet-800",
+};
+
 // Kelas sel sengaja sama dengan tabel Deal Brand: dua tabel dengan padding & ukuran
 // font berbeda terbaca sebagai dua komponen asing, bukan dua pandangan atas data
 // yang sama.
@@ -99,7 +109,7 @@ const COLUMNS: TableColumn[] = [
         {p.missing_shops > 0 && (
           <span
             className="ml-1 rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] text-amber-800"
-            title="Shop ini tidak lagi ada di katalog Produk TAP — biasanya karena Shop Name-nya diubah. Perbaiki lewat Edit project."
+            title="Shop ini tidak lagi ditemukan — biasanya karena Shop Name-nya diubah. Perbaiki lewat Edit project."
           >
             {p.missing_shops} hilang
           </span>
@@ -165,6 +175,22 @@ const COLUMNS: TableColumn[] = [
         {PROJECT_STATUS_LABEL[p.status ?? ""] ?? "—"}
       </span>
     ),
+  },
+  {
+    label: "Status Payment",
+    value: (p) => p.status_payment,
+    cell: (p) =>
+      p.status_payment ? (
+        <span
+          className={`rounded-full px-2 py-0.5 text-xs ${PAYMENT_CLASS[p.status_payment] ?? "bg-slate-100 text-slate-700"}`}
+        >
+          {PAYMENT_STATUS_LABEL[p.status_payment] ?? p.status_payment}
+        </span>
+      ) : (
+        <span className="text-slate-400" title="Status payment belum diisi — atur lewat Edit Project">
+          —
+        </span>
+      ),
   },
   {
     label: "Dibuat oleh",

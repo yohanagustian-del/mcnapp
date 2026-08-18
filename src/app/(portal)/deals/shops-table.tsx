@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, type ReactNode } from "react";
+import Link from "next/link";
 import {
   ColumnPicker, PAGE_SIZES_10_20_50_100, SortableTh, TablePagination,
   useColumnPreference, useTableControls,
@@ -10,7 +11,8 @@ import { CAMPAIGN_TYPE_LABEL } from "@/lib/deals/campaign-type";
 import { ShopEditButton } from "./shop-edit-button";
 
 /**
- * Satu SHOP hasil ringkasan kartu Produk TAP (view products_tap_shop_summary).
+ * Satu SHOP dari view `deal_shop_summary`: ringkasan kartu Produk TAP shop itu, atau —
+ * kalau kartunya belum ada — deal shop yang sudah terdaftar di brand_deals.
  *
  * Agregasinya dikerjakan SQL, bukan di sini: komponen ini hanya menampilkan,
  * mengurutkan, dan memaginasi baris yang sudah jadi.
@@ -29,11 +31,16 @@ export interface ShopSummaryRow {
   needs_review_count: number;
   campaign_count: number;
   campaign_types: string[];
+  /** Baris brand_deals untuk shop ini (deal lama / deal yang produknya belum turun). */
+  deal_count: number;
+  /** Deal pertama shop ini — dipakai menautkan baris ke halaman detail deal. */
+  deal_id: string | null;
+  /**
+   * Total lintas Project BD, bukan angka kartu: penjumlahan nominal yang diinput per
+   * shop di tiap project (bd_project_shop_budgets, migrasi 0046).
+   */
   ads_budget: number | null;
   service_fee: number | null;
-  /** Kartu yang nominalnya masih kosong — menentukan wajib/tidaknya isian di modal Edit. */
-  ads_budget_missing: number;
-  service_fee_missing: number;
   gmv_tap: number | null;
   avg_price: number | null;
   avg_commission_pct: number | null;
@@ -110,7 +117,26 @@ const COLUMNS: TableColumn[] = [
     className: `${tdTruncate} font-medium`,
     cell: (s) => (
       <span title={[s.shop_name ?? s.shop_key, s.shop_id].filter(Boolean).join(" · ")}>
-        {s.shop_name ?? <span className="text-slate-400">{s.shop_key}</span>}
+        {/* Shop yang punya baris deal ditautkan ke halaman detail deal-nya: di sanalah
+            tracking report campaign & daftar creator shop itu hidup. Shop yang cuma
+            berupa kartu produk tidak punya halaman detail, jadi tampil sebagai teks. */}
+        {s.deal_id ? (
+          <Link href={`/deals/${s.deal_id}`} className="text-blue-700 hover:underline">
+            {s.shop_name ?? s.shop_key}
+          </Link>
+        ) : (
+          (s.shop_name ?? <span className="text-slate-400">{s.shop_key}</span>)
+        )}
+        {/* Deal sudah terdaftar tapi belum punya satu pun kartu produk. Ditandai supaya
+            baris berangka 0 tidak terbaca sebagai shop kosong tanpa sebab. */}
+        {s.product_count === 0 && s.deal_count > 0 && (
+          <span
+            className="ml-1 rounded-full bg-blue-100 px-1.5 py-0.5 text-[10px] text-blue-800"
+            title="Deal sudah terdaftar, kartu produknya belum. Lengkapi lewat Registrasi Deal (isi Product Name / Product ID) atau upload master product list."
+          >
+            deal
+          </span>
+        )}
         {/* Nama shop yang menempel di beberapa Shop ID hampir selalu salah input —
             ditandai di sini supaya ketahuan tanpa membuka tab Produk TAP. */}
         {s.shop_id_count > 1 && (
@@ -190,8 +216,9 @@ const COLUMNS: TableColumn[] = [
     className: tdNum,
     cell: (s) => pct(s.avg_partner_commission_pct),
   },
-  // Ads Budget & Service Fee TIDAK lagi ada di tabel Produk TAP — tabel inilah
-  // satu-satunya tempat keduanya terbaca, jadi ikut preset "Ringkas".
+  // Ads Budget & Service Fee tidak ada di tabel Produk TAP maupun di kartu: nilainya
+  // nominal per (project, shop) yang dijumlah lintas project, dan tabel inilah
+  // satu-satunya tempat totalnya terbaca — jadi ikut preset "Ringkas".
   {
     label: "Ads Budget",
     compact: true,
@@ -299,13 +326,15 @@ const SORT: SortConfig<ShopSummaryRow> = {
 };
 
 /**
- * Tabel "Shop dari Produk TAP" di tab Deal Brand.
+ * Tabel "Shop" di tab Deal Brand.
  *
- * Isinya kolom yang sama dengan tabel Produk TAP, tapi DIRINGKAS per Shop Name:
- * satu baris per shop dengan jumlah kartu & campaign, total ads budget/service
- * fee/GMV, rata-rata harga & rate komisi, serta masa berlaku terjauh. Bentuk
- * barisnya sengaja sejajar dengan tabel Deal Brand (1 shop = 1 baris) supaya deal
- * baru (kartu produk) dan deal lama (brand_deals) bisa dibaca berdampingan.
+ * Isinya kolom yang sama dengan tabel Produk TAP, tapi DIRINGKAS per Shop Name: satu
+ * baris per shop dengan jumlah kartu & campaign, GMV, rata-rata harga & rate komisi,
+ * serta masa berlaku terjauh — plus Ads Budget & Service Fee yang datang dari tempat
+ * lain sama sekali: penjumlahan nominal per (project, shop) di tab Project BD.
+ *
+ * Shop yang deal-nya sudah terdaftar tapi kartu produknya belum ikut tampil di sini
+ * (bertanda "deal", 0 kartu), jadi satu tabel ini memuat deal baru maupun deal lama.
  *
  * Perilakunya mengikuti tabel Deal Brand: preset kolom "Ringkas", klik header untuk
  * urut naik → turun → urutan bawaan, paginasi 10/20/50/100 — semuanya client-side

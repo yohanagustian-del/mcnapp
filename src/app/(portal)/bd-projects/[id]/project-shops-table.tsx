@@ -8,9 +8,11 @@ import {
 import { ShopBudgetEditButton } from "./shop-budget-edit-button";
 
 /**
- * Satu shop anggota project — subset baris view products_tap_shop_summary yang
- * sudah diagregasi SQL. Komponen ini hanya menampilkan, mengurutkan, dan
- * memaginasi; tidak ada angka yang dihitung ulang di sini (CLAUDE.md #4).
+ * Satu shop anggota project. Kolom kartu (produk, campaign, komisi, GMV, exp date)
+ * datang dari view `deal_shop_summary` yang sudah diagregasi SQL; `ads_budget` &
+ * `service_fee` datang dari `bd_project_shop_budgets` untuk PROJECT INI (0046).
+ * Komponen ini hanya menampilkan, mengurutkan, dan memaginasi — tidak ada angka yang
+ * dihitung ulang di sini (CLAUDE.md #4).
  */
 export interface ProjectShopRow {
   shop_key: string;
@@ -87,10 +89,12 @@ const SORT: SortConfig<ProjectShopRow> = {
 export function ProjectShopsTable({
   rows,
   projectId,
+  projectName,
   canManage = false,
 }: {
   rows: ProjectShopRow[];
   projectId: string;
+  projectName?: string;
   /** BizDev/management: menampilkan tombol Edit Ads Budget & Service Fee per shop. */
   canManage?: boolean;
 }) {
@@ -127,7 +131,11 @@ export function ProjectShopsTable({
                 ))}
                 {canManage && (
                   <td className={`${td} whitespace-nowrap`}>
-                    <ShopBudgetEditButton shop={s} projectId={projectId} />
+                    <ShopBudgetEditButton
+                      shop={s}
+                      projectId={projectId}
+                      projectName={projectName}
+                    />
                   </td>
                 )}
               </tr>

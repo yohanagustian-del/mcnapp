@@ -11,7 +11,12 @@ import {
   uploadReportCreators,
 } from "@/lib/deals/report-actions";
 import { ReportTemplateButton } from "@/components/report-template-button";
-import { PROJECT_STATUS_LABEL, sumProjectShops, type ProjectShopMetrics } from "@/lib/deals/bd-project";
+import {
+  PAYMENT_STATUS_LABEL,
+  PROJECT_STATUS_LABEL,
+  sumProjectShops,
+  type ProjectShopMetrics,
+} from "@/lib/deals/bd-project";
 import { ProjectFormButton, type ShopOption } from "../project-form-button";
 import { DeleteProjectButton } from "./delete-project-button";
 import { ProjectShopsTable, type ProjectShopRow } from "./project-shops-table";
@@ -59,7 +64,7 @@ export default async function BdProjectDetailPage({
 
   const { data: project } = await supabase
     .from("bd_projects")
-    .select("id, name, status, notes, created_by, created_at")
+    .select("id, name, status, status_payment, notes, created_by, created_at")
     .eq("id", id)
     .maybeSingle();
   if (!project) notFound();
@@ -70,17 +75,41 @@ export default async function BdProjectDetailPage({
     .eq("project_id", id);
   const shopKeys = (links ?? []).map((l) => l.shop_key as string);
 
-  // Semua shop katalog tetap diambil: dipakai form Edit project (pilihan shop),
-  // sekaligus jadi sumber ringkasan shop anggota project.
-  const [{ data: allShops }, { data: sessions }, { data: proposals }, { data: memberRows }] =
-    await Promise.all([
+  // Dua bacaan shop yang berbeda tujuan:
+  //  - `memberShops`: ringkasan shop ANGGOTA project, difilter di SQL lewat shop_key.
+  //    Sengaja bukan hasil saring dari daftar 500 shop di bawah: shop yang belum punya
+  //    kartu (deal saja) berada di ekor urutan itu dan bisa terpotong batas — anggota
+  //    project akan terbaca "tidak ditemukan" hanya karena daftarnya kepanjangan.
+  //  - `allShops`: pilihan shop untuk form Edit Project (perlu daftar luas).
+  const [
+    { data: memberShops },
+    { data: allShops },
+    { data: shopBudgets },
+    { data: sessions },
+    { data: proposals },
+    { data: memberRows },
+  ] = await Promise.all([
+      shopKeys.length
+        ? supabase
+            .from("deal_shop_summary")
+            .select(
+              "shop_key, shop_name, shop_id, product_count, active_count, needs_review_count, campaign_count, gmv_tap, avg_commission_pct, effective_start, effective_end"
+            )
+            .in("shop_key", shopKeys)
+        : Promise.resolve({ data: [] as Record<string, unknown>[] }),
       supabase
-        .from("products_tap_shop_summary")
-        .select(
-          "shop_key, shop_name, shop_id, product_count, active_count, needs_review_count, campaign_count, ads_budget, service_fee, gmv_tap, avg_commission_pct, effective_start, effective_end"
-        )
+        .from("deal_shop_summary")
+        .select("shop_key, shop_name, shop_id, product_count")
         .order("product_count", { ascending: false })
+        .order("deal_count", { ascending: false })
+        .order("shop_key", { ascending: true })
         .limit(500),
+      // Ads Budget & Service Fee milik pasangan (project, shop) — dibaca khusus untuk
+      // project ini, BUKAN dari view shop yang menjumlahkannya lintas project (0046).
+      supabase
+        .from("bd_project_shop_budgets")
+        .select("shop_key, ads_budget, service_fee")
+        .eq("project_id", id),
       supabase
         .from("deal_live_sessions")
         .select("id, creator_name, session_date, event, support_ads, ads_spend_usd, ads_spend_idr, ss_link, gmv, roas")
@@ -103,10 +132,16 @@ export default async function BdProjectDetailPage({
     product_count: numeric(s.product_count) ?? 0,
   }));
 
-  const keySet = new Set(shopKeys);
-  const shops = (allShops ?? [])
-    .filter((s) => keySet.has(s.shop_key as string))
-    .map((s) => ({
+  // Nominal per shop untuk project INI saja. Shop yang belum diisi tidak punya baris
+  // → null, yang tampil sebagai "—" (bukan 0: "belum diisi" ≠ "nol").
+  const budgetByShop = new Map(
+    (shopBudgets ?? []).map((b) => [
+      b.shop_key as string,
+      { ads_budget: numeric(b.ads_budget), service_fee: numeric(b.service_fee) },
+    ])
+  );
+
+  const shops = (memberShops ?? []).map((s) => ({
       shop_key: s.shop_key as string,
       shop_name: (s.shop_name as string | null) ?? null,
       shop_id: (s.shop_id as string | null) ?? null,
@@ -114,8 +149,8 @@ export default async function BdProjectDetailPage({
       active_count: numeric(s.active_count) ?? 0,
       needs_review_count: numeric(s.needs_review_count) ?? 0,
       campaign_count: numeric(s.campaign_count) ?? 0,
-      ads_budget: numeric(s.ads_budget),
-      service_fee: numeric(s.service_fee),
+      ads_budget: budgetByShop.get(s.shop_key as string)?.ads_budget ?? null,
+      service_fee: budgetByShop.get(s.shop_key as string)?.service_fee ?? null,
       gmv_tap: numeric(s.gmv_tap),
       avg_commission_pct: numeric(s.avg_commission_pct),
       effective_start: (s.effective_start as string | null) ?? null,
@@ -131,7 +166,7 @@ export default async function BdProjectDetailPage({
       ? supabase
           .from("products_tap")
           .select(
-            "campaign_id, product_id, product_name, product_link, shop_name, shop_id, price, commission_pct, partner_commission_pct, effective_end, campaign_type, ads_budget, service_fee, active, needs_review"
+            "campaign_id, product_id, product_name, product_link, shop_name, shop_id, price, commission_pct, partner_commission_pct, effective_end, campaign_type, active, needs_review"
           )
           .in("shop_key", shopKeys)
           .order("shop_name", { ascending: true })
@@ -158,8 +193,6 @@ export default async function BdProjectDetailPage({
     commission_pct: numeric(p.commission_pct),
     partner_commission_pct: numeric(p.partner_commission_pct),
     campaign_type: (p.campaign_type as string | null) ?? null,
-    ads_budget: numeric(p.ads_budget),
-    service_fee: numeric(p.service_fee),
     effective_end: (p.effective_end as string | null) ?? null,
     needs_review: p.needs_review === true,
     selected: pickedKeys.has(`${(p.campaign_id as string) ?? "-"}|${p.product_id as string}`),
@@ -195,6 +228,7 @@ export default async function BdProjectDetailPage({
     ["Mulai", totals.effective_start ?? "—"],
     ["Exp Date", totals.effective_end ?? "—"],
     ["Status", PROJECT_STATUS_LABEL[project.status ?? ""] ?? "—"],
+    ["Status Payment", PAYMENT_STATUS_LABEL[project.status_payment ?? ""] ?? "—"],
     ["Dibuat oleh", memberNameById.get((project.created_by as string) ?? "") ?? "—"],
     ["Dibuat", (project.created_at as string | null)?.slice(0, 10) ?? "—"],
     ["Perlu Review", String(totals.needs_review_count)],
@@ -219,6 +253,7 @@ export default async function BdProjectDetailPage({
                 id: project.id as string,
                 name: project.name as string,
                 status: (project.status as string | null) ?? "running",
+                status_payment: (project.status_payment as string | null) ?? null,
                 notes: (project.notes as string | null) ?? null,
                 shop_keys: shopKeys,
               }}
@@ -243,13 +278,16 @@ export default async function BdProjectDetailPage({
         ))}
       </div>
       <p className="mt-2 text-xs text-slate-400">
-        Semua angka di atas dibaca dari kartu <strong>Produk TAP</strong> milik shop project ini —
-        tidak ada yang disimpan di project. Perbaiki kartunya, angka di sini ikut benar.
+        Jumlah kartu, campaign, GMV, dan masa berlaku dibaca dari kartu{" "}
+        <strong>Produk TAP</strong> milik shop project ini — perbaiki kartunya, angka di sini ikut
+        benar. <strong>Ads Budget</strong> &amp; <strong>Service Fee</strong> adalah angka{" "}
+        <strong>project ini saja</strong>: diisi lewat tombol Edit di tabel Shop di bawah, dan shop
+        yang sama di project lain punya angkanya sendiri.
       </p>
 
       {missingKeys.length > 0 && (
         <p className="mt-3 rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
-          {missingKeys.length} shop tidak ditemukan lagi di katalog Produk TAP (
+          {missingKeys.length} shop tidak ditemukan lagi (
           {missingKeys.slice(0, 3).join(", ")}
           {missingKeys.length > 3 ? ", …" : ""}). Biasanya Shop Name-nya diubah — pilih ulang
           shopnya lewat <strong>Edit Project</strong>.
@@ -264,7 +302,9 @@ export default async function BdProjectDetailPage({
           <>
             {" "}
             Tombol <strong>Edit</strong> di tiap baris mengatur <strong>Ads Budget</strong> &amp;{" "}
-            <strong>Service Fee</strong> shop itu (total per shop, disimpan ke kartu Produk TAP-nya).
+            <strong>Service Fee</strong> shop itu <strong>khusus untuk project ini</strong> — shop
+            yang sama di project lain tidak terpengaruh. Di tab Deal Brand, kolom yang sama
+            menampilkan totalnya lintas project.
           </>
         )}
       </p>
@@ -272,6 +312,7 @@ export default async function BdProjectDetailPage({
         <ProjectShopsTable
           rows={shops as ProjectShopRow[]}
           projectId={project.id as string}
+          projectName={project.name as string}
           canManage={canManage}
         />
       </div>

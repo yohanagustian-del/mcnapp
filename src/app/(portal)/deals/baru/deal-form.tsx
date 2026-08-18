@@ -1,12 +1,7 @@
 "use client";
 
-import { useActionState, useState } from "react";
+import { useActionState } from "react";
 import { registerDealCard, type DealFormState } from "../actions";
-import {
-  CAMPAIGN_TYPES,
-  CAMPAIGN_TYPE_NEEDS_BUDGET,
-  CAMPAIGN_TYPE_NEEDS_BUDGET_LABEL,
-} from "@/lib/deals/campaign-type";
 
 export interface MemberOption {
   id: string;
@@ -16,15 +11,17 @@ export interface MemberOption {
 }
 
 /**
- * Form Registrasi Deal = kartu produk untuk tab Produk TAP.
+ * Form Registrasi Deal.
  *
  * Pertanyaannya sengaja memakai nama kolom export TAP "Export link" persis seperti
  * yang tampil di tabel Produk TAP, supaya BizDev bisa menyalin isian langsung dari
  * file/room campaign tanpa menerjemahkan istilah.
  *
- * Semua pertanyaan opsional. Satu-satunya yang bisa jadi wajib adalah Ads Budget &
- * Service Fee, dan hanya saat Tipe Campaign = Paid Campaign — aturan yang sama
- * divalidasi ulang di server lewat productCardIssues, bukan hanya di sini.
+ * SEMUA pertanyaan opsional, dan tujuan simpannya ditentukan server dari isian yang
+ * ada (lihat productCardTarget): ada Product Name / Product ID → kartu produk di tab
+ * Produk TAP; belum ada keduanya tapi Shop Name terisi → deal shop di tab Deal Brand.
+ * Tipe Campaign, Ads Budget & Service Fee tidak ditanyakan di sini — kedua nominal itu
+ * milik pasangan (project, shop) dan diisi di tab Project BD.
  */
 export function DealForm({
   picOptions,
@@ -37,10 +34,8 @@ export function DealForm({
     registerDealCard,
     null
   );
-  const [campaignType, setCampaignType] = useState("");
 
   const err = (field: string) => state?.fieldErrors?.[field];
-  const needsBudget = campaignType === CAMPAIGN_TYPE_NEEDS_BUDGET;
 
   const dealByGroups = [...new Set(dealByOptions.map((o) => o.group ?? ""))];
 
@@ -106,21 +101,6 @@ export function DealForm({
       </Field>
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-        <Field label="Tipe Campaign" error={err("campaign_type")}>
-          <select
-            name="campaign_type"
-            value={campaignType}
-            onChange={(e) => setCampaignType(e.target.value)}
-            className={inputCls}
-          >
-            <option value="">Pilih tipe campaign…</option>
-            {CAMPAIGN_TYPES.map((t) => (
-              <option key={t.value} value={t.value}>
-                {t.label}
-              </option>
-            ))}
-          </select>
-        </Field>
         <Field label="Deal by" error={err("deal_by")}>
           <select name="deal_by" defaultValue="" className={inputCls}>
             <option value="">Pilih nama…</option>
@@ -137,46 +117,31 @@ export function DealForm({
             ))}
           </select>
         </Field>
+        <Field label="PIC TAP" error={err("pic_tap")}>
+          <select name="pic_tap" defaultValue="" className={inputCls}>
+            <option value="">Pilih PIC…</option>
+            {picOptions.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.name}
+              </option>
+            ))}
+          </select>
+        </Field>
       </div>
-
-      {/* Ads Budget & Service Fee hanya relevan untuk campaign berbayar — pertanyaannya
-          tidak dirender sama sekali di tipe lain, jadi nilainya tidak ikut terkirim. */}
-      {needsBudget && (
-        <fieldset className="rounded-md border border-amber-200 bg-amber-50 p-4">
-          <legend className="px-1 text-sm font-medium">
-            Wajib untuk {CAMPAIGN_TYPE_NEEDS_BUDGET_LABEL}
-          </legend>
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-            <Field label="Ads Budget (Rp, angka murni) *" error={err("ads_budget")}>
-              <input name="ads_budget" type="number" min="0" required className={inputCls} placeholder="50000000" />
-            </Field>
-            <Field label="Service Fee (Rp, angka murni) *" error={err("service_fee")}>
-              <input name="service_fee" type="number" min="0" required className={inputCls} placeholder="5000000" />
-            </Field>
-          </div>
-        </fieldset>
-      )}
-
-      <Field label="PIC TAP" error={err("pic_tap")}>
-        <select name="pic_tap" defaultValue="" className={inputCls}>
-          <option value="">Pilih PIC…</option>
-          {picOptions.map((p) => (
-            <option key={p.id} value={p.id}>
-              {p.name}
-            </option>
-          ))}
-        </select>
-      </Field>
 
       <p className="rounded-md bg-slate-50 p-3 text-xs text-slate-500">
         <strong>Semua isian opsional</strong> — isi yang sudah diketahui saja, sisanya boleh
-        menyusul lewat tombol Edit di tab Produk TAP (kecuali Ads Budget &amp; Service Fee yang
-        wajib untuk {CAMPAIGN_TYPE_NEEDS_BUDGET_LABEL}). Minimal satu kolom harus terisi supaya
-        kartunya bisa dikenali. Kolom <strong>Nama BD</strong> terisi otomatis dari akun Anda, dan{" "}
-        <strong>Segmen Harga</strong> dihitung server dari Sale Price memakai threshold app_config.
-        Kartu tanpa <strong>Product ID</strong> atau tanpa <strong>Product Name</strong> tetap
-        tersimpan, tapi ditandai &ldquo;perlu review&rdquo;: tanpa Product ID kartunya tidak bisa
-        dicocokkan dengan data TAP mingguan, tanpa nama sulit dikenali di tabel.
+        menyusul lewat tombol Edit. Minimal satu kolom harus terisi.{" "}
+        <strong>Isi Product Name / Product ID</strong> kalau produknya sudah jelas: kartunya masuk
+        tab <strong>Produk TAP</strong> (tanpa Product ID dipakai ID internal dan ditandai
+        &ldquo;perlu review&rdquo; karena kartunya tak bisa dicocokkan ke data TAP mingguan; tanpa
+        nama juga ditandai karena sulit dikenali di tabel).{" "}
+        <strong>Kalau produknya belum diketahui</strong>, cukup isi <strong>Shop Name</strong> —
+        deal-nya dicatat sebagai shop di tab <strong>Deal Brand</strong> dan belum menambah kartu
+        apa pun di Produk TAP. Kolom <strong>Nama BD</strong> terisi otomatis dari akun Anda, dan{" "}
+        <strong>Segmen Harga</strong> dihitung server dari Sale Price memakai threshold app_config.{" "}
+        <strong>Ads Budget</strong> &amp; <strong>Service Fee</strong> diisi per shop di dalam
+        project (tab <strong>Project BD</strong>).
       </p>
 
       <button

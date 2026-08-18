@@ -68,7 +68,7 @@ export async function updateProduct(
     const { data: before } = await admin
       .from("products_tap")
       .select(
-        "product_id, campaign_id, product_name, shop_id, shop_name, level1_category, level2_category, price, price_segment, commission_pct, commission_note, partner_commission_pct, product_link, active, needs_review, campaign_type, ads_budget, service_fee, deal_by, pic_tap, uploaded_by"
+        "product_id, campaign_id, product_name, shop_id, shop_name, level1_category, level2_category, price, price_segment, commission_pct, commission_note, partner_commission_pct, product_link, active, needs_review, campaign_type, deal_by, pic_tap, uploaded_by"
       )
       .eq("product_id", productId)
       .eq("campaign_id", campaignId)

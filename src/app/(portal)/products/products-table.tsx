@@ -48,8 +48,6 @@ export interface ProductRow {
   effective_end: string | null;
   /** Dimensi kartu deal (form Registrasi Deal) — tidak ada di export platform. */
   campaign_type: string | null;
-  ads_budget: number | null;
-  service_fee: number | null;
   deal_by: string | null;
   deal_by_name: string | null;
   pic_tap: string | null;

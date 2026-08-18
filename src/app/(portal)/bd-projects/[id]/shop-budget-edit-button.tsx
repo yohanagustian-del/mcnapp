@@ -8,20 +8,25 @@ import type { ProjectShopRow } from "./project-shops-table";
 const inputCls = "mt-1 w-full rounded-md border border-slate-300 px-2 py-1.5 text-sm";
 
 /**
- * Modal Edit Ads Budget & Service Fee untuk satu shop dalam project.
+ * Modal Edit Ads Budget & Service Fee untuk satu shop DALAM satu project.
  *
- * Nilai yang diketik di sini adalah TOTAL per shop. Ads Budget & Service Fee fisiknya
- * kolom per-kartu di products_tap yang dijumlah per shop, jadi server menaruh nilai
- * penuh di satu kartu dan menol-kan sisanya supaya totalnya pas (lihat
- * planShopBudgetEdit). Inilah satu-satunya tempat kedua nominal ini diisi dari tabel
- * ringkasan shop — tab Produk TAP & tab Deal Brand tidak lagi menyentuhnya.
+ * Nilai yang diketik di sini hanya berlaku untuk pasangan (project ini, shop ini):
+ * barisnya disimpan di bd_project_shop_budgets, jadi shop yang sama di project lain
+ * tidak ikut berubah (migrasi 0046). Tabel shop di tab Deal Brand menampilkan JUMLAH
+ * nominal ini lintas project.
+ *
+ * Inilah satu-satunya tempat kedua nominal ini diisi: form Registrasi Deal, upload
+ * deal, tab Produk TAP, dan form Edit shop di tab Deal Brand tidak menyentuhnya.
  */
 export function ShopBudgetEditButton({
   shop,
   projectId,
+  projectName,
 }: {
   shop: ProjectShopRow;
   projectId: string;
+  /** Dipakai di judul modal supaya jelas nominalnya milik project yang mana. */
+  projectName?: string;
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -60,15 +65,18 @@ export function ShopBudgetEditButton({
           className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/40 p-4"
           role="dialog"
           aria-modal="true"
-          aria-label={`Edit nominal shop ${shopLabel}`}
+          aria-label={`Edit nominal shop ${shopLabel} di project ${projectName ?? projectId}`}
         >
           <div className="my-8 w-full max-w-md rounded-lg bg-white p-5 shadow-xl">
             <h2 className="text-base font-semibold text-slate-900">Edit Ads Budget &amp; Service Fee</h2>
-            <p className="mt-1 text-sm text-slate-600">{shopLabel}</p>
+            <p className="mt-1 text-sm text-slate-600">
+              {shopLabel} <span className="text-slate-400">·</span> project{" "}
+              <strong>{projectName ?? projectId}</strong>
+            </p>
             <p className="mt-1 text-xs text-slate-400">
-              Angka di bawah adalah <strong>total untuk shop ini</strong>. Disimpan ke{" "}
-              <strong>{shop.product_count} kartu produk</strong> shop supaya totalnya pas. Kosongkan
-              salah satu kolom = jangan ubah kolom itu.
+              Angka di bawah hanya berlaku untuk <strong>shop ini di project ini</strong> — shop yang
+              sama di project lain punya angkanya sendiri, dan tab Deal Brand menampilkan totalnya.
+              Kosongkan salah satu kolom = jangan ubah kolom itu.
             </p>
 
             <form action={formAction} className="mt-4">

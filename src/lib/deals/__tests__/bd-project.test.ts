@@ -1,18 +1,13 @@
 import { describe, expect, it } from "vitest";
 import {
   bdProjectSchema,
+  mergeShopBudget,
   parseShopKeys,
-  planShopBudgetEdit,
+  PAYMENT_STATUS_LABEL,
   PROJECT_STATUS_LABEL,
   sumProjectShops,
   type ProjectShopMetrics,
-  type ShopBudgetCardRow,
 } from "@/lib/deals/bd-project";
-
-/** Kartu produk apa adanya dari products_tap (subset yang menentukan hasil). */
-function budgetCard(over: Partial<ShopBudgetCardRow> = {}): ShopBudgetCardRow {
-  return { campaign_id: "-", product_id: "1", ads_budget: null, service_fee: null, ...over };
-}
 
 function shop(over: Partial<ProjectShopMetrics> = {}): ProjectShopMetrics {
   return {
@@ -49,6 +44,26 @@ describe("form Project BD", () => {
     expect(PROJECT_STATUS_LABEL.hold).toBe("Hold");
     expect(PROJECT_STATUS_LABEL.done).toBe("Done");
     expect(bdProjectSchema.safeParse({ name: "X", status: "batal" }).success).toBe(false);
+  });
+
+  it("status payment opsional, dengan tiga pilihan yang dipakai dropdown", () => {
+    // Tidak diisi = belum diketahui, bukan salah satu status dipaksakan.
+    expect(bdProjectSchema.parse({ name: "X" }).status_payment).toBeUndefined();
+    expect(bdProjectSchema.parse({ name: "X", status_payment: "" }).status_payment).toBeUndefined();
+
+    expect(bdProjectSchema.parse({ name: "X", status_payment: "done" }).status_payment).toBe("done");
+    expect(
+      bdProjectSchema.parse({ name: "X", status_payment: "proses_finance_payment" }).status_payment
+    ).toBe("proses_finance_payment");
+    expect(
+      bdProjectSchema.parse({ name: "X", status_payment: "proses_finance_brand" }).status_payment
+    ).toBe("proses_finance_brand");
+
+    expect(PAYMENT_STATUS_LABEL.done).toBe("Done");
+    expect(PAYMENT_STATUS_LABEL.proses_finance_payment).toBe("Proses Finance Payment");
+    expect(PAYMENT_STATUS_LABEL.proses_finance_brand).toBe("Proses Finance Brand");
+
+    expect(bdProjectSchema.safeParse({ name: "X", status_payment: "lunas" }).success).toBe(false);
   });
 });
 
@@ -125,72 +140,42 @@ describe("total project = penjumlahan ringkasan shop", () => {
   });
 });
 
-describe("edit Ads Budget & Service Fee per shop (tab Project BD)", () => {
-  it("total shop ditaruh di kartu pertama, kartu lain dinol-kan supaya penjumlahan pas", () => {
-    const rows = [
-      budgetCard({ product_id: "1" }),
-      budgetCard({ product_id: "2" }),
-      budgetCard({ product_id: "3" }),
-    ];
-    const updates = planShopBudgetEdit(rows, { ads_budget: 50_000_000, service_fee: 5_000_000 });
-
-    // Kartu pertama menampung nilai penuh; kartu lain 0 (null → 0 tidak ditulis ulang).
-    expect(updates).toEqual([
-      {
-        campaign_id: "-",
-        product_id: "1",
-        patch: { ads_budget: 50_000_000, service_fee: 5_000_000 },
-      },
-    ]);
-    // Jumlah kolom setelah edit = 50jt + 0 + 0 = tepat 50jt.
-  });
-
-  it("nilai lama dipindah/dinol-kan supaya total baru pas (tidak berlipat)", () => {
-    const rows = [
-      budgetCard({ product_id: "1", ads_budget: 10_000_000 }),
-      budgetCard({ product_id: "2", ads_budget: 10_000_000 }),
-    ];
-    const updates = planShopBudgetEdit(rows, { ads_budget: 60_000_000 });
-
-    expect(updates).toEqual([
-      { campaign_id: "-", product_id: "1", patch: { ads_budget: 60_000_000 } },
-      { campaign_id: "-", product_id: "2", patch: { ads_budget: 0 } },
-    ]);
-  });
-
-  it("kolom yang tidak diisi (undefined) tidak disentuh", () => {
-    const rows = [budgetCard({ ads_budget: 10_000_000, service_fee: 1_000_000 })];
-    const updates = planShopBudgetEdit(rows, { service_fee: 2_000_000 });
-
-    expect(updates).toEqual([{ campaign_id: "-", product_id: "1", patch: { service_fee: 2_000_000 } }]);
-  });
-
-  it("nilai sama dengan total sekarang = tidak ada perubahan (tidak restrukturisasi)", () => {
-    const rows = [
-      budgetCard({ product_id: "1", ads_budget: 30_000_000 }),
-      budgetCard({ product_id: "2", ads_budget: 20_000_000 }),
-    ];
-    // Total sekarang 50jt; mengetik 50jt lagi tidak boleh memindah nilai antar kartu.
-    expect(planShopBudgetEdit(rows, { ads_budget: 50_000_000 })).toEqual([]);
-  });
-
-  it("0 adalah nilai sah — mengosongkan total shop", () => {
-    const rows = [budgetCard({ product_id: "1", ads_budget: 30_000_000 })];
-    const updates = planShopBudgetEdit(rows, { ads_budget: 0 });
-    expect(updates).toEqual([{ campaign_id: "-", product_id: "1", patch: { ads_budget: 0 } }]);
-  });
-
-  it("urutan kartu stabil (campaign_id lalu product_id) menentukan kartu pertama", () => {
-    const rows = [
-      budgetCard({ campaign_id: "CMP-2", product_id: "1" }),
-      budgetCard({ campaign_id: "CMP-1", product_id: "9" }),
-    ];
-    const updates = planShopBudgetEdit(rows, { ads_budget: 40_000_000 });
-    // CMP-1 < CMP-2 → kartu CMP-1/9 jadi penampung nilai penuh.
-    expect(updates).toContainEqual({
-      campaign_id: "CMP-1",
-      product_id: "9",
-      patch: { ads_budget: 40_000_000 },
+describe("edit Ads Budget & Service Fee per (project, shop)", () => {
+  it("nominal shop yang belum pernah diisi = baris baru", () => {
+    expect(mergeShopBudget(null, { ads_budget: 212_212, service_fee: 1_231 })).toEqual({
+      ads_budget: 212_212,
+      service_fee: 1_231,
     });
+  });
+
+  it("kolom yang dikosongkan di form mempertahankan nilai tersimpan", () => {
+    const existing = { ads_budget: 212_212, service_fee: 1_231 };
+    // Hanya Service Fee yang diisi → Ads Budget project ini tidak ikut berubah.
+    expect(mergeShopBudget(existing, { service_fee: 2_000 })).toEqual({
+      ads_budget: 212_212,
+      service_fee: 2_000,
+    });
+  });
+
+  it("0 adalah nilai sah, berbeda artinya dari kosong", () => {
+    expect(mergeShopBudget({ ads_budget: 30_000_000, service_fee: null }, { ads_budget: 0 })).toEqual({
+      ads_budget: 0,
+      service_fee: null,
+    });
+  });
+
+  it("nilai yang sama dengan yang tersimpan = tidak ada perubahan (tidak ditulis & tidak di-audit)", () => {
+    const existing = { ads_budget: 212_212, service_fee: 1_231 };
+    expect(mergeShopBudget(existing, { ads_budget: 212_212, service_fee: 1_231 })).toBeNull();
+    expect(mergeShopBudget(existing, { ads_budget: 212_212 })).toBeNull();
+    expect(mergeShopBudget(null, {})).toBeNull();
+  });
+
+  it("hasilnya cuma nominal — tidak ada kartu produk yang ikut ditulis", () => {
+    // Inti perubahan 0046: nominal punya barisnya sendiri per (project, shop), jadi
+    // shop yang sama di project lain tidak mungkin ikut terbawa. Yang dikembalikan
+    // fungsi ini hanya dua angka, bukan daftar kartu yang harus dinol-kan.
+    const merged = mergeShopBudget(null, { ads_budget: 1_000 });
+    expect(Object.keys(merged ?? {}).sort()).toEqual(["ads_budget", "service_fee"]);
   });
 });

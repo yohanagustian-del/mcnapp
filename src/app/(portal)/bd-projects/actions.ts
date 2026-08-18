@@ -8,14 +8,12 @@ import { genId } from "@/lib/utils/id";
 import { parseRupiah } from "@/lib/utils/rupiah";
 import {
   bdProjectSchema,
+  mergeShopBudget,
   parseShopKeys,
-  planShopBudgetEdit,
   PROJECT_PRODUCT_LIMIT,
   PROJECT_SHOP_LIMIT,
-  SHOP_BUDGET_CARD_LIMIT,
-  type ShopBudgetCardRow,
 } from "@/lib/deals/bd-project";
-import { groupKeysByCampaign, parseProductRowKeys } from "@/lib/m10/product-keys";
+import { parseProductRowKeys } from "@/lib/m10/product-keys";
 
 export interface ProjectFormState {
   ok: boolean;
@@ -32,9 +30,11 @@ export interface ProjectFormState {
  * `project_id` = mengubah. Aturannya identik, dan memisahkannya jadi dua action
  * berarti dua salinan validasi yang bisa berbeda diam-diam.
  *
- * Yang disimpan cuma nama, status, catatan, dan DAFTAR SHOP-nya (shop_key). Semua
- * angka project — jumlah kartu, ads budget, GMV — tidak pernah disalin ke sini;
- * halaman detail membacanya dari products_tap (CLAUDE.md #4).
+ * Yang disimpan cuma nama, status, status payment, catatan, dan DAFTAR SHOP-nya
+ * (shop_key). Angka yang dibaca dari sumber lain — jumlah kartu, GMV, masa berlaku —
+ * tidak pernah disalin ke sini (CLAUDE.md #4). Ads Budget & Service Fee memang
+ * disimpan per project, tapi di tabelnya sendiri (`bd_project_shop_budgets`) lewat
+ * updateProjectShopBudget, bukan di baris project ini.
  *
  * Menulis lewat admin client karena RLS bd_projects = baca saja untuk authenticated
  * (0044); izinnya ditegakkan server lewat requirePermission.
@@ -62,7 +62,7 @@ export async function saveBdProject(
   if (shopKeys.length === 0) {
     return {
       ok: false,
-      message: "Pilih minimal satu brand / shop dari tabel Shop dari Produk TAP.",
+      message: "Pilih minimal satu brand / shop dari tabel Shop di tab Deal Brand.",
       fieldErrors: { shop_keys: "Pilih minimal satu shop" },
     };
   }
@@ -76,10 +76,13 @@ export async function saveBdProject(
 
   const admin = createAdminClient();
 
-  // Shop yang dipilih harus benar-benar ada di katalog: kunci karangan (atau shop
-  // yang keburu berganti nama) akan jadi anggota project yang tak pernah muncul.
+  // Shop yang dipilih harus benar-benar ada: kunci karangan (atau shop yang keburu
+  // berganti nama) akan jadi anggota project yang tak pernah muncul. Diperiksa lewat
+  // view yang sama dengan tabel shop di tab Deal Brand — bukan langsung ke
+  // products_tap — supaya shop yang deal-nya sudah terdaftar tapi kartu produknya
+  // belum (Registrasi Deal berisi Shop Name saja) juga bisa dimasukkan ke project.
   const { data: known, error: knownError } = await admin
-    .from("products_tap")
+    .from("deal_shop_summary")
     .select("shop_key")
     .in("shop_key", shopKeys);
   if (knownError) return { ok: false, message: `Gagal memeriksa daftar shop: ${knownError.message}` };
@@ -88,7 +91,7 @@ export async function saveBdProject(
   if (unknown.length > 0) {
     return {
       ok: false,
-      message: `Shop tidak ditemukan di katalog Produk TAP: ${unknown.slice(0, 3).join(", ")}${unknown.length > 3 ? ` (+${unknown.length - 3})` : ""}.`,
+      message: `Shop tidak ditemukan: ${unknown.slice(0, 3).join(", ")}${unknown.length > 3 ? ` (+${unknown.length - 3})` : ""}.`,
       fieldErrors: { shop_keys: "Ada shop yang tidak dikenali" },
     };
   }
@@ -99,6 +102,7 @@ export async function saveBdProject(
   const record = {
     name: d.name,
     status: d.status,
+    status_payment: d.status_payment ?? null,
     notes: d.notes ?? null,
     updated_at: new Date().toISOString(),
   };
@@ -112,7 +116,7 @@ export async function saveBdProject(
   } else {
     const { data: existing } = await admin
       .from("bd_projects")
-      .select("id, name, status, notes")
+      .select("id, name, status, status_payment, notes")
       .eq("id", projectId)
       .maybeSingle();
     if (!existing) return { ok: false, message: `Project ${projectId} tidak ditemukan.` };
@@ -122,25 +126,63 @@ export async function saveBdProject(
     if (error) return { ok: false, message: `Gagal menyimpan project: ${error.message}` };
   }
 
-  // Daftar shop ditulis ulang utuh: form mengirim keadaan akhir yang diinginkan,
-  // jadi menghitung selisih tambah/hapus hanya menambah jalan yang bisa salah.
-  const { error: clearError } = await admin
+  // Daftar shop disinkron sebagai SELISIH — hapus yang keluar, tambah yang masuk —
+  // bukan hapus-seluruhnya-lalu-tulis-ulang. Sejak 0046 nominal per shop (ads budget
+  // & service fee) menempel ke pasangan (project, shop) dengan FK on delete cascade,
+  // jadi menghapus seluruh daftar dulu akan menghapus SEMUA nominal project setiap
+  // kali namanya diubah.
+  const { data: currentShops, error: currentError } = await admin
     .from("bd_project_shops")
-    .delete()
+    .select("shop_key")
     .eq("project_id", projectId);
-  if (clearError) return { ok: false, message: `Gagal menyimpan daftar shop: ${clearError.message}` };
-  const { error: shopError } = await admin
-    .from("bd_project_shops")
-    .insert(shopKeys.map((shop_key) => ({ project_id: projectId, shop_key })));
-  if (shopError) return { ok: false, message: `Gagal menyimpan daftar shop: ${shopError.message}` };
+  if (currentError) {
+    return { ok: false, message: `Gagal membaca daftar shop: ${currentError.message}` };
+  }
+  const currentKeys = (currentShops ?? []).map((r) => r.shop_key as string);
+  const wanted = new Set(shopKeys);
+  const removed = currentKeys.filter((k) => !wanted.has(k));
+  const added = shopKeys.filter((k) => !currentKeys.includes(k));
+
+  // Nominal shop yang dikeluarkan ikut hilang (cascade). Isinya dibaca lebih dulu
+  // supaya angkanya tetap ada di audit_logs — satu-satunya jalan pulih kalau shopnya
+  // ternyata dikeluarkan karena salah klik (CLAUDE.md #2).
+  let removedBudgets: unknown[] = [];
+  if (removed.length > 0) {
+    const { data: doomed } = await admin
+      .from("bd_project_shop_budgets")
+      .select("shop_key, ads_budget, service_fee")
+      .eq("project_id", projectId)
+      .in("shop_key", removed);
+    removedBudgets = doomed ?? [];
+
+    const { error: removeError } = await admin
+      .from("bd_project_shops")
+      .delete()
+      .eq("project_id", projectId)
+      .in("shop_key", removed);
+    if (removeError) {
+      return { ok: false, message: `Gagal menyimpan daftar shop: ${removeError.message}` };
+    }
+  }
+  if (added.length > 0) {
+    const { error: addError } = await admin
+      .from("bd_project_shops")
+      .insert(added.map((shop_key) => ({ project_id: projectId, shop_key })));
+    if (addError) return { ok: false, message: `Gagal menyimpan daftar shop: ${addError.message}` };
+  }
 
   await writeAudit({
     actorId: actor.id,
     action: isNew ? "bd_project.create" : "bd_project.update",
     entityType: "bd_projects",
     entityId: projectId,
-    before,
-    after: { id: projectId, ...record, shop_keys: shopKeys },
+    before: isNew ? null : { project: before, shop_keys: currentKeys },
+    after: {
+      id: projectId,
+      ...record,
+      shop_keys: shopKeys,
+      ...(removed.length > 0 ? { shops_removed: removed, budgets_removed: removedBudgets } : {}),
+    },
     // Menyusun pengelompokan tidak mengubah data deal mana pun → auto berlaku,
     // tetap ter-log lengkap (CLAUDE.md #2).
     type: "auto",
@@ -148,11 +190,16 @@ export async function saveBdProject(
 
   revalidatePath("/bd-projects");
   revalidatePath(`/bd-projects/${projectId}`);
+  // Nominal shop yang ikut terhapus mengubah total shop di tab Deal Brand.
+  if (removed.length > 0) revalidatePath("/deals");
   return {
     ok: true,
     message: isNew
       ? `Project "${d.name}" tersimpan dengan ${shopKeys.length} shop.`
-      : `Project ${projectId} diperbarui (${shopKeys.length} shop).`,
+      : `Project ${projectId} diperbarui (${shopKeys.length} shop).` +
+        (removedBudgets.length > 0
+          ? ` ${removedBudgets.length} shop yang dikeluarkan ikut kehilangan Ads Budget & Service Fee-nya (nilainya tercatat di audit log).`
+          : ""),
     projectId,
   };
 }
@@ -256,18 +303,18 @@ export async function setProjectProducts(
 }
 
 /**
- * Simpan Ads Budget & Service Fee satu shop dari tab Project BD.
+ * Simpan Ads Budget & Service Fee satu shop DALAM satu project (tab Project BD).
  *
- * Keduanya nominal per deal yang fisiknya kolom per-kartu di products_tap dan
- * DIJUMLAH per shop oleh view ringkasan (CLAUDE.md #6). Form ini menerima satu nilai
- * TOTAL per shop; `planShopBudgetEdit` menaruh nilai penuh di satu kartu dan menol-kan
- * sisanya supaya penjumlahan view pas dengan angka yang diketik (tidak berlipat ganda
- * saat shop punya banyak kartu).
+ * Kedua nominal itu milik PASANGAN (project, shop): DVARA di project "alya 2" dan
+ * DVARA di project lain punya barisnya masing-masing di `bd_project_shop_budgets`,
+ * jadi menyimpan di sini tidak pernah menyentuh nominal DVARA di project lain
+ * (migrasi 0046). Tabel shop di tab Deal Brand menampilkan JUMLAH baris-baris itu
+ * lintas project.
  *
- * Ini SATU-SATUNYA jalur entri Ads Budget & Service Fee dari tabel ringkasan: tab
- * Produk TAP (edit kartu) dan tab Deal Brand (edit shop) tidak lagi menyentuh
- * kolomnya. Menulis lewat admin client karena RLS products_tap = service-role only
- * (0019); izinnya ditegakkan server lewat requirePermission("bd_project.manage").
+ * Ini satu-satunya jalur entri kedua nominal: form Registrasi Deal, upload deal, form
+ * Edit Produk TAP, dan form Edit shop di tab Deal Brand tidak lagi menyentuhnya.
+ * Menulis lewat admin client karena RLS bd_project_shop_budgets = baca saja untuk
+ * authenticated (0046); izinnya ditegakkan server lewat requirePermission.
  */
 export async function updateProjectShopBudget(
   _prev: ProjectFormState | null,
@@ -275,9 +322,10 @@ export async function updateProjectShopBudget(
 ): Promise<ProjectFormState> {
   const actor = await requirePermission("bd_project.manage");
 
+  const projectId = String(formData.get("project_id") ?? "").trim();
+  if (!projectId) return { ok: false, message: "Project tidak dikenali." };
   const shopKey = String(formData.get("shop_key") ?? "").trim();
   if (!shopKey) return { ok: false, message: "Shop tidak dikenali." };
-  const projectId = String(formData.get("project_id") ?? "").trim();
 
   // Rupiah murni; "" = jangan ubah kolom itu. parseRupiah dipakai supaya tempelan
   // "Rp50.000.000" dari sheet lama ikut terbaca (CLAUDE.md #7).
@@ -301,95 +349,83 @@ export async function updateProjectShopBudget(
   }
 
   const admin = createAdminClient();
-  const { data: rows, error: readError } = await admin
-    .from("products_tap")
-    .select("campaign_id, product_id, ads_budget, service_fee")
-    .eq("shop_key", shopKey);
-  if (readError) return { ok: false, message: `Gagal membaca kartu shop: ${readError.message}` };
-  if (!rows || rows.length === 0) {
-    return { ok: false, message: `Tidak ada kartu produk untuk shop "${shopKey}".` };
-  }
-  if (rows.length > SHOP_BUDGET_CARD_LIMIT) {
+
+  // Shopnya harus benar-benar anggota project ini. Selain menjaga arti datanya, ini
+  // memberi pesan yang jelas alih-alih membiarkan FK komposit (0046) gagal.
+  const { data: member, error: memberError } = await admin
+    .from("bd_project_shops")
+    .select("shop_key")
+    .eq("project_id", projectId)
+    .eq("shop_key", shopKey)
+    .maybeSingle();
+  if (memberError) return { ok: false, message: `Gagal memeriksa shop: ${memberError.message}` };
+  if (!member) {
     return {
       ok: false,
-      message: `Shop ini punya ${rows.length} kartu — di atas batas ${SHOP_BUDGET_CARD_LIMIT} sekali edit.`,
+      message:
+        `Shop "${shopKey}" bukan anggota project ${projectId} (mungkin baru dikeluarkan atau ` +
+        "Shop Name-nya berganti). Muat ulang halaman, lalu pilih shopnya lewat Edit Project.",
     };
   }
+
+  const { data: existing, error: readError } = await admin
+    .from("bd_project_shop_budgets")
+    .select("ads_budget, service_fee")
+    .eq("project_id", projectId)
+    .eq("shop_key", shopKey)
+    .maybeSingle();
+  if (readError) return { ok: false, message: `Gagal membaca nominal shop: ${readError.message}` };
 
   const numeric = (v: unknown): number | null => {
     if (v === null || v === undefined || v === "") return null;
     const n = Number(v);
     return Number.isFinite(n) ? n : null;
   };
-  const cardRows: ShopBudgetCardRow[] = rows.map((r) => ({
-    campaign_id: r.campaign_id as string,
-    product_id: r.product_id as string,
-    ads_budget: numeric(r.ads_budget),
-    service_fee: numeric(r.service_fee),
-  }));
+  const before = existing
+    ? { ads_budget: numeric(existing.ads_budget), service_fee: numeric(existing.service_fee) }
+    : null;
 
-  const updates = planShopBudgetEdit(cardRows, { ads_budget: ads.value, service_fee: fee.value });
-  if (updates.length === 0) {
-    return { ok: true, message: "Tidak ada yang berubah — nominal shop ini sudah sesuai." };
+  const merged = mergeShopBudget(before, { ads_budget: ads.value, service_fee: fee.value });
+  if (merged === null) {
+    return { ok: true, message: "Tidak ada yang berubah — nominal shop ini di project ini sudah sesuai." };
   }
 
-  // Kartu dikelompokkan per patch IDENTIK lalu ditulis per campaign: jumlah round-trip
-  // mengikuti variasi patch (paling banyak dua), bukan jumlah kartu.
-  const byPatch = new Map<string, { patch: Record<string, unknown>; keys: typeof updates }>();
-  for (const u of updates) {
-    const signature = JSON.stringify(u.patch);
-    const group = byPatch.get(signature) ?? { patch: u.patch, keys: [] as typeof updates };
-    group.keys.push(u);
-    byPatch.set(signature, group);
-  }
-
-  const changed = new Set(updates.map((u) => `${u.campaign_id}|${u.product_id}`));
-  const before = cardRows.filter((r) => changed.has(`${r.campaign_id}|${r.product_id}`));
-
-  const now = new Date().toISOString();
-  let updated = 0;
-  for (const group of byPatch.values()) {
-    const byCampaign = groupKeysByCampaign(
-      group.keys.map((k) => ({ campaignId: k.campaign_id, productId: k.product_id }))
-    );
-    for (const [campaignId, productIds] of byCampaign) {
-      const { data, error } = await admin
-        .from("products_tap")
-        .update({ ...group.patch, updated_at: now })
-        .eq("campaign_id", campaignId)
-        .in("product_id", productIds)
-        .select("product_id");
-      if (error) {
-        return {
-          ok: false,
-          message: `Gagal menyimpan (${updated} kartu sudah tersimpan): ${error.message}`,
-        };
-      }
-      updated += data?.length ?? 0;
-    }
-  }
+  const { error: writeError } = await admin.from("bd_project_shop_budgets").upsert(
+    {
+      project_id: projectId,
+      shop_key: shopKey,
+      ...merged,
+      updated_by: actor.id,
+      updated_at: new Date().toISOString(),
+    },
+    { onConflict: "project_id,shop_key" }
+  );
+  if (writeError) return { ok: false, message: `Gagal menyimpan nominal: ${writeError.message}` };
 
   await writeAudit({
     actorId: actor.id,
-    action: "products_tap.shop_budget_update",
-    entityType: "products_tap",
-    entityId: shopKey,
+    action: "bd_project.shop_budget_update",
+    entityType: "bd_project_shop_budgets",
+    entityId: `${projectId}|${shopKey}`,
     before,
-    after: { shop_key: shopKey, ads_budget: ads.value, service_fee: fee.value, rows: updated },
+    after: { project_id: projectId, shop_key: shopKey, ...merged },
     // Mengelola nominal deal tidak merugikan perusahaan → auto berlaku, tetap
     // terekam penuh before/after (CLAUDE.md #2).
     type: "auto",
   });
 
   revalidatePath("/bd-projects");
-  if (projectId) revalidatePath(`/bd-projects/${projectId}`);
+  revalidatePath(`/bd-projects/${projectId}`);
+  // Total shop di tab Deal Brand = jumlah nominal ini lintas project.
   revalidatePath("/deals");
-  revalidatePath("/products");
 
   const done: string[] = [];
   if (ads.value !== undefined) done.push("Ads Budget");
   if (fee.value !== undefined) done.push("Service Fee");
-  return { ok: true, message: `${done.join(" & ")} shop diperbarui (${updated} kartu produk).` };
+  return {
+    ok: true,
+    message: `${done.join(" & ")} shop ini disimpan untuk project ${projectId} saja — nominal shop yang sama di project lain tidak berubah.`,
+  };
 }
 
 /**
@@ -411,7 +447,7 @@ export async function deleteBdProject(
   const admin = createAdminClient();
   const { data: project } = await admin
     .from("bd_projects")
-    .select("id, name, status, notes, created_by, created_at")
+    .select("id, name, status, status_payment, notes, created_by, created_at")
     .eq("id", projectId)
     .maybeSingle();
   if (!project) return { ok: false, message: `Project ${projectId} tidak ditemukan.` };
@@ -424,11 +460,18 @@ export async function deleteBdProject(
     };
   }
 
-  const [{ data: shops }, { data: sessions }, { data: proposals }] = await Promise.all([
-    admin.from("bd_project_shops").select("shop_key").eq("project_id", projectId),
-    admin.from("deal_live_sessions").select("*").eq("project_id", projectId),
-    admin.from("deal_creator_proposals").select("*").eq("project_id", projectId),
-  ]);
+  const [{ data: shops }, { data: budgets }, { data: sessions }, { data: proposals }] =
+    await Promise.all([
+      admin.from("bd_project_shops").select("shop_key").eq("project_id", projectId),
+      // Nominal per shop ikut terhapus lewat cascade (0046) — angkanya harus terekam
+      // sebelum hilang, sama seperti report campaignnya.
+      admin
+        .from("bd_project_shop_budgets")
+        .select("shop_key, ads_budget, service_fee")
+        .eq("project_id", projectId),
+      admin.from("deal_live_sessions").select("*").eq("project_id", projectId),
+      admin.from("deal_creator_proposals").select("*").eq("project_id", projectId),
+    ]);
 
   const { error } = await admin.from("bd_projects").delete().eq("id", projectId);
   if (error) return { ok: false, message: `Gagal menghapus project: ${error.message}` };
@@ -439,11 +482,13 @@ export async function deleteBdProject(
     entityType: "bd_projects",
     entityId: projectId,
     // Isi lengkap = satu-satunya jalan pulih kalau salah hapus.
-    before: { project, shops, sessions, proposals },
+    before: { project, shops, budgets, sessions, proposals },
     after: null,
     type: "auto",
   });
 
   revalidatePath("/bd-projects");
+  // Nominal project yang terhapus mengubah total shop di tab Deal Brand.
+  revalidatePath("/deals");
   return { ok: true, message: `Project "${project.name}" dihapus (tercatat di audit log).` };
 }

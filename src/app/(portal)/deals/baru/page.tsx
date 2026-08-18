@@ -5,8 +5,9 @@ import { CsvUploadForm } from "@/components/csv-upload-form";
 // Upload massal di halaman ini memakai PARSER YANG SAMA dengan tab Produk TAP
 // (export TAP "Export link"/"Custom report" → products_tap), bukan importer
 // deal_products tersendiri: satu format file, satu tujuan tabel, satu perilaku
-// (CLAUDE.md #4). Tutorial unduh filenya pun tutorial yang sama. Bedanya cuma satu:
-// di jalur deal, Tipe Campaign wajib dijawab — karena itu lewat uploadDealProducts.
+// (CLAUDE.md #4). Tutorial unduh filenya pun tutorial yang sama. `uploadDealProducts`
+// membungkusnya hanya untuk me-revalidate halaman deal juga — tidak ada lagi
+// pertanyaan Tipe Campaign/Ads Budget/Service Fee yang membedakan kedua jalur.
 import { uploadDealProducts } from "../actions";
 import { UploadTutorial } from "@/app/(portal)/products/upload-tutorial";
 import { DealForm, type MemberOption } from "./deal-form";
@@ -44,10 +45,14 @@ export default async function DealBaruPage() {
       <h1 className="text-2xl font-semibold">Registrasi Deal</h1>
       <p className="mt-1 text-sm text-slate-500">
         Isian form ini mengikuti kolom tabel <strong>Produk TAP</strong> (export TAP “Export
-        link”), ditambah Tipe Campaign, Ads Budget, Service Fee, Deal by, dan PIC TAP. Setelah
-        disimpan, kartunya langsung muncul sebagai baris di tab Produk TAP.{" "}
-        <strong>Semua pertanyaannya opsional</strong> — isi minimal satu kolom; hanya Ads Budget
-        &amp; Service Fee yang wajib, dan itu khusus untuk tipe <strong>Paid Campaign</strong>.
+        link”), ditambah Deal by dan PIC TAP. <strong>Semua pertanyaannya opsional</strong> — isi
+        yang sudah diketahui saja. Yang menentukan deal ini mendarat di mana adalah{" "}
+        <strong>identitas produknya</strong>: begitu <strong>Product Name</strong> atau{" "}
+        <strong>Product ID</strong> terisi, kartunya masuk tab <strong>Produk TAP</strong>; kalau
+        keduanya belum diketahui dan Anda baru mengisi <strong>Shop Name</strong>, deal-nya dicatat
+        sebagai shop di tab <strong>Deal Brand</strong> dan kartu produknya menyusul belakangan.{" "}
+        <strong>Ads Budget</strong> &amp; <strong>Service Fee</strong> tidak ditanyakan di sini —
+        keduanya diisi per shop di dalam project lewat tab <strong>Project BD</strong>.
       </p>
       <div className="mt-6">
         <DealForm picOptions={(picOptions ?? []) as MemberOption[]} dealByOptions={dealByOptions} />
@@ -60,12 +65,9 @@ export default async function DealBaruPage() {
         diunggah apa adanya, barisnya masuk ke katalog <strong>Produk TAP</strong> dengan kunci
         (Campaign ID + Product ID), dan baris yang sudah ada ikut diperbarui alih-alih
         digandakan. Kolom yang belum diketahui boleh kosong; baris berharga/komisi kotor tetap
-        tersimpan dengan tanda “perlu review”. Satu hal yang <strong>wajib</strong> dijawab di sini:{" "}
-        <strong>Tipe Campaign</strong> — kolom itu tidak ada di file export TAP, jadi jawabannyalah
-        yang mengisinya untuk semua kartu di file (dan <strong>Paid Campaign</strong> ikut
-        mewajibkan Ads Budget &amp; Service Fee). <strong>Deal by</strong> dan{" "}
-        <strong>PIC TAP</strong> boleh ikut dijawab sekali di sini untuk seluruh file;{" "}
-        <strong>Nama BD</strong> terisi otomatis dari akun Anda.
+        tersimpan dengan tanda “perlu review”. <strong>Deal by</strong> dan <strong>PIC TAP</strong>{" "}
+        boleh dijawab sekali di sini untuk seluruh file; <strong>Nama BD</strong> terisi otomatis
+        dari akun Anda.
       </p>
       <div className="mt-3">
         <UploadTutorial />

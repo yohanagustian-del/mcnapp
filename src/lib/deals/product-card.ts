@@ -1,27 +1,22 @@
 import { z } from "zod";
-import {
-  CAMPAIGN_TYPE_NEEDS_BUDGET,
-  CAMPAIGN_TYPE_NEEDS_BUDGET_LABEL,
-  CAMPAIGN_TYPE_VALUES,
-  type CampaignType,
-} from "@/lib/deals/campaign-type";
 
 /**
- * Aturan form "Registrasi Deal" (kartu produk) — dipisah dari server action supaya
- * bisa diuji tanpa Next/Supabase, dan supaya form klien & validasi server memakai
- * SATU daftar tipe campaign yang sama (CLAUDE.md #4).
+ * Aturan form "Registrasi Deal" — dipisah dari server action supaya bisa diuji tanpa
+ * Next/Supabase dan dipakai bersama form klien & validasi server (CLAUDE.md #4).
  *
- * Pertanyaan formnya = header tabel Produk TAP (export TAP "Export link") + dimensi
- * komersial yang tidak ada di export platform (tipe campaign, ads budget, service
- * fee, deal by, PIC TAP). SEMUA pertanyaan opsional — termasuk Product Name — karena
- * saat deal baru ditutup sebagian besar kolom belum diketahui, dan memaksa mengisinya
- * justru memancing isian karangan (masalah yang sama dengan master deal lama,
- * CLAUDE.md #6). Satu-satunya aturan "wajib" yang tersisa bersifat kondisional: Ads
- * Budget & Service Fee saat tipe campaign = Paid Campaign.
+ * Pertanyaan formnya = header tabel Produk TAP (export TAP "Export link") + dua
+ * dimensi yang tidak ada di export platform (Deal by, PIC TAP). Tipe Campaign, Ads
+ * Budget, dan Service Fee TIDAK lagi ditanyakan di sini: kedua nominal itu milik
+ * pasangan (project, shop) dan diisi di tab Project BD, jadi menanyakannya saat
+ * registrasi cuma memancing angka yang nanti bertabrakan.
+ *
+ * SEMUA pertanyaan opsional — termasuk Product Name — karena saat deal baru ditutup
+ * sebagian besar kolom belum diketahui, dan memaksa mengisinya justru memancing isian
+ * karangan (masalah yang sama dengan master deal lama, CLAUDE.md #6).
  *
  * Yang tetap dijaga ketat = FORMAT isian yang diisi (ID numerik, tanggal dari date
- * picker, komisi 0–100), plus larangan menyimpan kartu yang benar-benar kosong
- * (`isEmptyProductCard`) — kartu tanpa satu pun isian tidak menambah informasi apa pun.
+ * picker, komisi 0–100), plus larangan menyimpan form yang benar-benar kosong
+ * (`isEmptyProductCard`) — submit tanpa satu pun isian tidak menambah informasi apa pun.
  */
 
 /** Teks kosong dari input yang tidak diisi → undefined (bukan 0 / string kosong). */
@@ -69,9 +64,6 @@ export const productCardSchema = z.object({
   creator_shop_ads_commission_pct: optionalNumber(100),
   partner_shop_ads_commission_pct: optionalNumber(100),
   product_link: z.preprocess(blankToUndefined, z.string().url("Product Link harus URL").optional()),
-  campaign_type: z.preprocess(blankToUndefined, z.enum(CAMPAIGN_TYPE_VALUES).optional()),
-  ads_budget: optionalNumber(),
-  service_fee: optionalNumber(),
   deal_by: z.preprocess(blankToUndefined, z.string().uuid().optional()),
   pic_tap: z.preprocess(blankToUndefined, z.string().uuid().optional()),
 });
@@ -79,7 +71,7 @@ export const productCardSchema = z.object({
 export type ProductCardInput = z.infer<typeof productCardSchema>;
 
 /**
- * Semua pertanyaan opsional berarti form kosong pun lolos validasi per-field. Kartu
+ * Semua pertanyaan opsional berarti form kosong pun lolos validasi per-field. Submit
  * seperti itu hanya menghasilkan baris ber-ID internal tanpa satu pun informasi —
  * sampah yang tidak bisa dicocokkan maupun diperbaiki. Ditolak di sini, bukan dengan
  * mewajibkan salah satu kolom tertentu.
@@ -89,27 +81,18 @@ export function isEmptyProductCard(d: ProductCardInput): boolean {
 }
 
 /**
- * Aturan yang tidak bisa dinyatakan per-field: Ads Budget & Service Fee wajib
- * HANYA saat tipe campaign = Paid Campaign. Dikembalikan sebagai peta fieldErrors
+ * Satu-satunya isian FORM yang bisa dinyatakan hanya dengan melihat dua kolom
+ * sekaligus: masa berlaku tidak boleh terbalik. Dikembalikan sebagai peta fieldErrors
  * supaya pesannya menempel di input yang bersangkutan.
  *
  * Dipakai dua jalur tulis kartu produk: registrasi (registerDealCard) dan form Edit
  * di tab Produk TAP (updateProduct) — aturannya satu, bukan disalin per form.
  */
 export function productCardIssues(d: {
-  campaign_type?: string;
-  ads_budget?: number;
-  service_fee?: number;
   effective_start?: string;
   effective_end?: string;
 }): Record<string, string> {
   const errors: Record<string, string> = {};
-
-  if (d.campaign_type === CAMPAIGN_TYPE_NEEDS_BUDGET) {
-    const wajib = `Wajib diisi untuk ${CAMPAIGN_TYPE_NEEDS_BUDGET_LABEL}`;
-    if (d.ads_budget === undefined) errors.ads_budget = wajib;
-    if (d.service_fee === undefined) errors.service_fee = wajib;
-  }
 
   // Masa berlaku terbalik hampir selalu salah ketik, dan diam-diam merusak alert
   // kadaluarsa yang membaca effective_end.
@@ -120,11 +103,34 @@ export function productCardIssues(d: {
   return errors;
 }
 
+/**
+ * Satu submit Registrasi Deal bisa berakhir di dua tempat, dan yang menentukan adalah
+ * ADA/TIDAKNYA identitas produk:
+ *
+ *  - Ada Product Name atau Product ID → kartu produk di `products_tap` (tab Produk TAP).
+ *  - Tidak ada keduanya, tapi Shop Name / Shop ID terisi → deal shop di `brand_deals`
+ *    (tab Deal Brand). Kartu produknya belum bisa dibuat: tanpa nama maupun ID, baris
+ *    di katalog Produk TAP tidak bisa dikenali orang maupun dicocokkan ke data TAP
+ *    mingguan. Deal-nya sendiri sudah nyata, jadi ia tetap dicatat sebagai shop.
+ *  - Tidak ada identitas produk MAUPUN shop → tidak ada yang bisa disimpan.
+ *
+ * Dipisah ke fungsi sendiri supaya keputusan percabangannya bisa diuji langsung.
+ */
+export type ProductCardTarget = "product_card" | "brand_deal" | "unidentified";
+
+export function productCardTarget(d: {
+  product_name?: string;
+  product_id?: string;
+  shop_name?: string;
+  shop_id?: string;
+}): ProductCardTarget {
+  if (d.product_name !== undefined || d.product_id !== undefined) return "product_card";
+  if (d.shop_name !== undefined || d.shop_id !== undefined) return "brand_deal";
+  return "unidentified";
+}
+
 /** Nama kolom → label yang dipakai UI, supaya pesan error memakai istilah form. */
 export const PRODUCT_CARD_FIELD_LABEL: Record<string, string> = {
-  campaign_type: "Tipe Campaign",
-  ads_budget: "Ads Budget",
-  service_fee: "Service Fee",
   effective_end: "Product Effective End Time",
 };
 
@@ -136,51 +142,44 @@ export function productCardIssueMessage(issues: Record<string, string>): string 
 }
 
 /**
- * Jawaban Tipe Campaign pada UPLOAD MASSAL kartu produk ("Upload Produk Deal Lama
- * via Excel" di halaman Registrasi Deal).
+ * Jawaban SEKALI-UNTUK-SEFILE pada upload massal kartu produk ("Upload Produk Deal
+ * Lama via Excel" di halaman Registrasi Deal).
  *
- * File export TAP tidak membawa tipe campaign, ads budget, service fee, Deal by,
- * maupun PIC TAP — semuanya dimensi komersial MEA. Ditanyakan sekali di form upload
- * lalu diisikan ke SETIAP kartu di file itu, dengan aturan Paid Campaign yang sama
- * seperti form satuan (CLAUDE.md #6): satu file = satu campaign, jadi satu jawaban.
+ * File export TAP tidak membawa Deal by maupun PIC TAP — keduanya dimensi MEA, bukan
+ * data platform. Karena satu file upload = satu deal, keduanya cukup ditanyakan sekali
+ * lalu diisikan ke setiap kartu di file itu.
  *
- * (Kolom "Nama BD" tidak ditanyakan: ia = akun yang meng-upload, diisi importer dari
- * sesi login — menanyakannya justru membuka pintu salah tulis pemilik data.)
+ * Keduanya OPSIONAL: tidak dijawab → kolomnya tidak disentuh sama sekali, bukan
+ * dikosongkan pada kartu yang sudah terisi. (Kolom "Nama BD" tidak ditanyakan: ia =
+ * akun yang meng-upload, diisi importer dari sesi login — menanyakannya justru membuka
+ * pintu salah tulis pemilik data.)
+ *
+ * Tipe Campaign, Ads Budget, dan Service Fee tidak lagi ada di sini: nominalnya milik
+ * pasangan (project, shop) di tab Project BD, jadi upload deal tidak lagi menyentuh
+ * ketiga kolom itu.
  */
 export const uploadCampaignSchema = z.object({
-  campaign_type: z.preprocess(blankToUndefined, z.enum(CAMPAIGN_TYPE_VALUES).optional()),
-  ads_budget: optionalNumber(),
-  service_fee: optionalNumber(),
-  // Deal by & PIC TAP juga tidak ada di export TAP, dan sama-sama satu jawaban per
-  // file (satu file = satu deal). Keduanya OPSIONAL: tidak dijawab → kolomnya tidak
-  // disentuh sama sekali, bukan dikosongkan.
   deal_by: z.preprocess(blankToUndefined, z.string().uuid().optional()),
   pic_tap: z.preprocess(blankToUndefined, z.string().uuid().optional()),
 });
 
 export interface CampaignDefaults {
-  campaign_type?: CampaignType;
-  ads_budget?: number;
-  service_fee?: number;
   deal_by?: string;
   pic_tap?: string;
 }
 
 /**
- * Membaca & memvalidasi jawaban tipe campaign dari FormData upload.
+ * Membaca & memvalidasi jawaban per-file dari FormData upload.
  *
  * Mengembalikan pesan (bukan melempar) karena pemanggilnya adalah importer yang
  * melaporkan kegagalan lewat `UploadReport.error` — throw dari server action sudah
  * disensor Next.js di production sehingga pesannya tidak sampai ke user.
  *
- * Tanpa jawaban tipe campaign, `defaults` kosong dan importer tidak menyentuh
- * ketiga kolom itu sama sekali — itulah perilaku "Upload Master Product List" di
- * tab Produk TAP, yang memang tidak menanyakannya.
+ * Tanpa jawaban apa pun, `defaults` kosong dan importer tidak menyentuh kolomnya —
+ * itulah perilaku "Upload Master Product List" di tab Produk TAP, yang memang tidak
+ * menanyakannya.
  */
 export function campaignDefaultsFromForm(raw: {
-  campaign_type?: unknown;
-  ads_budget?: unknown;
-  service_fee?: unknown;
   deal_by?: unknown;
   pic_tap?: unknown;
 }): { defaults: CampaignDefaults; error?: string } {
@@ -192,11 +191,6 @@ export function campaignDefaultsFromForm(raw: {
         Object.fromEntries(parsed.error.issues.map((i) => [String(i.path[0]), i.message]))
       ),
     };
-  }
-
-  const issues = productCardIssues(parsed.data);
-  if (Object.keys(issues).length > 0) {
-    return { defaults: {}, error: productCardIssueMessage(issues) };
   }
   return { defaults: parsed.data };
 }

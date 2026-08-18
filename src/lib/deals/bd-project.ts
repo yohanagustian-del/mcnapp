@@ -36,6 +36,18 @@ export const PROJECT_STATUSES = [
 
 export type ProjectStatus = (typeof PROJECT_STATUSES)[number]["value"];
 
+export const PAYMENT_STATUSES = [
+  { value: "done", label: "Done" },
+  { value: "proses_finance_payment", label: "Proses Finance Payment" },
+  { value: "proses_finance_brand", label: "Proses Finance Brand" },
+] as const;
+
+export type PaymentStatus = (typeof PAYMENT_STATUSES)[number]["value"];
+
+export const PAYMENT_STATUS_LABEL: Record<string, string> = Object.fromEntries(
+  PAYMENT_STATUSES.map((s) => [s.value, s.label])
+);
+
 export const PROJECT_STATUS_LABEL: Record<string, string> = Object.fromEntries(
   PROJECT_STATUSES.map((s) => [s.value, s.label])
 );
@@ -48,6 +60,10 @@ export const bdProjectSchema = z.object({
   ),
   name: z.string().trim().min(1, "Nama project wajib diisi").max(120, "Nama project terlalu panjang"),
   status: z.enum(["running", "hold", "done"]).default("running"),
+  status_payment: z.preprocess(
+    (v) => (typeof v === "string" && v.trim() === "" ? undefined : v),
+    z.enum(["done", "proses_finance_payment", "proses_finance_brand"]).optional()
+  ),
   notes: z.preprocess(
     (v) => (typeof v === "string" && v.trim() === "" ? undefined : v),
     z.string().trim().optional()
@@ -86,7 +102,12 @@ export function parseShopKeys(raw: string): string[] {
   return keys;
 }
 
-/** Ringkasan satu shop untuk agregat project — bentuknya subset baris view. */
+/**
+ * Ringkasan satu shop untuk agregat project. Kolom kartu (jumlah produk, campaign,
+ * GMV, masa berlaku) datang dari view `deal_shop_summary`; `ads_budget` &
+ * `service_fee` TIDAK — keduanya nominal per project, dibaca dari
+ * `bd_project_shop_budgets` untuk project yang sedang dibuka.
+ */
 export interface ProjectShopMetrics {
   product_count: number;
   active_count: number;
@@ -113,7 +134,8 @@ export interface ProjectTotals {
 }
 
 /**
- * Total project = penjumlahan baris ringkasan shop yang SUDAH diagregasi SQL.
+ * Total project = penjumlahan baris ringkasan shop yang SUDAH diagregasi SQL, dengan
+ * nominal per project yang sudah ditempelkan pemanggilnya.
  *
  * Yang dijumlah di sini paling banyak sepuluhan baris (batas shop per project),
  * jadi ini membaca hasil agregasi — bukan memindahkan pipeline agregasi ke
@@ -160,16 +182,8 @@ export function sumProjectShops(shops: ProjectShopMetrics[]): ProjectTotals {
   return totals;
 }
 
-/**
- * Batas kartu yang boleh ditulis sekali edit nominal shop. Sama dengan batas kartu
- * yang dibaca halaman detail — di atas itu shop hampir pasti salah kelompok.
- */
-export const SHOP_BUDGET_CARD_LIMIT = 500;
-
-/** Kartu produk apa adanya dari products_tap — hanya kolom yang menentukan hasil. */
-export interface ShopBudgetCardRow {
-  campaign_id: string;
-  product_id: string;
+/** Nominal satu shop DALAM satu project, apa adanya dari bd_project_shop_budgets. */
+export interface ShopBudget {
   ads_budget: number | null;
   service_fee: number | null;
 }
@@ -180,62 +194,29 @@ export interface ShopBudgetValues {
   service_fee?: number;
 }
 
-export interface ShopBudgetUpdate {
-  campaign_id: string;
-  product_id: string;
-  patch: { ads_budget?: number; service_fee?: number };
-}
-
 /**
- * Menghitung perubahan Ads Budget & Service Fee untuk SELURUH kartu satu shop dari
- * satu nilai TOTAL per shop yang diketik user di tab Project BD.
+ * Menggabungkan isian form Edit nominal shop dengan nominal yang sudah tersimpan
+ * untuk pasangan (project, shop) itu.
  *
- * Ads Budget & Service Fee fisiknya kolom per-kartu di products_tap yang DIJUMLAH
- * per shop oleh view ringkasan. Supaya total shop pas dengan angka yang diketik —
- * dan tidak berlipat ganda ketika satu shop punya banyak kartu — nilai penuh
- * ditaruh di SATU kartu representatif (kartu pertama menurut urutan stabil
- * campaign_id, product_id) dan kartu lain di-nol-kan. Penjumlahan view karenanya
- * mengembalikan tepat angka itu, dan mengedit lagi membaca total yang sama sebagai
- * nilai awal (idempoten).
+ * Ads Budget & Service Fee adalah nominal PER PROJECT: DVARA di project "alya 2" dan
+ * DVARA di project lain punya barisnya masing-masing, jadi menyimpan salah satunya
+ * tidak pernah menyentuh yang lain. Tidak ada lagi pembagian nilai ke kartu produk
+ * seperti sebelumnya — nominalnya punya baris sendiri, tinggal ditulis.
  *
- * Kolom yang tidak diisi (undefined) TIDAK disentuh. Kolom yang diisi tapi totalnya
- * sudah sama dengan angka sekarang juga dibiarkan apa adanya — supaya menyimpan
- * tanpa mengubah angka tidak diam-diam merestrukturisasi kartu-kartu shop.
+ * Kolom yang dikosongkan di form (undefined) mempertahankan nilai tersimpan; 0 adalah
+ * nilai yang sah dan berbeda artinya dari kosong. `null` dikembalikan kalau tidak ada
+ * yang berubah, supaya pemanggilnya tidak menulis (dan meng-audit) baris yang identik.
  */
-export function planShopBudgetEdit(
-  rows: ShopBudgetCardRow[],
+export function mergeShopBudget(
+  existing: ShopBudget | null,
   values: ShopBudgetValues
-): ShopBudgetUpdate[] {
-  const sorted = [...rows].sort((a, b) =>
-    a.campaign_id === b.campaign_id
-      ? a.product_id.localeCompare(b.product_id)
-      : a.campaign_id.localeCompare(b.campaign_id)
-  );
-
-  const fields = ["ads_budget", "service_fee"] as const;
-  // Kolom yang benar-benar diterapkan: diisi form DAN mengubah total shop.
-  const apply: Partial<Record<(typeof fields)[number], number>> = {};
-  for (const f of fields) {
-    const v = values[f];
-    if (v === undefined) continue;
-    const currentTotal = sorted.reduce((sum, r) => sum + (r[f] ?? 0), 0);
-    if (v !== currentTotal) apply[f] = v;
-  }
-
-  const updates: ShopBudgetUpdate[] = [];
-  sorted.forEach((row, i) => {
-    const patch: ShopBudgetUpdate["patch"] = {};
-    for (const f of fields) {
-      const value = apply[f];
-      if (value === undefined) continue;
-      const target = i === 0 ? value : 0;
-      // null di kartu = 0 untuk penjumlahan; jangan menulis 0 ke atas null tanpa guna.
-      if ((row[f] ?? 0) !== target) patch[f] = target;
-    }
-    if (Object.keys(patch).length > 0) {
-      updates.push({ campaign_id: row.campaign_id, product_id: row.product_id, patch });
-    }
-  });
-
-  return updates;
+): ShopBudget | null {
+  const merged: ShopBudget = {
+    ads_budget: values.ads_budget ?? existing?.ads_budget ?? null,
+    service_fee: values.service_fee ?? existing?.service_fee ?? null,
+  };
+  const unchanged =
+    merged.ads_budget === (existing?.ads_budget ?? null) &&
+    merged.service_fee === (existing?.service_fee ?? null);
+  return unchanged ? null : merged;
 }

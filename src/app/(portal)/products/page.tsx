@@ -14,8 +14,9 @@ export const dynamic = "force-dynamic";
  * Kolom yang dibaca tabel — sama persis dengan ProductRow, satu daftar saja.
  *
  * Hanya atribut master export TAP "Export link", dimensi kartu deal (tipe campaign,
- * ads budget, service fee, deal by, PIC TAP), dan yang dibutuhkan form edit + wild
- * search. Metrik performa (GMV, orders, komisi nominal, dst.) tetap ada di
+ * deal by, PIC TAP), dan yang dibutuhkan form edit + wild search. Ads budget & service
+ * fee TIDAK ditarik: sejak 0046 keduanya nominal per (project, shop) di
+ * `bd_project_shop_budgets`, bukan atribut kartu produk. Metrik performa (GMV, orders, komisi nominal, dst.) tetap ada di
  * `products_tap` tapi tidak ikut ditarik: tabel tidak menampilkannya, dan 1.000
  * baris × puluhan kolom angka adalah payload yang percuma dikirim ke browser.
  */
@@ -25,7 +26,7 @@ const SELECT_COLUMNS = [
   "commission_pct", "commission_note", "partner_commission_pct",
   "creator_shop_ads_commission_pct", "partner_shop_ads_commission_pct", "product_link",
   "campaign_id", "campaign_name", "effective_start", "effective_end",
-  "campaign_type", "ads_budget", "service_fee", "deal_by", "pic_tap",
+  "campaign_type", "deal_by", "pic_tap",
   "source", "active", "needs_review", "uploaded_by",
 ].join(", ");
 

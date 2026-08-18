@@ -21,8 +21,6 @@ export interface ProjectProductRow {
   commission_pct: number | null;
   partner_commission_pct: number | null;
   campaign_type: string | null;
-  ads_budget: number | null;
-  service_fee: number | null;
   effective_end: string | null;
   needs_review: boolean;
   /** Sudah ditandai dikerjasamakan pada project ini (bd_project_products). */
@@ -115,8 +113,8 @@ const COLUMNS: Column[] = [
     value: (p) => p.campaign_type,
     cell: (p) => CAMPAIGN_TYPE_LABEL[p.campaign_type ?? ""] ?? "—",
   },
-  { key: "ads", label: "Ads Budget", value: (p) => p.ads_budget, firstDir: "desc", cell: (p) => formatRp(p.ads_budget) },
-  { key: "fee", label: "Service Fee", value: (p) => p.service_fee, firstDir: "desc", cell: (p) => formatRp(p.service_fee) },
+  // Ads Budget & Service Fee TIDAK ada di sini: keduanya nominal per (project, shop),
+  // bukan per kartu produk — angkanya ada di tabel "Shop dalam Project" di atas.
   { key: "exp", label: "Exp Date", value: (p) => p.effective_end, cell: (p) => p.effective_end ?? "—" },
 ];
 
