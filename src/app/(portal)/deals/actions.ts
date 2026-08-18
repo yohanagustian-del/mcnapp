@@ -14,7 +14,6 @@ import { parseCommission } from "@/lib/utils/commission";
 import { parseFlexibleDate } from "@/lib/utils/date";
 import { commissionRaw, dealReviewFlags } from "@/lib/deals/form";
 import {
-  PRODUCT_CARD_FIELD_LABEL,
   isEmptyProductCard,
   productCardIssues,
   productCardSchema,
@@ -186,10 +185,10 @@ export async function registerDealCard(
  * yang SAMA dengan yang dipakai view ringkasan untuk mengelompokkan — bukan salinan
  * ekspresi group by di sisi aplikasi (CLAUDE.md #4).
  *
- * Aturan "Paid Campaign wajib Ads Budget & Service Fee" dibaca dari
- * `productCardIssues()` yang sama dengan Registrasi Deal & Edit kartu; kalau ada
- * kartu yang belum memenuhinya, SELURUH edit dibatalkan (tidak ada shop yang
- * setengah terisi) dan formnya meminta nominal untuk mengisi kartu yang kosong.
+ * Ads Budget & Service Fee TIDAK diisi dari sini lagi — keduanya dikelola per shop
+ * di tab Project BD. Karena itu aturan "Paid Campaign wajib nominal" juga tidak
+ * ditegakkan di jalur ini: kalau ditegakkan, Tipe Campaign paid tidak akan pernah
+ * bisa dipilih untuk shop yang kartunya belum berisi nominal.
  *
  * Menulis lewat admin client karena RLS products_tap = service-role only (0019);
  * izinnya tetap ditegakkan server lewat requirePermission("products.edit").
@@ -218,7 +217,7 @@ export async function updateShopCards(
   const admin = createAdminClient();
   const { data: rows, error: readError } = await admin
     .from("products_tap")
-    .select("campaign_id, product_id, shop_id, campaign_type, ads_budget, service_fee")
+    .select("campaign_id, product_id, shop_id, campaign_type")
     .eq("shop_key", shopKey);
   if (readError) return { ok: false, message: `Gagal membaca kartu shop: ${readError.message}` };
   if (!rows || rows.length === 0) {
@@ -234,18 +233,6 @@ export async function updateShopCards(
   }
 
   const plan = planShopCardEdit(rows as ShopCardRow[], values);
-  if (plan.blocked.length > 0) {
-    const fields = [...new Set(plan.blocked.flatMap((b) => b.fields))];
-    const labels = fields.map((f) => PRODUCT_CARD_FIELD_LABEL[f] ?? f).join(" & ");
-    return {
-      ok: false,
-      message:
-        `${plan.blocked.length} kartu shop ini belum punya ${labels}, padahal ` +
-        `${CAMPAIGN_TYPE_LABEL[values.campaign_type ?? ""]} mewajibkannya. Isi nominalnya di form ` +
-        "ini — nilainya hanya diisikan ke kartu yang masih kosong, kartu yang sudah terisi tidak ditimpa.",
-      fieldErrors: Object.fromEntries(fields.map((f) => [f, "Wajib diisi untuk shop ini"])),
-    };
-  }
   if (plan.updates.length === 0) {
     return { ok: true, message: "Tidak ada yang berubah — kartu shop ini sudah sesuai." };
   }

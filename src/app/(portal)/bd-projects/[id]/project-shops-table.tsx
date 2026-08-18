@@ -5,6 +5,7 @@ import {
   PAGE_SIZES_10_20_50_100, SortableTh, TablePagination, useTableControls,
   type SortConfig, type SortDir, type SortValue,
 } from "@/components/table-controls";
+import { ShopBudgetEditButton } from "./shop-budget-edit-button";
 
 /**
  * Satu shop anggota project — subset baris view products_tap_shop_summary yang
@@ -83,13 +84,24 @@ const SORT: SortConfig<ProjectShopRow> = {
  * turun → urutan bawaan (jumlah kartu terbanyak dulu, urutan dari server), dengan
  * paginasi 10/20/50/100. Semuanya client-side atas baris yang sudah dikirim server.
  */
-export function ProjectShopsTable({ rows }: { rows: ProjectShopRow[] }) {
+export function ProjectShopsTable({
+  rows,
+  projectId,
+  canManage = false,
+}: {
+  rows: ProjectShopRow[];
+  projectId: string;
+  /** BizDev/management: menampilkan tombol Edit Ads Budget & Service Fee per shop. */
+  canManage?: boolean;
+}) {
   const controls = useTableControls<ProjectShopRow>({
     rows,
     sort: SORT,
     pageSizes: PAGE_SIZES_10_20_50_100,
     itemLabel: "shop",
   });
+
+  const colCount = COLUMNS.length + (canManage ? 1 : 0);
 
   return (
     <div className="rounded-lg border border-slate-200 bg-white">
@@ -102,6 +114,7 @@ export function ProjectShopsTable({ rows }: { rows: ProjectShopRow[] }) {
                   {c.label}
                 </SortableTh>
               ))}
+              {canManage && <th className={th}>Aksi</th>}
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
@@ -112,11 +125,16 @@ export function ProjectShopsTable({ rows }: { rows: ProjectShopRow[] }) {
                     {c.cell(s)}
                   </td>
                 ))}
+                {canManage && (
+                  <td className={`${td} whitespace-nowrap`}>
+                    <ShopBudgetEditButton shop={s} projectId={projectId} />
+                  </td>
+                )}
               </tr>
             ))}
             {controls.visibleRows.length === 0 && (
               <tr>
-                <td colSpan={COLUMNS.length} className="px-4 py-6 text-center text-slate-400">
+                <td colSpan={colCount} className="px-4 py-6 text-center text-slate-400">
                   Belum ada shop di project ini. Tambahkan lewat Edit Project.
                 </td>
               </tr>

@@ -260,9 +260,20 @@ export default async function BdProjectDetailPage({
       <h2 className="mt-8 text-lg font-semibold">Shop dalam Project ({shops.length})</h2>
       <p className="mt-1 text-xs text-slate-400">
         Klik judul kolom untuk mengurutkan (naik → turun → urutan bawaan).
+        {canManage && (
+          <>
+            {" "}
+            Tombol <strong>Edit</strong> di tiap baris mengatur <strong>Ads Budget</strong> &amp;{" "}
+            <strong>Service Fee</strong> shop itu (total per shop, disimpan ke kartu Produk TAP-nya).
+          </>
+        )}
       </p>
       <div className="mt-2">
-        <ProjectShopsTable rows={shops as ProjectShopRow[]} />
+        <ProjectShopsTable
+          rows={shops as ProjectShopRow[]}
+          projectId={project.id as string}
+          canManage={canManage}
+        />
       </div>
 
       {/* ===== Produk yang dikerjasamakan ===== */}

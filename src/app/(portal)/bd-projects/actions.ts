@@ -5,13 +5,17 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { writeAudit } from "@/lib/audit";
 import { requirePermission } from "@/lib/rbac";
 import { genId } from "@/lib/utils/id";
+import { parseRupiah } from "@/lib/utils/rupiah";
 import {
   bdProjectSchema,
   parseShopKeys,
+  planShopBudgetEdit,
   PROJECT_PRODUCT_LIMIT,
   PROJECT_SHOP_LIMIT,
+  SHOP_BUDGET_CARD_LIMIT,
+  type ShopBudgetCardRow,
 } from "@/lib/deals/bd-project";
-import { parseProductRowKeys } from "@/lib/m10/product-keys";
+import { groupKeysByCampaign, parseProductRowKeys } from "@/lib/m10/product-keys";
 
 export interface ProjectFormState {
   ok: boolean;
@@ -249,6 +253,143 @@ export async function setProjectProducts(
         ? "Daftar kerja sama dikosongkan — semua kartu shop project ini kembali dianggap belum dipilih."
         : `${keys.length} kartu produk ditandai dikerjasamakan pada project ini.`,
   };
+}
+
+/**
+ * Simpan Ads Budget & Service Fee satu shop dari tab Project BD.
+ *
+ * Keduanya nominal per deal yang fisiknya kolom per-kartu di products_tap dan
+ * DIJUMLAH per shop oleh view ringkasan (CLAUDE.md #6). Form ini menerima satu nilai
+ * TOTAL per shop; `planShopBudgetEdit` menaruh nilai penuh di satu kartu dan menol-kan
+ * sisanya supaya penjumlahan view pas dengan angka yang diketik (tidak berlipat ganda
+ * saat shop punya banyak kartu).
+ *
+ * Ini SATU-SATUNYA jalur entri Ads Budget & Service Fee dari tabel ringkasan: tab
+ * Produk TAP (edit kartu) dan tab Deal Brand (edit shop) tidak lagi menyentuh
+ * kolomnya. Menulis lewat admin client karena RLS products_tap = service-role only
+ * (0019); izinnya ditegakkan server lewat requirePermission("bd_project.manage").
+ */
+export async function updateProjectShopBudget(
+  _prev: ProjectFormState | null,
+  formData: FormData
+): Promise<ProjectFormState> {
+  const actor = await requirePermission("bd_project.manage");
+
+  const shopKey = String(formData.get("shop_key") ?? "").trim();
+  if (!shopKey) return { ok: false, message: "Shop tidak dikenali." };
+  const projectId = String(formData.get("project_id") ?? "").trim();
+
+  // Rupiah murni; "" = jangan ubah kolom itu. parseRupiah dipakai supaya tempelan
+  // "Rp50.000.000" dari sheet lama ikut terbaca (CLAUDE.md #7).
+  const parseMoney = (raw: string): { value?: number; error?: string } => {
+    const v = raw.trim();
+    if (!v) return {};
+    const n = parseRupiah(v);
+    if (n === null || n < 0) return { error: `"${v}" tidak terbaca sebagai angka Rupiah` };
+    return { value: n };
+  };
+  const ads = parseMoney(String(formData.get("ads_budget") ?? ""));
+  const fee = parseMoney(String(formData.get("service_fee") ?? ""));
+  const fieldErrors: Record<string, string> = {};
+  if (ads.error) fieldErrors.ads_budget = ads.error;
+  if (fee.error) fieldErrors.service_fee = fee.error;
+  if (Object.keys(fieldErrors).length > 0) {
+    return { ok: false, message: "Periksa kembali nominal yang diisi.", fieldErrors };
+  }
+  if (ads.value === undefined && fee.value === undefined) {
+    return { ok: false, message: "Isi Ads Budget dan/atau Service Fee yang mau disimpan." };
+  }
+
+  const admin = createAdminClient();
+  const { data: rows, error: readError } = await admin
+    .from("products_tap")
+    .select("campaign_id, product_id, ads_budget, service_fee")
+    .eq("shop_key", shopKey);
+  if (readError) return { ok: false, message: `Gagal membaca kartu shop: ${readError.message}` };
+  if (!rows || rows.length === 0) {
+    return { ok: false, message: `Tidak ada kartu produk untuk shop "${shopKey}".` };
+  }
+  if (rows.length > SHOP_BUDGET_CARD_LIMIT) {
+    return {
+      ok: false,
+      message: `Shop ini punya ${rows.length} kartu — di atas batas ${SHOP_BUDGET_CARD_LIMIT} sekali edit.`,
+    };
+  }
+
+  const numeric = (v: unknown): number | null => {
+    if (v === null || v === undefined || v === "") return null;
+    const n = Number(v);
+    return Number.isFinite(n) ? n : null;
+  };
+  const cardRows: ShopBudgetCardRow[] = rows.map((r) => ({
+    campaign_id: r.campaign_id as string,
+    product_id: r.product_id as string,
+    ads_budget: numeric(r.ads_budget),
+    service_fee: numeric(r.service_fee),
+  }));
+
+  const updates = planShopBudgetEdit(cardRows, { ads_budget: ads.value, service_fee: fee.value });
+  if (updates.length === 0) {
+    return { ok: true, message: "Tidak ada yang berubah — nominal shop ini sudah sesuai." };
+  }
+
+  // Kartu dikelompokkan per patch IDENTIK lalu ditulis per campaign: jumlah round-trip
+  // mengikuti variasi patch (paling banyak dua), bukan jumlah kartu.
+  const byPatch = new Map<string, { patch: Record<string, unknown>; keys: typeof updates }>();
+  for (const u of updates) {
+    const signature = JSON.stringify(u.patch);
+    const group = byPatch.get(signature) ?? { patch: u.patch, keys: [] as typeof updates };
+    group.keys.push(u);
+    byPatch.set(signature, group);
+  }
+
+  const changed = new Set(updates.map((u) => `${u.campaign_id}|${u.product_id}`));
+  const before = cardRows.filter((r) => changed.has(`${r.campaign_id}|${r.product_id}`));
+
+  const now = new Date().toISOString();
+  let updated = 0;
+  for (const group of byPatch.values()) {
+    const byCampaign = groupKeysByCampaign(
+      group.keys.map((k) => ({ campaignId: k.campaign_id, productId: k.product_id }))
+    );
+    for (const [campaignId, productIds] of byCampaign) {
+      const { data, error } = await admin
+        .from("products_tap")
+        .update({ ...group.patch, updated_at: now })
+        .eq("campaign_id", campaignId)
+        .in("product_id", productIds)
+        .select("product_id");
+      if (error) {
+        return {
+          ok: false,
+          message: `Gagal menyimpan (${updated} kartu sudah tersimpan): ${error.message}`,
+        };
+      }
+      updated += data?.length ?? 0;
+    }
+  }
+
+  await writeAudit({
+    actorId: actor.id,
+    action: "products_tap.shop_budget_update",
+    entityType: "products_tap",
+    entityId: shopKey,
+    before,
+    after: { shop_key: shopKey, ads_budget: ads.value, service_fee: fee.value, rows: updated },
+    // Mengelola nominal deal tidak merugikan perusahaan → auto berlaku, tetap
+    // terekam penuh before/after (CLAUDE.md #2).
+    type: "auto",
+  });
+
+  revalidatePath("/bd-projects");
+  if (projectId) revalidatePath(`/bd-projects/${projectId}`);
+  revalidatePath("/deals");
+  revalidatePath("/products");
+
+  const done: string[] = [];
+  if (ads.value !== undefined) done.push("Ads Budget");
+  if (fee.value !== undefined) done.push("Service Fee");
+  return { ok: true, message: `${done.join(" & ")} shop diperbarui (${updated} kartu produk).` };
 }
 
 /**

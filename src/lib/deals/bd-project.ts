@@ -159,3 +159,83 @@ export function sumProjectShops(shops: ProjectShopMetrics[]): ProjectTotals {
 
   return totals;
 }
+
+/**
+ * Batas kartu yang boleh ditulis sekali edit nominal shop. Sama dengan batas kartu
+ * yang dibaca halaman detail — di atas itu shop hampir pasti salah kelompok.
+ */
+export const SHOP_BUDGET_CARD_LIMIT = 500;
+
+/** Kartu produk apa adanya dari products_tap — hanya kolom yang menentukan hasil. */
+export interface ShopBudgetCardRow {
+  campaign_id: string;
+  product_id: string;
+  ads_budget: number | null;
+  service_fee: number | null;
+}
+
+/** Nilai form Edit nominal shop; undefined = jangan ubah kolom itu. */
+export interface ShopBudgetValues {
+  ads_budget?: number;
+  service_fee?: number;
+}
+
+export interface ShopBudgetUpdate {
+  campaign_id: string;
+  product_id: string;
+  patch: { ads_budget?: number; service_fee?: number };
+}
+
+/**
+ * Menghitung perubahan Ads Budget & Service Fee untuk SELURUH kartu satu shop dari
+ * satu nilai TOTAL per shop yang diketik user di tab Project BD.
+ *
+ * Ads Budget & Service Fee fisiknya kolom per-kartu di products_tap yang DIJUMLAH
+ * per shop oleh view ringkasan. Supaya total shop pas dengan angka yang diketik —
+ * dan tidak berlipat ganda ketika satu shop punya banyak kartu — nilai penuh
+ * ditaruh di SATU kartu representatif (kartu pertama menurut urutan stabil
+ * campaign_id, product_id) dan kartu lain di-nol-kan. Penjumlahan view karenanya
+ * mengembalikan tepat angka itu, dan mengedit lagi membaca total yang sama sebagai
+ * nilai awal (idempoten).
+ *
+ * Kolom yang tidak diisi (undefined) TIDAK disentuh. Kolom yang diisi tapi totalnya
+ * sudah sama dengan angka sekarang juga dibiarkan apa adanya — supaya menyimpan
+ * tanpa mengubah angka tidak diam-diam merestrukturisasi kartu-kartu shop.
+ */
+export function planShopBudgetEdit(
+  rows: ShopBudgetCardRow[],
+  values: ShopBudgetValues
+): ShopBudgetUpdate[] {
+  const sorted = [...rows].sort((a, b) =>
+    a.campaign_id === b.campaign_id
+      ? a.product_id.localeCompare(b.product_id)
+      : a.campaign_id.localeCompare(b.campaign_id)
+  );
+
+  const fields = ["ads_budget", "service_fee"] as const;
+  // Kolom yang benar-benar diterapkan: diisi form DAN mengubah total shop.
+  const apply: Partial<Record<(typeof fields)[number], number>> = {};
+  for (const f of fields) {
+    const v = values[f];
+    if (v === undefined) continue;
+    const currentTotal = sorted.reduce((sum, r) => sum + (r[f] ?? 0), 0);
+    if (v !== currentTotal) apply[f] = v;
+  }
+
+  const updates: ShopBudgetUpdate[] = [];
+  sorted.forEach((row, i) => {
+    const patch: ShopBudgetUpdate["patch"] = {};
+    for (const f of fields) {
+      const value = apply[f];
+      if (value === undefined) continue;
+      const target = i === 0 ? value : 0;
+      // null di kartu = 0 untuk penjumlahan; jangan menulis 0 ke atas null tanpa guna.
+      if ((row[f] ?? 0) !== target) patch[f] = target;
+    }
+    if (Object.keys(patch).length > 0) {
+      updates.push({ campaign_id: row.campaign_id, product_id: row.product_id, patch });
+    }
+  });
+
+  return updates;
+}
