@@ -2,7 +2,8 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { requireMember, canAccessNav, NAV_ITEMS, hasPermission } from "@/lib/rbac";
 import { createClient } from "@/lib/supabase/server";
-import { sumProjectShops, SHOP_PICKER_LIMIT, type ProjectShopMetrics } from "@/lib/deals/bd-project";
+import { sumProjectShops, type ProjectShopMetrics } from "@/lib/deals/bd-project";
+import { SHOP_PICKER_LIMIT } from "@/lib/deals/shop-search";
 import { ProjectFormButton, type ShopOption } from "./project-form-button";
 import { ProjectsTable, type ProjectRow } from "./projects-table";
 

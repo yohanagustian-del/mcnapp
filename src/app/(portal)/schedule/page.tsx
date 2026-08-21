@@ -5,6 +5,7 @@ import { buildWeekMatrix } from "@/lib/schedule/matrix";
 import type { LiveScheduleSlot } from "@/lib/schedule/types";
 import { ScheduleBoard, type BoardWeekMatrix } from "./schedule-board";
 import { loadPicTapScheduleAlert } from "@/lib/schedule/pic-tap-alerts";
+import { SHOP_PICKER_LIMIT } from "@/lib/deals/shop-search";
 import type { ShopDealOption } from "./slot-form";
 import { WeekNav } from "./week-nav";
 import { VerifyPanel, type VerifyRow } from "./verify-panel";
@@ -114,9 +115,17 @@ export default async function SchedulePage({
     ? fetchAllCreators(supabase)
     : Promise.resolve([]);
 
-  // Pilihan brand pada form slot = shop dari tabel "Shop dari Produk TAP" (tab Deal
-  // Brand): deal baru didaftarkan sebagai KARTU PRODUK, jadi di sanalah brand yang
-  // sedang berjalan hidup — bukan lagi di brand_deals (yang kini khusus deal lama).
+  // Pilihan brand pada form slot = shop dari tabel "Shop" di tab Deal Brand (view
+  // deal_shop_summary): deal baru didaftarkan sebagai KARTU PRODUK, jadi di sanalah
+  // brand yang sedang berjalan hidup — dan view itu ikut membawa brand yang dealnya
+  // terdaftar tapi kartunya belum turun.
+  //
+  // Ini isi AWAL pemilih, bukan seluruh katalog: 16.030 shop tidak dikirim ke klien.
+  // Begitu orang mengetik, pencariannya dikerjakan server (searchShopDealsAction).
+  // Urutannya dibiarkan apa adanya — kartu terbanyak dulu — supaya daftar yang tampil
+  // benar-benar 50 teratas menurut kriteria itu. Versi lama mengurutkannya ulang per
+  // nama setelah dipotong, sehingga daftarnya terbaca alfabetis padahal isinya hasil
+  // potongan menurut jumlah kartu: shop mana yang hilang jadi mustahil ditebak.
   const [{ data: rosterCreators }, allCreators, { data: cpms }, { data: shopSummary }] =
     await Promise.all([
       rosterQuery,
@@ -124,19 +133,19 @@ export default async function SchedulePage({
       supabase.from("team_members").select("id, name").eq("role", "cpm"),
       supabase
         .from("deal_shop_summary")
-        .select("shop_key, shop_name, shop_id, pic_tap_ids, product_count")
+        .select("shop_key, shop_name, shop_id, pic_tap_ids")
         .order("product_count", { ascending: false })
-        .limit(500),
+        .order("deal_count", { ascending: false })
+        .order("shop_key", { ascending: true })
+        .limit(SHOP_PICKER_LIMIT),
     ]);
 
-  const shopOptions: ShopDealOption[] = (shopSummary ?? [])
-    .map((s) => ({
-      shop_key: s.shop_key as string,
-      shop_name: (s.shop_name as string | null) ?? null,
-      shop_id: (s.shop_id as string | null) ?? null,
-      has_pic_tap: Array.isArray(s.pic_tap_ids) && s.pic_tap_ids.length > 0,
-    }))
-    .sort((a, b) => (a.shop_name ?? a.shop_key).localeCompare(b.shop_name ?? b.shop_key, "id"));
+  const shopOptions: ShopDealOption[] = (shopSummary ?? []).map((s) => ({
+    shop_key: s.shop_key as string,
+    shop_name: (s.shop_name as string | null) ?? null,
+    shop_id: (s.shop_id as string | null) ?? null,
+    has_pic_tap: Array.isArray(s.pic_tap_ids) && s.pic_tap_ids.length > 0,
+  }));
 
   // CM names for the calendar rows — scoped to the calendar's roster creators.
   const cmNameByCreator = new Map<string, string>();
@@ -286,7 +295,7 @@ export default async function SchedulePage({
           <ScheduleBoard
             matrix={matrix}
             creators={matrixCreators}
-            shops={shopOptions}
+            initialShops={shopOptions}
             todayIso={today}
             canEdit={canEdit}
           />

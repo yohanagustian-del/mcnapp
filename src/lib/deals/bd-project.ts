@@ -21,18 +21,6 @@ import { z } from "zod";
 export const PROJECT_SHOP_LIMIT = 100;
 
 /**
- * Batas baris yang ditampilkan pemilih brand/shop di form Tambah/Edit Project —
- * sekali muat awal maupun sekali pencarian.
- *
- * Katalog shop sudah belasan ribu baris, jadi daftarnya TIDAK dikirim utuh ke klien
- * lalu disaring di sana: berapa pun batas yang dipasang, shop di luar batas jadi tak
- * terjangkau kotak cari. Pencariannya karena itu dikerjakan SQL (searchProjectShops),
- * dan angka ini cuma sebesar yang enak dibaca dalam satu daftar bergulir. Kalau
- * hasilnya kena batas, formnya MENGATAKANNYA alih-alih diam-diam memotong.
- */
-export const SHOP_PICKER_LIMIT = 50;
-
-/**
  * Batas kartu produk yang bisa ditandai "dikerjasamakan" dalam satu project.
  * Alasannya sama dengan batas shop: sekali simpan menulis seluruh daftar, dan
  * project dengan ribuan kartu terpilih hampir pasti hasil salah klik "pilih semua".

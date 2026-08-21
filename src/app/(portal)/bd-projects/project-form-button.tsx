@@ -2,12 +2,8 @@
 
 import { useActionState, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import {
-  PROJECT_SHOP_LIMIT,
-  PROJECT_STATUSES,
-  PAYMENT_STATUSES,
-  SHOP_PICKER_LIMIT,
-} from "@/lib/deals/bd-project";
+import { PROJECT_SHOP_LIMIT, PROJECT_STATUSES, PAYMENT_STATUSES } from "@/lib/deals/bd-project";
+import { SHOP_PICKER_LIMIT } from "@/lib/deals/shop-search";
 import { saveBdProject, searchProjectShops, type ProjectFormState, type ShopOption } from "./actions";
 
 const inputCls = "mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm";

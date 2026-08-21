@@ -89,13 +89,13 @@ function SlotBlock({ slot, todayIso }: { slot: LiveScheduleSlot; todayIso: strin
 export function ScheduleBoard({
   matrix,
   creators,
-  shops,
+  initialShops,
   todayIso,
   canEdit,
 }: {
   matrix: BoardWeekMatrix;
   creators: RosterCreatorOption[];
-  shops: ShopDealOption[];
+  initialShops: ShopDealOption[];
   todayIso: string;
   canEdit: boolean;
 }) {
@@ -160,7 +160,7 @@ export function ScheduleBoard({
           creatorId={selected.creatorId}
           date={selected.date}
           creators={creators}
-          shops={shops}
+          initialShops={initialShops}
           onDone={close}
           onCancel={close}
         />

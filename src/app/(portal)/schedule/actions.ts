@@ -6,6 +6,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { writeAudit } from "@/lib/audit";
 import { genId } from "@/lib/utils/id";
 import { buildCopiedSlots } from "@/lib/schedule/copy-week";
+import { searchShopSummary } from "@/lib/deals/shop-search";
 import type {
   AdsPayer,
   DealsBy,
@@ -34,6 +35,26 @@ export type CopyWeekResult =
 
 export type CreateCreatorResult =
   | { ok: true; creatorId: string }
+  | { ok: false; error: string };
+
+/**
+ * Satu pilihan brand pada pertanyaan "Link ke deal (opsional)" di form slot.
+ *
+ * Sumbernya tabel "Shop" di tab Deal Brand (view `deal_shop_summary`) — deal baru
+ * didaftarkan sebagai kartu produk, jadi di sanalah brand yang sedang berjalan hidup;
+ * shop yang deal-nya terdaftar tapi kartunya belum turun juga ikut. Nilainya
+ * `shop_key`, kunci grup yang sama dengan view ringkasan.
+ */
+export interface ShopDealOption {
+  shop_key: string;
+  shop_name: string | null;
+  shop_id: string | null;
+  /** Ada PIC TAP-nya → slot ini akan memunculkan notifikasi di akun PIC tersebut. */
+  has_pic_tap: boolean;
+}
+
+export type ShopDealSearchResult =
+  | { ok: true; shops: ShopDealOption[]; capped: boolean }
   | { ok: false; error: string };
 
 // ---------- FormData helpers ----------
@@ -163,12 +184,19 @@ async function assertCreatorInScope(
 }
 
 /**
- * Shop yang ditautkan ke slot harus benar-benar ada di katalog Produk TAP.
+ * Shop yang ditautkan ke slot harus benar-benar ada di katalog shop.
  *
  * shop_key bukan foreign key (shop = hasil grouping kartu produk, bukan tabel), jadi
  * database tidak bisa menolak kunci karangan/basi. Tanpa cek ini, slot bisa menunjuk
  * shop yang namanya sudah diganti — dan notifikasi PIC TAP-nya diam-diam tidak
  * pernah muncul.
+ *
+ * Diperiksa ke view `deal_shop_summary`, BUKAN langsung ke `products_tap`: pemilih di
+ * form menawarkan shop dari view itu, dan view itu juga memuat shop yang deal-nya
+ * sudah terdaftar tapi kartu produknya belum turun (Registrasi Deal berisi Shop Name
+ * saja — Wardah, Skintific, dan empat shop lain saat ini). Memvalidasi ke sumber yang
+ * berbeda dengan yang ditawarkan berarti form menolak shop yang baru saja dipilih
+ * pemakainya sendiri.
  */
 async function assertShopKeyExists(
   admin: ReturnType<typeof createAdminClient>,
@@ -176,7 +204,7 @@ async function assertShopKeyExists(
 ): Promise<void> {
   if (!shopKey) return;
   const { data, error } = await admin
-    .from("products_tap")
+    .from("deal_shop_summary")
     .select("shop_key")
     .eq("shop_key", shopKey)
     .limit(1)
@@ -184,7 +212,7 @@ async function assertShopKeyExists(
   if (error) throw new Error(`Gagal memeriksa shop: ${error.message}`);
   if (!data) {
     throw new Error(
-      `Shop "${shopKey}" tidak ada di katalog Produk TAP — muat ulang halaman lalu pilih ulang shopnya.`
+      `Shop "${shopKey}" tidak ada di katalog shop — muat ulang halaman lalu pilih ulang shopnya.`
     );
   }
 }
@@ -196,6 +224,49 @@ function revalidateSchedule(): void {
 }
 
 // ---------- Actions ----------
+
+/**
+ * Cari brand untuk pertanyaan "Link ke deal (opsional)" di form slot.
+ *
+ * KENAPA ADA. Sebelumnya form memuat 500 shop sekali lalu menampilkannya sebagai
+ * <select> tanpa kotak cari — dan daftar itu diurutkan ulang per nama di klien,
+ * sehingga 500 yang termuat adalah yang kartunya terbanyak tapi urutan tampilnya
+ * alfabetis: shop mana yang terpotong tidak bisa ditebak pemakai. Dari 16.030 shop di
+ * katalog, 15.530 di antaranya tidak pernah bisa dipilih.
+ *
+ * Pencarian & urutannya milik `searchShopSummary` — definisi yang sama dengan pemilih
+ * shop di form Project BD dan kotak cari tabel Shop di tab Deal Brand (CLAUDE.md #4).
+ *
+ * Memakai admin client seperti action slot lainnya di berkas ini, lalu menyaring
+ * hasilnya sendiri lewat requirePermission di atas; RLS view-nya security_invoker.
+ */
+export async function searchShopDealsAction(query: string): Promise<ShopDealSearchResult> {
+  try {
+    // Pemilihnya hanya muncul di form slot yang bisa disunting; izinnya disamakan
+    // supaya action ini tidak jadi jalan pintas membaca katalog shop.
+    await requirePermission("schedule.edit");
+    const admin = createAdminClient();
+    const { rows, capped } = await searchShopSummary(admin, {
+      term: query,
+      // pic_tap_ids dipakai menandai brand yang jadwalnya akan memunculkan
+      // notifikasi di akun PIC TAP-nya.
+      columns: "shop_key, shop_name, shop_id, pic_tap_ids",
+    });
+
+    return {
+      ok: true,
+      shops: rows.map((s) => ({
+        shop_key: s.shop_key as string,
+        shop_name: (s.shop_name as string | null) ?? null,
+        shop_id: (s.shop_id as string | null) ?? null,
+        has_pic_tap: Array.isArray(s.pic_tap_ids) && s.pic_tap_ids.length > 0,
+      })),
+      capped,
+    };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "Pencarian shop gagal" };
+  }
+}
 
 /** Create a live-schedule slot. Requires an existing roster creator (live_roster=true). */
 export async function createSlotAction(formData: FormData): Promise<CreateSlotResult> {

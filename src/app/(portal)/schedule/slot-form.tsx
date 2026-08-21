@@ -1,27 +1,237 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 import type { LiveScheduleSlot, SlotStatus } from "@/lib/schedule/types";
-import { createSlotAction, deleteSlotAction, updateSlotAction } from "./actions";
+import { SHOP_PICKER_LIMIT } from "@/lib/deals/shop-search";
+import {
+  createSlotAction,
+  deleteSlotAction,
+  updateSlotAction,
+  searchShopDealsAction,
+  type ShopDealOption,
+} from "./actions";
 
 const input = "w-full rounded-md border border-slate-300 px-3 py-2 text-sm";
 const btn = "rounded-md bg-slate-900 px-3 py-2 text-sm font-medium text-white hover:bg-slate-700 disabled:opacity-50";
 const btnGhost = "rounded-md border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50";
 const btnDanger = "rounded-md border border-red-300 px-3 py-2 text-sm font-medium text-red-700 hover:bg-red-50 disabled:opacity-50";
 
+/** Jeda sebelum ketikan dikirim sebagai query — cukup untuk tidak menembak tiap huruf. */
+const SEARCH_DEBOUNCE_MS = 250;
+
+export type { ShopDealOption };
+
 /**
- * Satu pilihan brand pada pertanyaan "Link ke deal (opsional)".
+ * Pemilih brand untuk "Link ke deal (opsional)".
  *
- * Sumbernya tabel "Shop dari Produk TAP" (tab Deal Brand) — deal baru didaftarkan
- * sebagai kartu produk, jadi di sanalah brand yang sedang berjalan hidup. Nilainya
- * `shop_key`, kunci grup yang sama dengan view ringkasan (products_tap.shop_key).
+ * SENGAJA BUKAN <select> berisi daftar yang sudah dimuat. Katalog shop 16.030 baris:
+ * daftar sepanjang apa pun yang dikirim ke klien menyembunyikan sisanya, dan yang
+ * tersembunyi tidak bisa dicari sama sekali. Versi lama memuat 500 baris teratas
+ * menurut jumlah kartu lalu MENGURUTKANNYA ULANG per nama, jadi shop mana yang
+ * terpotong pun tak bisa ditebak pemakai.
+ *
+ * Gantinya kotak cari yang menembak SQL (searchShopDealsAction) — definisi pencarian
+ * yang sama dengan pemilih shop di form Project BD dan kotak cari tabel Shop di tab
+ * Deal Brand (CLAUDE.md #4). Terlipat saat tidak dipakai supaya form slot tetap ringkas.
  */
-export interface ShopDealOption {
-  shop_key: string;
-  shop_name: string | null;
-  shop_id: string | null;
-  /** Ada PIC TAP-nya → slot ini akan memunculkan notifikasi di akun PIC tersebut. */
-  has_pic_tap: boolean;
+function ShopDealPicker({
+  initialValue,
+  initialShops,
+  disabled,
+  onPicked,
+}: {
+  initialValue: string;
+  /** Isi daftar sebelum pemakai mengetik — bukan seluruh katalog shop. */
+  initialShops: ShopDealOption[];
+  disabled: boolean;
+  /** Dipanggil HANYA saat pemakai memilih; dipakai mengisi otomatis kolom Brand. */
+  onPicked: (shop: ShopDealOption | null) => void;
+}) {
+  const [shopKey, setShopKey] = useState(initialValue);
+  const [selected, setSelected] = useState<ShopDealOption | null>(
+    () => initialShops.find((s) => s.shop_key === initialValue) ?? null
+  );
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const [results, setResults] = useState<ShopDealOption[]>(initialShops);
+  const [capped, setCapped] = useState(false);
+  const [searching, setSearching] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  // Balasan yang datang telat tidak boleh menimpa hasil ketikan yang lebih baru.
+  const seqRef = useRef(0);
+
+  // Slot lama bisa menaut shop yang tidak ada di daftar awal (isinya cuma 50 baris
+  // teratas). Namanya dijemput sekali supaya keterangan "ada PIC TAP" tetap benar.
+  // TIDAK memanggil onPicked: ini melengkapi data yang sudah tersimpan, bukan pilihan
+  // baru pemakai — memanggilnya akan menimpa kolom Brand yang sudah diisi.
+  useEffect(() => {
+    if (!initialValue || selected) return;
+    let alive = true;
+    searchShopDealsAction(initialValue)
+      .then((res) => {
+        if (!alive || !res.ok) return;
+        const exact = res.shops.find((s) => s.shop_key === initialValue);
+        if (exact) setSelected(exact);
+      })
+      .catch(() => {
+        // Gagal melengkapi nama bukan alasan menghalangi penyuntingan slot: labelnya
+        // jatuh ke shop_key, yang memang sudah berisi nama shopnya.
+      });
+    return () => {
+      alive = false;
+    };
+  }, [initialValue, selected]);
+
+  useEffect(() => {
+    if (!open) return;
+    const term = query.trim();
+    const seq = ++seqRef.current;
+
+    // Kotak cari kosong = daftar bawaan yang sudah ikut terkirim bersama halaman.
+    if (!term) {
+      setResults(initialShops);
+      setCapped(false);
+      setSearching(false);
+      setError(null);
+      return;
+    }
+
+    setSearching(true);
+    const timer = setTimeout(() => {
+      searchShopDealsAction(term)
+        .then((res) => {
+          if (seq !== seqRef.current) return;
+          if (res.ok) {
+            setResults(res.shops);
+            setCapped(res.capped);
+            setError(null);
+          } else {
+            // Gagal cari ≠ tidak ada hasil. Dibedakan supaya orang tidak menyimpulkan
+            // brandnya memang tidak ada padahal querynya yang tidak sampai.
+            setResults([]);
+            setCapped(false);
+            setError(res.error);
+          }
+          setSearching(false);
+        })
+        .catch((e: unknown) => {
+          if (seq !== seqRef.current) return;
+          setResults([]);
+          setCapped(false);
+          setError(e instanceof Error ? e.message : "Pencarian brand gagal");
+          setSearching(false);
+        });
+    }, SEARCH_DEBOUNCE_MS);
+
+    return () => clearTimeout(timer);
+  }, [open, query, initialShops]);
+
+  function pick(shop: ShopDealOption | null) {
+    setShopKey(shop?.shop_key ?? "");
+    setSelected(shop);
+    setOpen(false);
+    setQuery("");
+    onPicked(shop);
+  }
+
+  // shop_key sudah berisi Shop Name, jadi slot yang shopnya belum sempat dijemput
+  // tetap tampil bernama — bukan kunci mentah yang tak berarti bagi pemakai.
+  const label = selected
+    ? `${selected.shop_name ?? selected.shop_key}${selected.shop_id ? ` (${selected.shop_id})` : ""}`
+    : shopKey || null;
+
+  const rowCls =
+    "flex w-full items-center gap-2 border-b border-slate-100 px-2 py-1.5 text-left text-sm last:border-b-0 hover:bg-slate-50";
+
+  return (
+    <div>
+      <label className="block text-xs font-medium text-slate-600">Link ke deal (opsional)</label>
+      <input type="hidden" name="shop_key" value={shopKey} />
+
+      <div className="mt-1 flex items-center gap-2">
+        <span
+          className={`flex-1 truncate rounded-md border border-slate-300 px-3 py-2 text-sm ${
+            label ? "" : "text-slate-400"
+          }`}
+        >
+          {label ?? "— tidak ada —"}
+        </span>
+        {!disabled && (
+          <button
+            type="button"
+            onClick={() => setOpen((v) => !v)}
+            className="shrink-0 rounded-md border border-slate-300 px-2 py-2 text-xs font-medium text-slate-700 hover:bg-slate-50"
+          >
+            {open ? "Tutup" : label ? "Ganti" : "Pilih"}
+          </button>
+        )}
+      </div>
+
+      {open && !disabled && (
+        <div className="mt-2 rounded-md border border-slate-200 p-2">
+          <input
+            type="search"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Cari nama brand / Shop ID…"
+            className="w-full rounded-md border border-slate-300 px-3 py-1.5 text-sm"
+          />
+
+          <div className="mt-2 max-h-48 overflow-y-auto rounded-md border border-slate-200">
+            <button type="button" onClick={() => pick(null)} className={`${rowCls} text-slate-400`}>
+              — tidak ada —
+            </button>
+            {results.map((s) => (
+              <button key={s.shop_key} type="button" onClick={() => pick(s)} className={rowCls}>
+                <span className="flex-1 truncate">{s.shop_name ?? s.shop_key}</span>
+                <span className="font-mono text-[11px] text-slate-400">{s.shop_id ?? "—"}</span>
+                {s.has_pic_tap && (
+                  <span className="shrink-0 rounded-full bg-purple-100 px-1.5 py-0.5 text-[10px] text-purple-800">
+                    PIC TAP
+                  </span>
+                )}
+              </button>
+            ))}
+            {results.length === 0 && (
+              <p className="px-3 py-5 text-center text-sm text-slate-400">
+                {searching
+                  ? "Mencari…"
+                  : error
+                    ? error
+                    : query.trim()
+                      ? `Tidak ada brand cocok dengan "${query.trim()}".`
+                      : "Belum ada shop di katalog."}
+              </p>
+            )}
+          </div>
+
+          {/* Batas hasil dikatakan, bukan disembunyikan: tanpa ini daftar yang
+              terpotong terbaca seolah itulah semua brand yang cocok. */}
+          <p className="mt-1 text-[11px] leading-tight text-slate-400">
+            {searching
+              ? "Mencari di katalog shop…"
+              : capped
+                ? `Ditampilkan ${SHOP_PICKER_LIMIT} teratas — masih ada yang cocok. Persempit pencarian (mis. ketik Shop ID).`
+                : query.trim()
+                  ? `${results.length} brand cocok.`
+                  : `Daftar awal ${results.length} brand dengan kartu terbanyak. Ketik untuk mencari seluruh katalog.`}
+          </p>
+        </div>
+      )}
+
+      <p className="mt-1 text-[11px] leading-tight text-slate-400">
+        Daftar brand diambil dari tabel <strong>Shop</strong> di tab Deal Brand — termasuk
+        brand yang dealnya sudah terdaftar tapi kartu produknya belum turun.
+        {selected?.has_pic_tap && (
+          <>
+            {" "}
+            Brand ini punya <strong>PIC TAP</strong> — jadwal ini akan muncul sebagai
+            notifikasi di akun PIC tersebut.
+          </>
+        )}
+      </p>
+    </div>
+  );
 }
 
 export interface RosterCreatorOption {
@@ -40,7 +250,7 @@ export function SlotForm({
   creatorId,
   date,
   creators,
-  shops,
+  initialShops,
   onDone,
   onCancel,
 }: {
@@ -48,18 +258,17 @@ export function SlotForm({
   creatorId: string;
   date: string;
   creators: RosterCreatorOption[];
-  shops: ShopDealOption[];
+  /** Isi awal pemilih brand; pencariannya sendiri dikerjakan server. */
+  initialShops: ShopDealOption[];
   onDone: () => void;
   onCancel: () => void;
 }) {
   const [status, setStatus] = useState<SlotStatus>(slot?.status === "done" ? "scheduled" : slot?.status ?? "scheduled");
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
-  const [shopKey, setShopKey] = useState(slot?.shop_key ?? "");
   const [brandName, setBrandName] = useState(slot?.brand_name ?? "");
   const isEdit = slot !== null;
   const locked = slot?.status === "done";
-  const selectedShop = shops.find((s) => s.shop_key === shopKey) ?? null;
 
   /**
    * Memilih shop ikut mengisi kolom "Brand (bebas teks)" SELAMA kolom itu masih
@@ -67,9 +276,7 @@ export function SlotForm({
    * ulang hanya melahirkan ejaan berbeda untuk brand yang sama. Kolomnya tetap bisa
    * diubah manual, dan isian yang sudah ada tidak pernah ditimpa.
    */
-  function onShopChange(next: string) {
-    setShopKey(next);
-    const shop = shops.find((s) => s.shop_key === next);
+  function onShopPicked(shop: ShopDealOption | null) {
     if (shop && brandName.trim() === "") setBrandName(shop.shop_name ?? shop.shop_key);
   }
 
@@ -188,35 +395,12 @@ export function SlotForm({
                   className={input}
                 />
               </div>
-              <div>
-                <label className="block text-xs font-medium text-slate-600">Link ke deal (opsional)</label>
-                <select
-                  name="shop_key"
-                  disabled={locked}
-                  value={shopKey}
-                  onChange={(e) => onShopChange(e.target.value)}
-                  className={input}
-                >
-                  <option value="">— tidak ada —</option>
-                  {shops.map((s) => (
-                    <option key={s.shop_key} value={s.shop_key}>
-                      {s.shop_name ?? s.shop_key}
-                      {s.shop_id ? ` (${s.shop_id})` : ""}
-                      {s.has_pic_tap ? " · ada PIC TAP" : ""}
-                    </option>
-                  ))}
-                </select>
-                <p className="mt-1 text-[11px] leading-tight text-slate-400">
-                  Daftar brand diambil dari <strong>Shop dari Produk TAP</strong> (tab Deal Brand).
-                  {selectedShop?.has_pic_tap && (
-                    <>
-                      {" "}
-                      Brand ini punya <strong>PIC TAP</strong> — jadwal ini akan muncul sebagai
-                      notifikasi di akun PIC tersebut.
-                    </>
-                  )}
-                </p>
-              </div>
+              <ShopDealPicker
+                initialValue={slot?.shop_key ?? ""}
+                initialShops={initialShops}
+                disabled={locked}
+                onPicked={onShopPicked}
+              />
             </div>
 
             <div className="grid grid-cols-2 gap-3">

@@ -15,9 +15,9 @@ import {
   PAYMENT_STATUS_LABEL,
   PROJECT_STATUS_LABEL,
   sumProjectShops,
-  SHOP_PICKER_LIMIT,
   type ProjectShopMetrics,
 } from "@/lib/deals/bd-project";
+import { SHOP_PICKER_LIMIT } from "@/lib/deals/shop-search";
 import { ProjectFormButton, type ShopOption } from "../project-form-button";
 import { DeleteProjectButton } from "./delete-project-button";
 import { ProjectShopsTable, type ProjectShopRow } from "./project-shops-table";
