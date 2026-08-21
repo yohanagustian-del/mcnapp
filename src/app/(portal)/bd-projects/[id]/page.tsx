@@ -15,6 +15,7 @@ import {
   PAYMENT_STATUS_LABEL,
   PROJECT_STATUS_LABEL,
   sumProjectShops,
+  SHOP_PICKER_LIMIT,
   type ProjectShopMetrics,
 } from "@/lib/deals/bd-project";
 import { ProjectFormButton, type ShopOption } from "../project-form-button";
@@ -77,13 +78,15 @@ export default async function BdProjectDetailPage({
 
   // Dua bacaan shop yang berbeda tujuan:
   //  - `memberShops`: ringkasan shop ANGGOTA project, difilter di SQL lewat shop_key.
-  //    Sengaja bukan hasil saring dari daftar 500 shop di bawah: shop yang belum punya
-  //    kartu (deal saja) berada di ekor urutan itu dan bisa terpotong batas — anggota
+  //    Sengaja bukan hasil saring dari daftar pemilih di bawah: shop yang belum punya
+  //    kartu (deal saja) berada di ekor urutan itu dan pasti terpotong batas — anggota
   //    project akan terbaca "tidak ditemukan" hanya karena daftarnya kepanjangan.
-  //  - `allShops`: pilihan shop untuk form Edit Project (perlu daftar luas).
+  //  - `pickerShops`: isi AWAL pemilih shop di form Edit Project. Bukan seluruh
+  //    katalog: begitu orang mengetik, pencariannya dikerjakan server lewat
+  //    searchProjectShops (lihat catatan di project-form-button).
   const [
     { data: memberShops },
-    { data: allShops },
+    { data: pickerShops },
     { data: shopBudgets },
     { data: sessions },
     { data: proposals },
@@ -103,7 +106,7 @@ export default async function BdProjectDetailPage({
         .order("product_count", { ascending: false })
         .order("deal_count", { ascending: false })
         .order("shop_key", { ascending: true })
-        .limit(500),
+        .limit(SHOP_PICKER_LIMIT),
       // Ads Budget & Service Fee milik pasangan (project, shop) — dibaca khusus untuk
       // project ini, BUKAN dari view shop yang menjumlahkannya lintas project (0046).
       supabase
@@ -125,7 +128,17 @@ export default async function BdProjectDetailPage({
       supabase.from("team_members").select("id, name"),
     ]);
 
-  const shopOptions: ShopOption[] = (allShops ?? []).map((s) => ({
+  const shopOptions: ShopOption[] = (pickerShops ?? []).map((s) => ({
+    shop_key: s.shop_key as string,
+    shop_name: (s.shop_name as string | null) ?? null,
+    shop_id: (s.shop_id as string | null) ?? null,
+    product_count: numeric(s.product_count) ?? 0,
+  }));
+
+  // Nama shop yang SUDAH jadi anggota project ini, dikirim terpisah supaya chip
+  // pilihan di form Edit tetap bernama benar walaupun shopnya tidak ada di isi awal
+  // pemilih maupun di hasil pencarian yang sedang tampil.
+  const memberShopOptions: ShopOption[] = (memberShops ?? []).map((s) => ({
     shop_key: s.shop_key as string,
     shop_name: (s.shop_name as string | null) ?? null,
     shop_id: (s.shop_id as string | null) ?? null,
@@ -248,7 +261,8 @@ export default async function BdProjectDetailPage({
         {canManage && (
           <div className="flex gap-2">
             <ProjectFormButton
-              shops={shopOptions}
+              initialShops={shopOptions}
+              knownShops={memberShopOptions}
               project={{
                 id: project.id as string,
                 name: project.name as string,

@@ -2,7 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { requireMember, canAccessNav, NAV_ITEMS, hasPermission } from "@/lib/rbac";
 import { createClient } from "@/lib/supabase/server";
-import { sumProjectShops, type ProjectShopMetrics } from "@/lib/deals/bd-project";
+import { sumProjectShops, SHOP_PICKER_LIMIT, type ProjectShopMetrics } from "@/lib/deals/bd-project";
 import { ProjectFormButton, type ShopOption } from "./project-form-button";
 import { ProjectsTable, type ProjectRow } from "./projects-table";
 
@@ -45,10 +45,10 @@ export default async function BdProjectsPage({
     .limit(200);
   if (q?.trim()) projectQuery = projectQuery.ilike("name", `%${q.trim()}%`);
 
-  // Daftar shop untuk PILIHAN form Tambah/Edit project (perlu daftar luas). Ringkasan
-  // shop ANGGOTA project dibaca terpisah di bawah, difilter di SQL: kalau ikut disaring
-  // dari daftar ini, shop yang belum punya kartu (deal saja) bisa terpotong batas dan
-  // anggota project terbaca "hilang" hanya karena daftarnya kepanjangan.
+  // Isi AWAL pemilih shop di form Tambah Project — bukan seluruh katalog. Katalognya
+  // belasan ribu baris, jadi pencariannya dikerjakan server (searchProjectShops) begitu
+  // orang mengetik; mengirim potongan besar ke klien lalu menyaringnya di sana justru
+  // membuat shop di luar potongan itu mustahil ditemukan.
   const [{ data: projects, error: projectError }, { data: pickerShops, error: shopError }] =
     await Promise.all([
       projectQuery,
@@ -58,7 +58,7 @@ export default async function BdProjectsPage({
         .order("product_count", { ascending: false })
         .order("deal_count", { ascending: false })
         .order("shop_key", { ascending: true })
-        .limit(500),
+        .limit(SHOP_PICKER_LIMIT),
     ]);
 
   const shopOptions: ShopOption[] = (pickerShops ?? []).map((s) => ({
@@ -181,7 +181,7 @@ export default async function BdProjectsPage({
             project.
           </p>
         </div>
-        {canManage && <ProjectFormButton shops={shopOptions} />}
+        {canManage && <ProjectFormButton initialShops={shopOptions} />}
       </div>
 
       <form method="get" className="mt-4 flex gap-2">

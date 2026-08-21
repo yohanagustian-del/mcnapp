@@ -1,19 +1,21 @@
 "use client";
 
-import { useActionState, useEffect, useMemo, useState } from "react";
+import { useActionState, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { PROJECT_SHOP_LIMIT, PROJECT_STATUSES, PAYMENT_STATUSES } from "@/lib/deals/bd-project";
-import { saveBdProject, type ProjectFormState } from "./actions";
+import {
+  PROJECT_SHOP_LIMIT,
+  PROJECT_STATUSES,
+  PAYMENT_STATUSES,
+  SHOP_PICKER_LIMIT,
+} from "@/lib/deals/bd-project";
+import { saveBdProject, searchProjectShops, type ProjectFormState, type ShopOption } from "./actions";
 
 const inputCls = "mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm";
 
-/** Satu pilihan brand/shop = satu baris tabel "Shop dari Produk TAP". */
-export interface ShopOption {
-  shop_key: string;
-  shop_name: string | null;
-  shop_id: string | null;
-  product_count: number;
-}
+/** Jeda sebelum ketikan dikirim sebagai query — cukup untuk tidak menembak tiap huruf. */
+const SEARCH_DEBOUNCE_MS = 250;
+
+export type { ShopOption };
 
 /**
  * Form "Tambah Project" / "Edit Project" (tab Project BD).
@@ -24,17 +26,29 @@ export interface ShopOption {
  *
  * Pemilihannya sengaja BUKAN <select multiple>: daftar shop bisa ratusan baris dan
  * ctrl-klik di listbox panjang mudah menghapus pilihan yang sudah benar tanpa
- * disadari. Yang dipakai: satu kotak cari + daftar checkbox yang tersaring
- * seketika, chip untuk yang sudah terpilih (bisa dilepas satu-satu), dan tombol
- * "pilih semua hasil pencarian" untuk memilih sekelompok brand sekaligus.
+ * disadari. Yang dipakai: satu kotak cari + daftar checkbox, chip untuk yang sudah
+ * terpilih (bisa dilepas satu-satu), dan tombol "pilih semua yang tampil".
+ *
+ * PENCARIANNYA DI SERVER (searchProjectShops), bukan saringan atas daftar yang sudah
+ * dimuat. Katalog shop belasan ribu baris: memuat sepotong lalu menyaringnya di klien
+ * berarti shop di luar potongan itu tidak bisa ditemukan sama sekali — bug yang
+ * membuat "Dua Belibis" (urutan ke-1073) tak muncul di sini padahal ada di tab Deal
+ * Brand. `initialShops` hanya isi awal daftar sebelum orang mengetik.
  */
 export function ProjectFormButton({
-  shops,
+  initialShops,
+  knownShops,
   project,
   label = "+ Tambah Project",
   className = "rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-700",
 }: {
-  shops: ShopOption[];
+  /** Isi daftar saat kotak cari masih kosong — bukan seluruh katalog shop. */
+  initialShops: ShopOption[];
+  /**
+   * Shop yang namanya sudah diketahui pemanggil (mis. anggota project yang sedang
+   * diedit), supaya chip-nya bernama benar walau tidak ada di hasil cari saat ini.
+   */
+  knownShops?: ShopOption[];
   /** Kosong = tambah project baru; terisi = ubah project yang sudah ada. */
   project?: {
     id: string;
@@ -51,6 +65,17 @@ export function ProjectFormButton({
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [selected, setSelected] = useState<string[]>(project?.shop_keys ?? []);
+  const [results, setResults] = useState<ShopOption[]>(initialShops);
+  const [capped, setCapped] = useState(false);
+  const [searching, setSearching] = useState(false);
+  const [searchError, setSearchError] = useState<string | null>(null);
+  // Nama shop yang pernah terlihat, supaya chip pilihan tetap bernama benar setelah
+  // hasil pencarian berganti dan shop itu tidak lagi ada di daftar.
+  const [known, setKnown] = useState<Record<string, ShopOption>>(() => {
+    const seed: Record<string, ShopOption> = {};
+    for (const s of [...initialShops, ...(knownShops ?? [])]) seed[s.shop_key] = s;
+    return seed;
+  });
   const [state, formAction, pending] = useActionState<ProjectFormState | null, FormData>(
     saveBdProject,
     null
@@ -67,15 +92,54 @@ export function ProjectFormButton({
     else router.refresh();
   }, [state, isNew, router]);
 
-  const shopByKey = useMemo(() => new Map(shops.map((s) => [s.shop_key, s])), [shops]);
+  // Balasan yang datang telat tidak boleh menimpa hasil ketikan yang lebih baru:
+  // tiap permintaan bernomor, dan hanya nomor terakhir yang boleh menulis state.
+  const seqRef = useRef(0);
 
-  const filtered = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    if (!q) return shops;
-    return shops.filter((s) =>
-      [s.shop_name, s.shop_id, s.shop_key].some((v) => v?.toLowerCase().includes(q))
-    );
-  }, [shops, query]);
+  useEffect(() => {
+    if (!open) return;
+    const term = query.trim();
+    const seq = ++seqRef.current;
+
+    // Kotak cari kosong = daftar bawaan yang sudah ikut terkirim bersama halaman.
+    // Tidak perlu bolak-balik ke server untuk menampilkan yang sudah ada di tangan.
+    if (!term) {
+      setResults(initialShops);
+      setCapped(false);
+      setSearching(false);
+      setSearchError(null);
+      return;
+    }
+
+    setSearching(true);
+    const timer = setTimeout(() => {
+      searchProjectShops(term)
+        .then((res) => {
+          if (seq !== seqRef.current) return;
+          setResults(res.shops);
+          setCapped(res.capped);
+          setSearchError(null);
+          setKnown((prev) => {
+            const next = { ...prev };
+            for (const s of res.shops) next[s.shop_key] = s;
+            return next;
+          });
+        })
+        .catch((e: unknown) => {
+          if (seq !== seqRef.current) return;
+          // Gagal cari ≠ tidak ada hasil. Dibedakan supaya orang tidak menyimpulkan
+          // shopnya memang tidak ada padahal querynya yang tidak sampai.
+          setResults([]);
+          setCapped(false);
+          setSearchError(e instanceof Error ? e.message : "Pencarian shop gagal");
+        })
+        .finally(() => {
+          if (seq === seqRef.current) setSearching(false);
+        });
+    }, SEARCH_DEBOUNCE_MS);
+
+    return () => clearTimeout(timer);
+  }, [open, query, initialShops]);
 
   const selectedSet = new Set(selected);
   const overLimit = selected.length > PROJECT_SHOP_LIMIT;
@@ -91,6 +155,9 @@ export function ProjectFormButton({
     // tidak jadi disimpan.
     setSelected(project?.shop_keys ?? []);
     setQuery("");
+    setResults(initialShops);
+    setCapped(false);
+    setSearchError(null);
     setOpen(true);
   }
 
@@ -192,7 +259,7 @@ export function ProjectFormButton({
                         title="Klik untuk melepas"
                         className="rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-700 hover:bg-red-100 hover:text-red-700"
                       >
-                        {shopByKey.get(key)?.shop_name ?? key} ✕
+                        {known[key]?.shop_name ?? key} ✕
                       </button>
                     ))}
                   </div>
@@ -211,12 +278,14 @@ export function ProjectFormButton({
                     onClick={() =>
                       setSelected((prev) => [
                         ...prev,
-                        ...filtered.map((s) => s.shop_key).filter((k) => !prev.includes(k)),
+                        ...results.map((s) => s.shop_key).filter((k) => !prev.includes(k)),
                       ])
                     }
                     className="rounded-md border border-slate-300 px-2 py-1.5 text-xs text-slate-700 hover:bg-slate-100"
                   >
-                    Pilih semua hasil ({filtered.length})
+                    {/* "yang tampil", bukan "semua hasil": kalau hasilnya kena batas,
+                        yang terpilih hanya sebagian dari yang cocok. */}
+                    Pilih semua yang tampil ({results.length})
                   </button>
                   {selected.length > 0 && (
                     <button
@@ -230,7 +299,7 @@ export function ProjectFormButton({
                 </div>
 
                 <div className="mt-2 max-h-60 overflow-y-auto rounded-md border border-slate-200">
-                  {filtered.map((s) => (
+                  {results.map((s) => (
                     <label
                       key={s.shop_key}
                       className="flex cursor-pointer items-center gap-2 border-b border-slate-100 px-2 py-1.5 text-sm last:border-b-0 hover:bg-slate-50"
@@ -248,14 +317,30 @@ export function ProjectFormButton({
                       <span className="text-[11px] text-slate-400">{s.product_count} kartu</span>
                     </label>
                   ))}
-                  {filtered.length === 0 && (
+                  {results.length === 0 && (
                     <p className="px-3 py-6 text-center text-sm text-slate-400">
-                      {shops.length === 0
-                        ? "Belum ada shop di katalog Produk TAP. Daftarkan deal atau upload master product list dulu."
-                        : `Tidak ada shop cocok dengan "${query}".`}
+                      {searching
+                        ? "Mencari…"
+                        : searchError
+                          ? searchError
+                          : query.trim()
+                            ? `Tidak ada shop cocok dengan "${query.trim()}".`
+                            : "Belum ada shop di katalog. Daftarkan deal atau upload master product list dulu."}
                     </p>
                   )}
                 </div>
+
+                {/* Batas hasil dikatakan, bukan disembunyikan: tanpa ini daftar yang
+                    terpotong terbaca seolah itulah semua shop yang cocok. */}
+                <p className="mt-1 text-[11px] text-slate-400">
+                  {searching
+                    ? "Mencari di katalog shop…"
+                    : capped
+                      ? `Ditampilkan ${SHOP_PICKER_LIMIT} shop teratas — masih ada yang cocok. Persempit pencarian (mis. ketik Shop ID).`
+                      : query.trim()
+                        ? `${results.length} shop cocok.`
+                        : `Daftar awal ${results.length} shop dengan kartu terbanyak. Ketik untuk mencari seluruh katalog — termasuk shop yang belum punya kartu produk.`}
+                </p>
 
                 {err("shop_keys") && (
                   <span className="mt-1 block text-xs text-red-600">{err("shop_keys")}</span>

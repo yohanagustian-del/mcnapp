@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { createClient } from "@/lib/supabase/server";
 import { writeAudit } from "@/lib/audit";
 import { requirePermission } from "@/lib/rbac";
 import { genId } from "@/lib/utils/id";
@@ -12,6 +13,7 @@ import {
   parseShopKeys,
   PROJECT_PRODUCT_LIMIT,
   PROJECT_SHOP_LIMIT,
+  SHOP_PICKER_LIMIT,
 } from "@/lib/deals/bd-project";
 import { parseProductRowKeys } from "@/lib/m10/product-keys";
 
@@ -21,6 +23,88 @@ export interface ProjectFormState {
   fieldErrors?: Record<string, string>;
   /** Diisi saat project BARU tersimpan, supaya form bisa langsung membuka detailnya. */
   projectId?: string;
+}
+
+/** Satu pilihan brand/shop di form Tambah/Edit Project. */
+export interface ShopOption {
+  shop_key: string;
+  shop_name: string | null;
+  shop_id: string | null;
+  product_count: number;
+}
+
+export interface ShopSearchResult {
+  shops: ShopOption[];
+  /** true = hasilnya kena batas, jadi masih ada yang cocok tapi tidak ditampilkan. */
+  capped: boolean;
+}
+
+/** numeric/bigint hasil agregasi bisa datang sebagai string tergantung driver. */
+function shopCount(v: unknown): number {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : 0;
+}
+
+/**
+ * Cari brand/shop untuk pemilih di form Tambah/Edit Project.
+ *
+ * KENAPA DI SERVER. Katalog shop sudah belasan ribu baris. Sebelumnya form memuat
+ * daftar shop sekali lalu menyaringnya di klien, jadi kotak carinya hanya bisa
+ * menemukan shop yang kebetulan masuk batas muat — shop di luar batas TIDAK ADA bagi
+ * pemakai, padahal ada di tab Deal Brand dan Produk TAP. Persis itu yang terjadi pada
+ * "Dua Belibis": urutan ke-1073 dari 16.030 shop, di luar batas 500 baris.
+ *
+ * Filternya sengaja sama persis dengan kotak cari tabel Shop di tab Deal Brand
+ * (`/deals`) — satu perilaku pencarian shop, bukan dua yang bisa berbeda diam-diam
+ * (CLAUDE.md #4). Query lewat client user biasa: view `deal_shop_summary` sudah
+ * security_invoker + grant select ke authenticated (0047), jadi tak perlu admin client.
+ */
+export async function searchProjectShops(query: string): Promise<ShopSearchResult> {
+  // Pemilihnya hanya muncul untuk yang boleh mengelola project; actionnya dijaga
+  // dengan izin yang sama supaya tidak jadi jalan pintas membaca katalog shop.
+  await requirePermission("bd_project.manage");
+
+  const supabase = await createClient();
+  // Urutan bawaan sama dengan tabel Shop di tab Deal Brand: kartu terbanyak dulu,
+  // lalu shop yang punya baris deal (0 kartu) — tanpa pengurutan kedua, shop yang
+  // baru didaftarkan menumpuk di ekor dan jadi yang pertama terpotong batas.
+  let shopQuery = supabase
+    .from("deal_shop_summary")
+    .select("shop_key, shop_name, shop_id, product_count")
+    .order("product_count", { ascending: false })
+    .order("deal_count", { ascending: false })
+    .order("shop_key", { ascending: true })
+    // +1 baris cuma untuk MENGETAHUI ada sisa; baris ekstranya dibuang di bawah.
+    .limit(SHOP_PICKER_LIMIT + 1);
+
+  const term = query.trim();
+  if (term) {
+    // Karakter yang punya arti khusus di PostgREST `or=(...)` — koma memisah kondisi,
+    // tanda kurung membungkusnya. Dibuang, bukan di-escape: ini kotak cari, dan nama
+    // shop yang memuatnya tetap ketemu lewat sisa katanya.
+    const safe = term.replace(/[(),]/g, " ").trim();
+    if (!safe) return { shops: [], capped: false };
+    const pattern = `%${safe}%`;
+    // shop_key sudah berisi Shop Name (atau "#shop_id" untuk baris tanpa nama), jadi
+    // tiga filter ini cukup — sama dengan `/deals`.
+    shopQuery = shopQuery.or(
+      `shop_key.ilike.${pattern},shop_name.ilike.${pattern},shop_id.ilike.${pattern}`
+    );
+  }
+
+  const { data, error } = await shopQuery;
+  if (error) throw new Error(`Gagal mencari shop: ${error.message}`);
+
+  const rows = data ?? [];
+  return {
+    shops: rows.slice(0, SHOP_PICKER_LIMIT).map((s) => ({
+      shop_key: s.shop_key as string,
+      shop_name: (s.shop_name as string | null) ?? null,
+      shop_id: (s.shop_id as string | null) ?? null,
+      product_count: shopCount(s.product_count),
+    })),
+    capped: rows.length > SHOP_PICKER_LIMIT,
+  };
 }
 
 /**
