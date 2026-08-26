@@ -65,12 +65,13 @@ const STATUS_CLASS: Record<string, string> = {
   done: "bg-slate-200 text-slate-700",
 };
 
-// Status payment: hijau hanya untuk "done"; dua status "proses" dibedakan warnanya
-// supaya barisnya bisa dipilah cepat tanpa membaca teksnya.
+// Status payment: hijau hanya untuk "done"; status lain dibedakan warnanya supaya
+// barisnya bisa dipilah cepat tanpa membaca teksnya.
 const PAYMENT_CLASS: Record<string, string> = {
   done: "bg-green-100 text-green-800",
   proses_finance_payment: "bg-blue-100 text-blue-800",
   proses_finance_brand: "bg-violet-100 text-violet-800",
+  ads_by_brand: "bg-orange-100 text-orange-800",
 };
 
 // Kelas sel sengaja sama dengan tabel Deal Brand: dua tabel dengan padding & ukuran

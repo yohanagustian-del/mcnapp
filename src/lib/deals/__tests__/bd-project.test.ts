@@ -46,7 +46,7 @@ describe("form Project BD", () => {
     expect(bdProjectSchema.safeParse({ name: "X", status: "batal" }).success).toBe(false);
   });
 
-  it("status payment opsional, dengan tiga pilihan yang dipakai dropdown", () => {
+  it("status payment opsional, dengan empat pilihan yang dipakai dropdown", () => {
     // Tidak diisi = belum diketahui, bukan salah satu status dipaksakan.
     expect(bdProjectSchema.parse({ name: "X" }).status_payment).toBeUndefined();
     expect(bdProjectSchema.parse({ name: "X", status_payment: "" }).status_payment).toBeUndefined();
@@ -58,10 +58,14 @@ describe("form Project BD", () => {
     expect(
       bdProjectSchema.parse({ name: "X", status_payment: "proses_finance_brand" }).status_payment
     ).toBe("proses_finance_brand");
+    expect(bdProjectSchema.parse({ name: "X", status_payment: "ads_by_brand" }).status_payment).toBe(
+      "ads_by_brand"
+    );
 
     expect(PAYMENT_STATUS_LABEL.done).toBe("Done");
     expect(PAYMENT_STATUS_LABEL.proses_finance_payment).toBe("Proses Finance Payment");
     expect(PAYMENT_STATUS_LABEL.proses_finance_brand).toBe("Proses Finance Brand");
+    expect(PAYMENT_STATUS_LABEL.ads_by_brand).toBe("Ads by Brand");
 
     expect(bdProjectSchema.safeParse({ name: "X", status_payment: "lunas" }).success).toBe(false);
   });

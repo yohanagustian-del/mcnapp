@@ -40,6 +40,7 @@ export const PAYMENT_STATUSES = [
   { value: "done", label: "Done" },
   { value: "proses_finance_payment", label: "Proses Finance Payment" },
   { value: "proses_finance_brand", label: "Proses Finance Brand" },
+  { value: "ads_by_brand", label: "Ads by Brand" },
 ] as const;
 
 export type PaymentStatus = (typeof PAYMENT_STATUSES)[number]["value"];
@@ -62,7 +63,7 @@ export const bdProjectSchema = z.object({
   status: z.enum(["running", "hold", "done"]).default("running"),
   status_payment: z.preprocess(
     (v) => (typeof v === "string" && v.trim() === "" ? undefined : v),
-    z.enum(["done", "proses_finance_payment", "proses_finance_brand"]).optional()
+    z.enum(["done", "proses_finance_payment", "proses_finance_brand", "ads_by_brand"]).optional()
   ),
   notes: z.preprocess(
     (v) => (typeof v === "string" && v.trim() === "" ? undefined : v),
