@@ -20,6 +20,8 @@ export const NAV_ICON_PATHS: Record<string, string> = {
   "/workspace/cm": "M3 7h18v12H3zM8 7V5a2 2 0 012-2h4a2 2 0 012 2v2M3 12h18",
   "/reports": "M8 3h8l4 4v14H4V3zM8 13h8M8 17h5M14 3v5h5",
   "/schedule": "M4 6h16v14H4zM4 10h16M8 3v4M16 3v4M9 15h6",
+  // Kapasitas Kreator (PX): slot-slot kapasitas — beberapa kotak terisi sebagian.
+  "/px/capability": "M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4zM14 14h6v6h-6zM17 17v-3",
   "/deals": "M3 8l9-5 9 5-9 5zM3 12l9 5 9-5M3 16l9 5 9-5",
   "/deals/baru": "M12 5v14M5 12h14",
   "/deals/import": "M12 3v10m0 0l-4-4m4 4l4-4M4 17v3h16v-3",

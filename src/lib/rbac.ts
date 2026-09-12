@@ -76,6 +76,10 @@ export const NAV_ITEMS: NavItem[] = [
   { href: "/reports", label: "Report Kreator", roles: [...MANAGEMENT_ROLES, ...CM_ROLES], group: "Creator Management" },
   // M13 Penjadwalan Live: CM + BizDev input slots; Creator Support verifies outside CM hours.
   { href: "/schedule", label: "Jadwal Live", roles: [...MANAGEMENT_ROLES, ...CM_ROLES, ...BIZDEV_ROLES, "creator_support"], group: "Creator Management" },
+  // PX-M1: Product Exchange Creator Capability Registry — kapasitas match aktif
+  // per (creator, level2, price_segment). BizDev (AM) butuh baca Coverage untuk
+  // menjanjikan kuota admisi ke klien MEA Agency; hanya CM/CPM yang mengisi slot.
+  { href: "/px/capability", label: "Kapasitas Kreator (PX)", roles: [...MANAGEMENT_ROLES, ...CM_ROLES, ...BIZDEV_ROLES], group: "Creator Management" },
 
   { href: "/deals", label: "Deal Brand", roles: [...MANAGEMENT_ROLES, ...BIZDEV_ROLES, "finance"], group: "BizDev & Deal" },
   { href: "/deals/baru", label: "Registrasi Deal", roles: [...MANAGEMENT_ROLES, "bizdev_lead", "bizdev"], group: "BizDev & Deal" },
@@ -249,6 +253,15 @@ export const PERMISSIONS: Record<string, Role[]> = {
   // ===== M11 Governance (§2B/§2C) =====
   // Multi-Director account management (invite/suspend director & roles): Director.
   "m11.manage_accounts": ["director"] as Role[],
+  // ===== PX-M1 Creator Capability Registry (bridge.px_creator_capability) =====
+  // Baca tab Registry & Coverage: management + CM (mengisi) + BizDev (AM, butuh
+  // baca Coverage untuk menjanjikan kuota admisi ke klien MEA Agency).
+  "px.capability.read": [...MANAGEMENT_ROLES, ...CM_ROLES, ...BIZDEV_ROLES],
+  // Ubah slots_total: management + cm_lead (Lukman/Sr SPV MCN konfirmasi CM Lead
+  // menilai lintas-tim dari data) + cpm (HANYA kreator sendiri — K4, ditegakkan
+  // per-baris di server action, BUKAN lewat daftar role ini; lihat requireMember
+  // + creators.owner_cpm_id check di src/app/(portal)/px/capability/actions.ts).
+  "px.capability.write": [...MANAGEMENT_ROLES, "cm_lead", "cpm"],
   // ===== M13 Penjadwalan Live Streaming (§ live-schedule) =====
   // View the weekly live-schedule calendar: management + CM + BizDev + Creator Support.
   "schedule.view": [...MANAGEMENT_ROLES, ...CM_ROLES, ...BIZDEV_ROLES, "creator_support"],

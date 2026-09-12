@@ -2,6 +2,90 @@
 
 Status per sesi 2026-07-09 (sesi 5, backlog-sweep + audit deploy). Baca ini + `CLAUDE.md` sebelum lanjut.
 
+## ⚡ SESI 2026-09-12 — PX-M1 Creator Capability Registry (Product Exchange) + ⚠ peringatan drift ledger migrasi
+
+**⚠️ WAJIB BACA SEBELUM MENJALANKAN `supabase db push` DI REPO INI.** Ledger migrasi remote (`list_migrations`)
+**TIDAK COCOK** dengan nomor file di `supabase/migrations/`, lebih jauh dari yang tercatat sebelumnya di sini:
+- Ada di repo, TIDAK muncul di ledger remote sebagai nomor yang sama: `0015_m12_partitioning`, `0023_live_schedule`
+  (nama migrasi di remote untuk periode itu adalah `leak_artifact_rollup`/`leak_artifact_v2`/`shopee_ingest`/dst — tidak
+  ada baris bernama `m12_partitioning` atau `live_schedule` sama sekali di ledger).
+- Ada di ledger remote, TIDAK ada file dengan nomor itu di repo: `0011_m9_hardening` (ada, tapi sebagai nama, bukan
+  angka — cek `20260706130113`), dan `0010_rbac_foundation` **tercatat DUA KALI** di ledger (`20260706015902` dan
+  `20260706214723` — migrasi yang sama diterapkan ulang di bawah timestamp berbeda).
+- Nomor berbeda: `creator_master_gate` & `creators_username_unique` ada di repo sebagai `0049`/`0050`, tapi tercatat di
+  ledger remote sebagai `0028_creator_master_gate`/`0029_creators_username_unique` (bentrok dengan `0028_creators_delete_rls`/
+  `0029_creator_class` yang JUGA ada — ledger remote memakai penomoran bebas per migrasi, bukan urut file repo).
+- **Diverifikasi juga**: `live_schedule_slots` (dipakai M13 Jadwal Live) **ADA** di production — tabelnya nyata, hanya
+  terbawa migrasi bernama lain (bukan `0023_live_schedule`), persis dugaan di surat tugas PX-M1.
+
+**Konsekuensi**: `apply_migration` (dipakai sesi ini, HANYA menambah di ujung ledger) aman. `supabase db push` /
+apply-berdasar-nomor-file TIDAK aman — siapa pun yang menjalankannya akan menemukan drift, kemungkinan re-apply
+migrasi lama atau bentrok nomor. Selalu `list_migrations` dulu untuk konfirmasi nomor/berikutnya sebelum apply.
+
+**PX-M1 Creator Capability Registry** (`bridge.px_creator_capability` + `bridge.px_coverage_map()`, migrasi
+`0051_px_creator_capability.sql`) — peta kapasitas kreator (berapa banyak match aktif bersamaan yang sanggup
+ditangani per kreator × level2_category × price_segment), lapisan di atas `creator_subcat_segment_gmv` yang sudah
+ada. Ini modul PERTAMA di repo yang punya schema non-`public` (`bridge`).
+
+- **Migrasi 0051 SUDAH DI-APPLY KE PRODUCTION (`bqknstylbpwsnlgnzayw`)**, dikonfirmasi user 2026-09-12 (permintaan
+  apply pertama sempat ditolak sistem permission sesi sebelumnya — konfirmasi eksplisit diminta ulang, disetujui,
+  lalu dijalankan via `apply_migration`, BUKAN `supabase db push` — lihat peringatan drift di atas). **BELUM
+  di-apply ke staging (`fomlangoiiywhexwoqom`)** — jalankan migrasi yang sama di sana sebelum tim menguji dari
+  environment staging.
+  Pasca-apply diverifikasi langsung lewat SQL: schema `bridge` ada, `slots_available` generated column `ALWAYS`,
+  CHECK `ck_pxcc_no_overcommit` ada, index `(level2_category, price_segment)` ada, `bridge.px_coverage_map()` ada,
+  dan keempat fungsi `public.px_capability_recompute` / `public.px_capability_list` /
+  `public.px_capability_bulk_set_slots` / `public.px_coverage` HANYA punya grant EXECUTE ke `postgres` (owner) dan
+  `service_role` — `anon`/`authenticated` dikonfirmasi TIDAK ada di daftar grant. **Over-commit CHECK diuji nyata**
+  di production (bukan cuma didokumentasikan): insert baris `__qa_overcommit_test__` dengan `slots_total=5`, set
+  `slots_committed=3` langsung lewat SQL, lalu `update ... set slots_total=2` → **gagal dengan error
+  `ck_pxcc_no_overcommit` persis seperti diharapkan** — baris ujinya sudah dibersihkan (0 baris tersisa). Security
+  advisor (`get_advisors`) dicek setelah apply — nol temuan baru terkait 4 fungsi/tabel PX-M1 ini (temuan yang ada
+  semuanya pre-existing, tidak terkait modul ini).
+- **Keputusan arsitektur penting yang TIDAK ada di surat tugas kata-per-kata, wajib dipahami sebelum menyentuh modul
+  ini**: `bridge` sengaja TIDAK didaftarkan ke PostgREST (Layer 3 keamanan) — dan itu berarti `createAdminClient()`
+  milik APLIKASI INI SENDIRI juga tidak bisa memanggil `bridge.px_creator_capability`/`bridge.px_coverage_map()`
+  langsung lewat `.from()`/`.rpc()` (exposed-schema PostgREST adalah satu daftar global per project, bukan per JWT
+  role — dikonfirmasi ke dokumentasi Supabase). Solusinya: empat fungsi wrapper `public.px_capability_recompute` /
+  `public.px_capability_list` / `public.px_capability_bulk_set_slots` / `public.px_coverage` hidup di schema `public`
+  (jadi tetap kelihatan oleh PostgREST) tapi `SECURITY DEFINER`, dan badannya menyentuh `bridge.*` lewat SQL biasa —
+  bukan REST. Jangan pernah mendaftarkan `bridge` ke Exposed Schemas di Dashboard untuk "mempermudah" — itu
+  membongkar seluruh Layer 3. Detail penuh ada di komentar migrasi 0051.
+- **K4 (deviasi dari PRD §3.2 Rule 4, dikonfirmasi Lukman/Sr SPV MCN 2026-09-12)**: pengisi `slots_total` bukan "CM
+  Lead atau Senior SPV MCN" seperti PRD, melainkan **CPM yang memegang kreatornya** (`creators.owner_cpm_id`).
+  Konsekuensinya: gerbang per-baris di server action (`src/app/(portal)/px/capability/actions.ts`), BUKAN cuma daftar
+  role di `PERMISSIONS["px.capability.write"]` — CM Lead & Management tetap lintas-baris (Lukman konfirmasi CM Lead
+  mampu menilai angkanya dari data), CPM dibatasi ke kreator miliknya sendiri, ditolak dengan pesan Bahasa Indonesia
+  eksplisit (bukan disaring diam-diam) kalau mencoba menyentuh kreator CPM lain. Diuji di
+  `src/app/(portal)/px/capability/__tests__/actions.test.ts`.
+- `slots_committed` TETAP 0 untuk semua baris sampai M5 (`px_match`) lahir — tidak ada trigger yang mengisinya
+  (belum ada sumbernya), dan itu **disengaja**, bukan bug. `slots_available = slots_total` untuk sekarang.
+- Recompute `proven_gmv`/`proven_orders` (`src/lib/px/capability-recompute.ts`) dipicu dari `runIngest()`
+  (`src/lib/ingest/run.ts`) sebagai langkah baru — pipeline sekarang punya 9 langkah bernomor (dulu 8): langkah 7 =
+  recompute PX (try/catch sendiri, tidak pernah menggagalkan ingest), langkah 8 = Audit (dulu 7), langkah 9 = Analisa
+  Link Leakage (dulu 8). Nol cron baru (`getConfig()` request-scoped, throw di luar request context — recompute HANYA
+  jalan dari alur ingest).
+- Halaman `/px/capability` (nav "Kapasitas Kreator (PX)", grup Creator Management): tab **Registry** (editable per
+  baris — bukan bulk seragam seperti Shop ID/Name di Produk TAP, karena `slots_total` memang berbeda tiap
+  kreator/kategori; semua baris yang diubah disimpan dalam SATU submit lewat `px_capability_bulk_set_slots`) + tab
+  **Coverage** (read-only, `bridge.px_coverage_map()` lewat `public.px_coverage`, export CSV). Keterbatasan Coverage
+  (kategori dengan NOL kreator tidak pernah muncul sebagai baris — butuh tabel master kategori dari Hans, di luar
+  lingkup PX-M1) tertulis di layar tab itu sendiri.
+- **Belum diverifikasi di sesi ini** (migrasi sudah ter-apply, tapi ini butuh akun/UI sungguhan, bukan cuma SQL):
+  jalankan `npx tsx scripts/gen-sample-leak-files.ts ./sample-data` atau ingest nyata → cek `bridge.px_creator_capability`
+  terisi & `last_computed_at` ter-update lewat pipeline (bukan insert manual seperti uji over-commit di atas); buka
+  `/px/capability` sebagai `cm_lead` dan `cpm` untuk uji gerbang K4 di UI sungguhan. Over-commit DB-level SUDAH
+  diuji nyata langsung lewat SQL (lihat poin apply migrasi di atas) — `src/lib/px/__tests__/overcommit.qa-manual.test.ts`
+  tetap `skip` di repo karena repo ini tidak punya driver `pg` untuk mengotomasinya lewat `createAdminClient()`,
+  bukan karena belum pernah diuji.
+- Tes: `src/lib/px/__tests__/capability-recompute.test.ts` (mock Supabase — scoping per batch, atomicity/rollback
+  kontrak, audit kegagalan), `src/app/(portal)/px/capability/__tests__/actions.test.ts` (gerbang K4 CPM, validasi
+  `slots_total >= slots_committed`), `src/lib/px/__tests__/rls-creator-deny.qa-manual.test.ts` (guard
+  `RUN_PX_RLS_SMOKE=1` — bukti Layer 3 lewat client anon-key sungguhan, tanpa perlu harness login `creator_user`).
+- **Di luar lingkup PX-M1** (jangan dikerjakan tanpa diminta ulang): tabel `px_match` (M5), trigger `slots_committed`,
+  tabel master kategori/dropdown kategori (Hans), harness test RLS penuh, transport lintas-proyek `px_coverage_map()`
+  ke CDPS (M3).
+
 ## ⚡ SESI 2026-08-07 — Filter/sort CM Workspace, kelas "Eksternal", request CM massal, sort+paginasi Special Project
 1. **CM Workspace — "Pertumbuhan GMV Mingguan" & "Creator & Growth Mingguan"**: tambah filter **Kelas** (kelas kreator) dan **Kategori** (niche utama = `creators.niche`, fallback `top_niches[0]`) plus **semua header bisa diklik untuk urut naik/turun**. Query creators di `workspace/cm/page.tsx` kini ikut mengambil `creator_class, niche, top_niches`. Dipakai infra bersama `useTableControls` (facets + SortConfig + SortableTh) — tidak ada implementasi filter/sort kedua. Catatan: frasa user "filter kelas kategori" ambigu, jadi DUA facet dipasang (kelas kreator + kategori/niche); kalau ternyata cuma satu yang dipakai, hapus facet yang tak terpakai di `weekly-growth-table.tsx` + `creator-growth-panel.tsx`.
 2. **Kelas kreator jadi 4: + "Eksternal"** (`creators.creator_class`). Migration **0034_creator_class_eksternal.sql** — **SUDAH APPLIED KE PRODUCTION (`bqknstylbpwsnlgnzayw`)**, enum terverifikasi `reguler|top_creator|influencer|eksternal`. Label + parser + keterangan satu sumber di `src/lib/creators/creator-class.ts` (`CREATOR_CLASS_DESCRIPTION`, `CREATOR_CLASS_HINT`); `parseCreatorClass` menerima "Eksternal"/"External"/"external creator". Keterangan arti kelas muncul di: form **Tambah Kreator**, modal **Edit** (prop `hint` baru di SelectField), sheet **Petunjuk** template Excel, dan note kolom `IMPORT_COLUMNS`. Badge amber di tabel Kreator.
