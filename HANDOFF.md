@@ -27,12 +27,12 @@ migrasi lama atau bentrok nomor. Selalu `list_migrations` dulu untuk konfirmasi 
 ditangani per kreator × level2_category × price_segment), lapisan di atas `creator_subcat_segment_gmv` yang sudah
 ada. Ini modul PERTAMA di repo yang punya schema non-`public` (`bridge`).
 
-- **Migrasi 0051 SUDAH DI-APPLY KE PRODUCTION (`bqknstylbpwsnlgnzayw`)**, dikonfirmasi user 2026-09-12 (permintaan
-  apply pertama sempat ditolak sistem permission sesi sebelumnya — konfirmasi eksplisit diminta ulang, disetujui,
-  lalu dijalankan via `apply_migration`, BUKAN `supabase db push` — lihat peringatan drift di atas). **BELUM
-  di-apply ke staging (`fomlangoiiywhexwoqom`)** — jalankan migrasi yang sama di sana sebelum tim menguji dari
-  environment staging.
-  Pasca-apply diverifikasi langsung lewat SQL: schema `bridge` ada, `slots_available` generated column `ALWAYS`,
+- **Migrasi 0051 SUDAH DI-APPLY KE PRODUCTION (`bqknstylbpwsnlgnzayw`) DAN STAGING (`fomlangoiiywhexwoqom`)**,
+  dikonfirmasi user 2026-09-12 (permintaan apply pertama sempat ditolak sistem permission sesi sebelumnya —
+  konfirmasi eksplisit diminta ulang, disetujui, lalu dijalankan via `apply_migration`, BUKAN `supabase db push` —
+  lihat peringatan drift di atas). Staging diverifikasi ringan (schema `bridge`, tabel, keempat fungsi wrapper ada);
+  verifikasi penuh (grant, generated column, CHECK) hanya dilakukan di production — lihat detail di bawah.
+  Pasca-apply diverifikasi langsung lewat SQL (production): schema `bridge` ada, `slots_available` generated column `ALWAYS`,
   CHECK `ck_pxcc_no_overcommit` ada, index `(level2_category, price_segment)` ada, `bridge.px_coverage_map()` ada,
   dan keempat fungsi `public.px_capability_recompute` / `public.px_capability_list` /
   `public.px_capability_bulk_set_slots` / `public.px_coverage` HANYA punya grant EXECUTE ke `postgres` (owner) dan
