@@ -27,14 +27,21 @@ migrasi lama atau bentrok nomor. Selalu `list_migrations` dulu untuk konfirmasi 
 ditangani per kreator × level2_category × price_segment), lapisan di atas `creator_subcat_segment_gmv` yang sudah
 ada. Ini modul PERTAMA di repo yang punya schema non-`public` (`bridge`).
 
-- **Migrasi 0051 BELUM di-apply ke project mana pun** (production `bqknstylbpwsnlgnzayw` maupun staging
-  `fomlangoiiywhexwoqom`) — permintaan `apply_migration` di sesi ini ditolak user (perubahan skema produksi + REVOKE
-  butuh konfirmasi eksplisit dulu, bukan dijalankan otomatis). File migrasi sudah siap; jalankan `apply_migration`
-  (BUKAN `supabase db push` — lihat peringatan drift di atas) begitu dikonfirmasi, lalu verifikasi: schema `bridge`
-  ada, `slots_available` generated column benar, CHECK `ck_pxcc_no_overcommit` ada, index
-  `(level2_category, price_segment)` ada, dan keempat fungsi `public.px_capability_recompute` /
-  `public.px_capability_list` / `public.px_capability_bulk_set_slots` / `public.px_coverage` ter-REVOKE dari
-  `public, anon, authenticated` (hanya `service_role` yang boleh EXECUTE — lihat alasan di komentar migrasi).
+- **Migrasi 0051 SUDAH DI-APPLY KE PRODUCTION (`bqknstylbpwsnlgnzayw`)**, dikonfirmasi user 2026-09-12 (permintaan
+  apply pertama sempat ditolak sistem permission sesi sebelumnya — konfirmasi eksplisit diminta ulang, disetujui,
+  lalu dijalankan via `apply_migration`, BUKAN `supabase db push` — lihat peringatan drift di atas). **BELUM
+  di-apply ke staging (`fomlangoiiywhexwoqom`)** — jalankan migrasi yang sama di sana sebelum tim menguji dari
+  environment staging.
+  Pasca-apply diverifikasi langsung lewat SQL: schema `bridge` ada, `slots_available` generated column `ALWAYS`,
+  CHECK `ck_pxcc_no_overcommit` ada, index `(level2_category, price_segment)` ada, `bridge.px_coverage_map()` ada,
+  dan keempat fungsi `public.px_capability_recompute` / `public.px_capability_list` /
+  `public.px_capability_bulk_set_slots` / `public.px_coverage` HANYA punya grant EXECUTE ke `postgres` (owner) dan
+  `service_role` — `anon`/`authenticated` dikonfirmasi TIDAK ada di daftar grant. **Over-commit CHECK diuji nyata**
+  di production (bukan cuma didokumentasikan): insert baris `__qa_overcommit_test__` dengan `slots_total=5`, set
+  `slots_committed=3` langsung lewat SQL, lalu `update ... set slots_total=2` → **gagal dengan error
+  `ck_pxcc_no_overcommit` persis seperti diharapkan** — baris ujinya sudah dibersihkan (0 baris tersisa). Security
+  advisor (`get_advisors`) dicek setelah apply — nol temuan baru terkait 4 fungsi/tabel PX-M1 ini (temuan yang ada
+  semuanya pre-existing, tidak terkait modul ini).
 - **Keputusan arsitektur penting yang TIDAK ada di surat tugas kata-per-kata, wajib dipahami sebelum menyentuh modul
   ini**: `bridge` sengaja TIDAK didaftarkan ke PostgREST (Layer 3 keamanan) — dan itu berarti `createAdminClient()`
   milik APLIKASI INI SENDIRI juga tidak bisa memanggil `bridge.px_creator_capability`/`bridge.px_coverage_map()`
@@ -64,12 +71,13 @@ ada. Ini modul PERTAMA di repo yang punya schema non-`public` (`bridge`).
   **Coverage** (read-only, `bridge.px_coverage_map()` lewat `public.px_coverage`, export CSV). Keterbatasan Coverage
   (kategori dengan NOL kreator tidak pernah muncul sebagai baris — butuh tabel master kategori dari Hans, di luar
   lingkup PX-M1) tertulis di layar tab itu sendiri.
-- **Belum bisa diverifikasi otomatis di sesi ini** (butuh migrasi ter-apply dulu): apply 0051 → jalankan
-  `npx tsx scripts/gen-sample-leak-files.ts ./sample-data` atau ingest nyata → cek `bridge.px_creator_capability`
-  terisi & `last_computed_at` ter-update; buka `/px/capability` sebagai `cm_lead` dan `cpm` untuk uji gerbang K4 di
-  UI sungguhan; over-commit DB-level (`ck_pxcc_no_overcommit`) HANYA bisa diuji dengan koneksi Postgres langsung
-  (SQL editor / MCP) — repo ini tidak punya driver `pg`, jadi tidak diotomasi lewat `createAdminClient()` (lihat
-  `src/lib/px/__tests__/overcommit.qa-manual.test.ts` untuk langkah SQL persis + alasannya).
+- **Belum diverifikasi di sesi ini** (migrasi sudah ter-apply, tapi ini butuh akun/UI sungguhan, bukan cuma SQL):
+  jalankan `npx tsx scripts/gen-sample-leak-files.ts ./sample-data` atau ingest nyata → cek `bridge.px_creator_capability`
+  terisi & `last_computed_at` ter-update lewat pipeline (bukan insert manual seperti uji over-commit di atas); buka
+  `/px/capability` sebagai `cm_lead` dan `cpm` untuk uji gerbang K4 di UI sungguhan. Over-commit DB-level SUDAH
+  diuji nyata langsung lewat SQL (lihat poin apply migrasi di atas) — `src/lib/px/__tests__/overcommit.qa-manual.test.ts`
+  tetap `skip` di repo karena repo ini tidak punya driver `pg` untuk mengotomasinya lewat `createAdminClient()`,
+  bukan karena belum pernah diuji.
 - Tes: `src/lib/px/__tests__/capability-recompute.test.ts` (mock Supabase — scoping per batch, atomicity/rollback
   kontrak, audit kegagalan), `src/app/(portal)/px/capability/__tests__/actions.test.ts` (gerbang K4 CPM, validasi
   `slots_total >= slots_committed`), `src/lib/px/__tests__/rls-creator-deny.qa-manual.test.ts` (guard
