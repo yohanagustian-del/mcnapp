@@ -17,6 +17,7 @@ import {
   computeSharedAutoFillFields, fetchMonthlyAvgGmvByCreator, writeCreatorAutoFillUpdate,
 } from "./creator-autofill";
 import { runLeakAnalysis, type LeakAnalysisResult } from "@/lib/m4/leak-analysis";
+import { recomputeCapabilityForBatch } from "@/lib/px/capability-recompute";
 // Retention lives in its own module (leak-retention.ts) so the leak analysis can
 // import it without a cycle through this file; re-exported here for the existing
 // importers of `enforceLeakRetention` from "./run".
@@ -56,6 +57,14 @@ export interface RunIngestResult {
   leak: LeakAnalysisResult | null;
   leakSkipped: string | null;
   leakError: string | null;
+  /**
+   * PX-M1: rows written by the capability recompute for this batch's creators, or
+   * null when it didn't run (see capabilitySkipped/capabilityError). Never fails
+   * the ingest — a recompute error is reported here, not thrown.
+   */
+  capability: number | null;
+  capabilitySkipped: string | null;
+  capabilityError: string | null;
 }
 
 /** sha256 of the raw file bytes — cheap provenance record in upload_batches (no row content kept). */
@@ -119,8 +128,15 @@ function describeMcnParseFailure(mcnParsed: ParseResult<McnRow>): string {
  *   6. upload_batches → status='processed'. On any failure: status='failed' + error,
  *      and aggregate tables are NOT written partially (aggregates are only written
  *      after the full in-memory computation succeeds, in one pass, per creator).
- *   7. audit_logs for ingest (type auto).
- *   8. Link-leakage analysis (runLeakAnalysis) when a TAP file is present — its own
+ *   7. PX-M1 capability recompute (recomputeCapabilityForBatch) — refreshes
+ *      bridge.px_creator_capability.proven_* for the creators in THIS batch. Own
+ *      try/catch, own result fields (capability/capabilitySkipped/capabilityError):
+ *      the performance aggregates are already committed by step 6, so a recompute
+ *      failure must be reported, never roll back the ingest (surat tugas PX-M1 §5
+ *      Langkah 3 — same reasoning as step 9's leak analysis, just earlier in the
+ *      list since it has no file-upload precondition to wait on).
+ *   8. audit_logs for ingest (type auto).
+ *   9. Link-leakage analysis (runLeakAnalysis) when a TAP file is present — its own
  *      try/catch: the aggregates are already committed, so a leak failure is reported
  *      in the result (leakError) instead of failing/rolling back the batch.
  */
@@ -307,7 +323,11 @@ export async function runIngest(input: RunIngestInput): Promise<RunIngestResult>
       .eq("batch_id", batchId);
     if (doneError) throw new Error(`Gagal update status upload_batches: ${doneError.message}`);
 
-    // ---- 7. Audit ----
+    // ---- 7. PX-M1: recompute bridge.px_creator_capability.proven_* (own try/catch,
+    // never fails the ingest — see step doc above and capability-recompute.ts) ----
+    const capabilityResult = await recomputeCapabilityForBatch(admin, [...creatorIdsSet], actorId);
+
+    // ---- 8. Audit ----
     // rows_tap = number of TAP rows actually parsed (no staging round-trip anymore).
     // leak_engine flag records the product decision in force at ingest time; the leak
     // analysis itself writes its own audit row (m4.leak_compute) in step 8.
@@ -341,7 +361,7 @@ export async function runIngest(input: RunIngestInput): Promise<RunIngestResult>
       });
     }
 
-    // ---- 8. Analisa link leakage dari BARIS YANG SAMA (0 LLM) ----
+    // ---- 9. Analisa link leakage dari BARIS YANG SAMA (0 LLM) ----
     // Keputusan interview: fungsi artifak "Agency Leaked Generator" dipindah ke
     // dalam platform, dan file MCN+TAP mingguan cukup diupload SEKALI di sini.
     // Dijalankan setelah batch 'processed' dan dibungkus try/catch sendiri:
@@ -388,6 +408,9 @@ export async function runIngest(input: RunIngestInput): Promise<RunIngestResult>
       leak,
       leakSkipped,
       leakError,
+      capability: capabilityResult.rows,
+      capabilitySkipped: capabilityResult.skipped,
+      capabilityError: capabilityResult.error,
     };
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);

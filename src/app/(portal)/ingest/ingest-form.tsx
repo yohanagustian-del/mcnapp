@@ -186,6 +186,13 @@ export function IngestForm() {
               ulang analisa dari halaman Link Leakage.
             </p>
           )}
+          {result.capabilityError && (
+            <p className="mt-2 rounded-md bg-red-50 p-2 text-xs text-red-700">
+              Agregat performa TERSIMPAN, tapi recompute kapasitas (PX) gagal: {result.capabilityError} —
+              nilai proven_gmv/proven_orders lama di Registry Kapasitas tetap dipakai sampai ingest
+              berikutnya berhasil.
+            </p>
+          )}
           {result.skipped.length > 0 && (
             <details className="mt-2">
               <summary className="cursor-pointer text-xs text-amber-700">
