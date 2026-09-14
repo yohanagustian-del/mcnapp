@@ -1,10 +1,13 @@
 /**
  * Agregasi adopsi sistem (QA feedback /okr): jam pemakaian tools per user per
- * bulan dari tool_usage_logs (page-view). Deterministik, 0 LLM.
+ * minggu dari tool_usage_logs (page-view). Deterministik, 0 token AI.
  *
  * Sessionization: page-view berurutan dengan gap ≤ SESSION_GAP_MIN dianggap satu
  * sesi; durasi sesi = last−first, minimal MIN_SESSION_MIN (sesi 1 view tetap
  * dihitung aktivitas singkat).
+ *
+ * Akumulasi per minggu (Senin−Minggu, UTC): sebuah sesi masuk ke minggu tempat
+ * sesi itu DIMULAI (waktu view pertamanya).
  */
 export const SESSION_GAP_MIN = 30;
 export const MIN_SESSION_MIN = 5;
@@ -14,19 +17,34 @@ export interface UsageLog {
   occurred_at: string; // ISO timestamp
 }
 
-export interface MonthlyUsage {
+export interface WeeklyUsage {
   memberId: string;
-  month: string; // YYYY-MM
+  /** Senin minggu itu, YYYY-MM-DD (UTC). */
+  weekStart: string;
+  /** Minggu ke bulan mana difilter — bulan dari weekStart, YYYY-MM. */
+  month: string;
   hours: number;
   sessions: number;
   pageViews: number;
 }
 
-export function aggregateUsageHours(
+/** Senin (00:00 UTC) dari minggu yang memuat waktu `ms`. */
+function mondayOf(ms: number): number {
+  const d = new Date(ms);
+  const day = d.getUTCDay(); // 0=Minggu..6=Sabtu
+  const diffToMonday = day === 0 ? -6 : 1 - day;
+  return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() + diffToMonday);
+}
+
+function isoDate(ms: number): string {
+  return new Date(ms).toISOString().slice(0, 10);
+}
+
+export function aggregateUsageByWeek(
   logs: UsageLog[],
   gapMinutes: number = SESSION_GAP_MIN,
   minSessionMinutes: number = MIN_SESSION_MIN
-): MonthlyUsage[] {
+): WeeklyUsage[] {
   const byMember = new Map<string, number[]>();
   for (const l of logs) {
     const t = new Date(l.occurred_at).getTime();
@@ -36,7 +54,7 @@ export function aggregateUsageHours(
     byMember.set(l.member_id, arr);
   }
 
-  const out = new Map<string, MonthlyUsage>(); // key `${memberId}|${month}`
+  const out = new Map<string, WeeklyUsage>(); // key `${memberId}|${weekStart}`
   const gapMs = gapMinutes * 60_000;
   const minMs = minSessionMinutes * 60_000;
 
@@ -48,10 +66,16 @@ export function aggregateUsageHours(
 
     const flush = (endTime: number, viewCount: number) => {
       const dur = Math.max(endTime - start, minMs);
-      const d = new Date(start);
-      const month = `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
-      const key = `${memberId}|${month}`;
-      const cur = out.get(key) ?? { memberId, month, hours: 0, sessions: 0, pageViews: 0 };
+      const weekStart = isoDate(mondayOf(start));
+      const key = `${memberId}|${weekStart}`;
+      const cur = out.get(key) ?? {
+        memberId,
+        weekStart,
+        month: weekStart.slice(0, 7),
+        hours: 0,
+        sessions: 0,
+        pageViews: 0,
+      };
       cur.hours += dur / 3_600_000;
       cur.sessions += 1;
       cur.pageViews += viewCount;
@@ -72,5 +96,14 @@ export function aggregateUsageHours(
 
   return [...out.values()]
     .map((u) => ({ ...u, hours: Math.round(u.hours * 10) / 10 }))
-    .sort((a, b) => (a.month === b.month ? b.hours - a.hours : b.month.localeCompare(a.month)));
+    .sort((a, b) => (a.weekStart === b.weekStart ? b.hours - a.hours : b.weekStart.localeCompare(a.weekStart)));
+}
+
+/** Label tampil "8–14 Sep 2026" dari Senin (weekStart, YYYY-MM-DD). */
+export function formatWeekLabel(weekStart: string): string {
+  const start = new Date(`${weekStart}T00:00:00Z`);
+  const end = new Date(start.getTime() + 6 * 86_400_000);
+  const startLabel = start.toLocaleDateString("id-ID", { day: "numeric", timeZone: "UTC" });
+  const endLabel = end.toLocaleDateString("id-ID", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" });
+  return `${startLabel}–${endLabel}`;
 }
