@@ -141,7 +141,10 @@ export default async function OkrPage() {
         .from("tool_usage_logs")
         .select("member_id, occurred_at")
         .gte("occurred_at", since.toISOString())
-        .order("occurred_at", { ascending: true })
+        // Descending: API punya batas baris tersendiri (di luar kendali .limit()
+        // di sini) — kalau volume 92 hari melampauinya, baris yang KEPOTONG harus
+        // yang PALING LAMA, bukan aktivitas terbaru (yang justru dipakai Last Access).
+        .order("occurred_at", { ascending: false })
         .limit(20000),
       supabase.from("team_members").select("id, name, role").eq("active", true),
       supabase
@@ -156,8 +159,10 @@ export default async function OkrPage() {
 
     const lastAccessByMember = new Map<string, string>();
     for (const l of usageLogs ?? []) {
-      // usageLogs terurut ascending → penulisan terakhir per member = paling baru.
-      lastAccessByMember.set(l.member_id, l.occurred_at);
+      // usageLogs terurut descending → kemunculan pertama per member = paling baru.
+      if (!lastAccessByMember.has(l.member_id)) {
+        lastAccessByMember.set(l.member_id, l.occurred_at);
+      }
     }
 
     const lastActivityByMember = new Map<string, { at: string; label: string }>();
