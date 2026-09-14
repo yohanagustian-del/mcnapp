@@ -40,16 +40,25 @@ export async function middleware(request: NextRequest) {
     return NextResponse.redirect(url);
   }
 
-  // Log adopsi sistem (M3/QA): page-view per user → tool_usage_logs (RLS: insert own).
-  // Await singkat; kegagalan log tidak boleh mengganggu request (catch → abaikan).
-  if (
-    user &&
-    !isPublic &&
-    request.method === "GET" &&
-    request.headers.get("purpose") !== "prefetch" &&
-    request.headers.get("next-router-prefetch") === null &&
-    (request.headers.get("accept") ?? "").includes("text/html")
-  ) {
+  // Log adopsi sistem (M3/QA): aktivitas per user → tool_usage_logs (RLS: insert own).
+  // "Aktivitas" = full page load (GET + text/html), navigasi client-side App Router
+  // (GET + header `rsc`, dikirim tiap kali user pindah halaman lewat <Link> tanpa
+  // reload penuh) DAN submit Server Action (POST + header `next-action`, dikirim
+  // tiap kali user menekan tombol yang memicu server action — upload, simpan
+  // jadwal, dst). Tanpa dua yang terakhir, last access/last activity ketinggalan
+  // jauh dari aktivitas nyata karena SPA navigation & form submit tidak pernah
+  // memuat ulang HTML.
+  // Prefetch (hover/viewport) selalu dikecualikan supaya tidak tercatat sebagai
+  // aktivitas — hover di atas link belum tentu user benar-benar membuka halamannya.
+  const isPrefetch =
+    request.headers.get("purpose") === "prefetch" ||
+    request.headers.get("next-router-prefetch") !== null;
+  const isFullPageLoad =
+    request.method === "GET" && (request.headers.get("accept") ?? "").includes("text/html");
+  const isClientNavigation = request.method === "GET" && request.headers.get("rsc") !== null;
+  const isServerAction = request.method === "POST" && request.headers.get("next-action") !== null;
+
+  if (user && !isPublic && !isPrefetch && (isFullPageLoad || isClientNavigation || isServerAction)) {
     try {
       await supabase
         .from("tool_usage_logs")
