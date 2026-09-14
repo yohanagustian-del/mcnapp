@@ -11,7 +11,9 @@ import {
   isRewardTbd,
 } from "@/lib/m3/scoring";
 import { getHandsOnRatio } from "@/lib/m3/adapters";
-import { aggregateUsageHours, type MonthlyUsage } from "@/lib/m3/usage";
+import { aggregateUsageByWeek } from "@/lib/m3/usage";
+import { describeActivity } from "@/lib/m3/activity-labels";
+import { UsageAdoptionTable, type UsageRow } from "./usage-table";
 import { getConfig } from "@/lib/config";
 
 export const dynamic = "force-dynamic";
@@ -127,12 +129,14 @@ export default async function OkrPage() {
       .sort((a, b) => b.achieved - a.achieved);
   }
 
-  // Adopsi sistem (QA): jam pemakaian tools per user per bulan — Director & Lead.
-  let usageRows: (MonthlyUsage & { memberName: string; role: string })[] = [];
+  // Adopsi sistem (QA): jam pemakaian tools per user per minggu — Director & Lead.
+  // Last Access & Last Activity dibaca dari sumber yang sudah ada (tool_usage_logs,
+  // audit_logs) — bukan mekanisme log baru (CLAUDE.md #4: satu sumber kebenaran).
+  let usageRows: UsageRow[] = [];
   if (isLead) {
     const since = new Date();
     since.setUTCDate(since.getUTCDate() - 92); // ~3 bulan terakhir
-    const [{ data: usageLogs }, { data: allMembers }] = await Promise.all([
+    const [{ data: usageLogs }, { data: allMembers }, { data: recentAudit }] = await Promise.all([
       supabase
         .from("tool_usage_logs")
         .select("member_id, occurred_at")
@@ -140,12 +144,36 @@ export default async function OkrPage() {
         .order("occurred_at", { ascending: true })
         .limit(20000),
       supabase.from("team_members").select("id, name, role").eq("active", true),
+      supabase
+        .from("audit_logs")
+        .select("actor_id, action, created_at")
+        .gte("created_at", since.toISOString())
+        .not("actor_id", "is", null)
+        .order("created_at", { ascending: false })
+        .limit(20000),
     ]);
     const memberById = new Map((allMembers ?? []).map((m) => [m.id, m]));
-    usageRows = aggregateUsageHours(usageLogs ?? []).map((u) => ({
+
+    const lastAccessByMember = new Map<string, string>();
+    for (const l of usageLogs ?? []) {
+      // usageLogs terurut ascending → penulisan terakhir per member = paling baru.
+      lastAccessByMember.set(l.member_id, l.occurred_at);
+    }
+
+    const lastActivityByMember = new Map<string, { at: string; label: string }>();
+    for (const a of recentAudit ?? []) {
+      // recentAudit terurut descending → kemunculan pertama per actor = paling baru.
+      if (a.actor_id && !lastActivityByMember.has(a.actor_id)) {
+        lastActivityByMember.set(a.actor_id, { at: a.created_at, label: describeActivity(a.action) });
+      }
+    }
+
+    usageRows = aggregateUsageByWeek(usageLogs ?? []).map((u) => ({
       ...u,
       memberName: memberById.get(u.memberId)?.name ?? u.memberId,
       role: memberById.get(u.memberId)?.role ?? "—",
+      lastAccess: lastAccessByMember.get(u.memberId) ?? null,
+      lastActivity: lastActivityByMember.get(u.memberId) ?? null,
     }));
   }
 
@@ -323,47 +351,15 @@ export default async function OkrPage() {
         </section>
       )}
 
-      {/* ===== Adopsi sistem (QA): jam pemakaian tools per bulan ===== */}
+      {/* ===== Adopsi sistem (QA): jam pemakaian tools per minggu ===== */}
       {isLead && (
         <section>
           <h2 className="text-lg font-medium">Adopsi Sistem — Jam Pemakaian Tools</h2>
           <p className="mt-1 text-xs text-slate-500">
             Dari log page-view (sesi = aktivitas beruntun, gap &gt;30 menit memulai sesi baru).
-            Indikator adaptasi tim ke sistem baru — bukan komponen reward.
+            Akumulasi per minggu Senin−Minggu. Indikator adaptasi tim ke sistem baru — bukan komponen reward.
           </p>
-          <div className="mt-3 overflow-x-auto rounded-lg border border-slate-200 bg-white">
-            <table className="min-w-full text-sm">
-              <thead className="bg-slate-50 text-left text-xs uppercase text-slate-500">
-                <tr>
-                  <th className="px-4 py-3">Bulan</th>
-                  <th className="px-4 py-3">Anggota</th>
-                  <th className="px-4 py-3">Role</th>
-                  <th className="px-4 py-3">Jam / Bulan</th>
-                  <th className="px-4 py-3">Sesi</th>
-                  <th className="px-4 py-3">Page View</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100">
-                {usageRows.map((u) => (
-                  <tr key={`${u.memberId}-${u.month}`}>
-                    <td className="px-4 py-2 font-mono text-xs">{u.month}</td>
-                    <td className="px-4 py-2 font-medium">{u.memberName}</td>
-                    <td className="px-4 py-2">{u.role}</td>
-                    <td className="px-4 py-2 font-semibold">{u.hours} jam</td>
-                    <td className="px-4 py-2">{u.sessions}</td>
-                    <td className="px-4 py-2">{u.pageViews}</td>
-                  </tr>
-                ))}
-                {usageRows.length === 0 && (
-                  <tr>
-                    <td colSpan={6} className="px-4 py-6 text-center text-slate-400">
-                      Belum ada log pemakaian — log terisi otomatis saat tim membuka halaman.
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
+          <UsageAdoptionTable rows={usageRows} />
         </section>
       )}
 

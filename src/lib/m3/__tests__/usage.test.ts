@@ -1,14 +1,14 @@
 import { describe, expect, it } from "vitest";
-import { aggregateUsageHours } from "../usage";
+import { aggregateUsageByWeek, formatWeekLabel } from "../usage";
 
 const log = (member: string, iso: string) => ({ member_id: member, occurred_at: iso });
 
-describe("aggregateUsageHours", () => {
+describe("aggregateUsageByWeek", () => {
   it("merges views within the session gap into one session", () => {
-    const rows = aggregateUsageHours([
-      log("u1", "2026-07-01T09:00:00Z"),
+    const rows = aggregateUsageByWeek([
+      log("u1", "2026-07-01T09:00:00Z"), // Rabu, minggu 2026-06-29
       log("u1", "2026-07-01T09:20:00Z"),
-      log("u1", "2026-07-01T10:00:00Z"), // 40min gap > 30 → still same? no: 40>30 → new session
+      log("u1", "2026-07-01T10:00:00Z"), // 40min gap > 30 → sesi baru
     ]);
     expect(rows).toHaveLength(1);
     expect(rows[0].sessions).toBe(2);
@@ -17,24 +17,44 @@ describe("aggregateUsageHours", () => {
     expect(rows[0].hours).toBeCloseTo(0.4, 1);
   });
 
-  it("splits by month and member", () => {
-    const rows = aggregateUsageHours([
-      log("u1", "2026-06-30T23:00:00Z"),
-      log("u1", "2026-07-01T08:00:00Z"),
-      log("u2", "2026-07-01T08:00:00Z"),
+  it("splits by week (Senin−Minggu) and member", () => {
+    const rows = aggregateUsageByWeek([
+      log("u1", "2026-06-29T08:00:00Z"), // Senin minggu 2026-06-29
+      log("u1", "2026-07-06T08:00:00Z"), // Senin minggu berikutnya
+      log("u2", "2026-06-29T08:00:00Z"),
     ]);
     expect(rows).toHaveLength(3);
-    const months = new Set(rows.map((r) => r.month));
-    expect(months).toEqual(new Set(["2026-06", "2026-07"]));
+    const weeks = new Set(rows.map((r) => r.weekStart));
+    expect(weeks).toEqual(new Set(["2026-06-29", "2026-07-06"]));
+  });
+
+  it("groups a session that starts Sunday into the week it started (not the week it ends)", () => {
+    const rows = aggregateUsageByWeek([
+      log("u1", "2026-07-05T23:50:00Z"), // Minggu, minggu 2026-06-29
+      log("u1", "2026-07-06T00:05:00Z"), // Senin, gap 15 menit → sesi sama
+    ]);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].weekStart).toBe("2026-06-29");
   });
 
   it("single view counts as minimum session duration", () => {
-    const rows = aggregateUsageHours([log("u1", "2026-07-02T12:00:00Z")]);
+    const rows = aggregateUsageByWeek([log("u1", "2026-07-02T12:00:00Z")]);
     expect(rows[0].hours).toBe(0.1); // 5 menit, dibulatkan 1 desimal jam
     expect(rows[0].sessions).toBe(1);
   });
 
   it("empty input → empty output", () => {
-    expect(aggregateUsageHours([])).toEqual([]);
+    expect(aggregateUsageByWeek([])).toEqual([]);
+  });
+
+  it("month field derives from weekStart for month filtering", () => {
+    const rows = aggregateUsageByWeek([log("u1", "2026-06-29T08:00:00Z")]);
+    expect(rows[0].month).toBe("2026-06");
+  });
+});
+
+describe("formatWeekLabel", () => {
+  it("renders a Senin−Minggu range", () => {
+    expect(formatWeekLabel("2026-06-29")).toBe("29–5 Jul 2026");
   });
 });
