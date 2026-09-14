@@ -330,6 +330,95 @@ describe("parseTapFile — 2026-07 Custom report headers", () => {
   });
 });
 
+// ─── 2026-08 Custom report export (extra break-down columns) ───
+// Platform kept the 2026-07 renamed attribution columns but split several
+// metrics into LIVE/video/product-card breakdowns and added net-new counters
+// (Direct orders, Product card direct GMV, Refunded items, Affiliate partner
+// creator attributed orders on MCN; Affiliate orders, Video/LIVE views, LIVE
+// streams, Videos, Products added to Showcase, Settled GMV, Revenue
+// (Showcase), Link GMV/items/orders/commission on TAP). None of these extra
+// columns are read by MCN_COLUMNS/TAP_COLUMNS — verified against the real
+// production sample files (CLAUDE.md task spec, 2026-09) that they parse
+// with 0 skipped rows and the already-mapped fields are unaffected.
+const MCN_V3_DATA_ROW = {
+  Date: "2026-08-01-2026-08-31", "Comparison date": "--", "Creator username": "tokomasteguh",
+  "Creator follower count": "31133", "Product ID": "1735705464581817802",
+  "Product info": "PAKET 10 KARTON MAMYPOKO XTRA KERING", "Shop code": "IDLCEBWYNW",
+  "Shop ID": "7495036526336772554", "Shop name": "NDSTOREMDN", "Level 1 category": "Baby & Maternity",
+  "Level 2 category": "Baby Care & Health", "Creator-attributed GMV": "Rp567.531.159",
+  "Creator LIVE-attributed GMV": "Rp565.926.713", "Affiliate video-attributed GMV": "Rp0",
+  "Creator-attributed orders": "335", "Creator LIVE-attributed orders": "334",
+  "Creator video-attributed orders": "0", "Direct GMV": "Rp529.319.971",
+  "LIVE direct GMV": "Rp527.715.525", "Video direct GMV": "Rp0", "Product card direct GMV": "Rp1.604.446",
+  "Creator-attributed items sold": "338", "Direct orders": "312", "LIVE direct orders": "311",
+  "Video direct orders": "0", "Product card orders": "1", "Creator LIVE items sold": "314",
+  "creator video items sold": "0", "Product card items sold": "1", "Direct refund GMV": "Rp10.440.147",
+  "Refunded items": "14", CTR: "4.97%", "CTOR (SKU order)": "2.76%",
+  "Affiliate partner creator attributed GMV": "Rp0", "Affiliate partner creator attributed orders": "0",
+};
+
+const TAP_V3_DATA_ROW = {
+  Date: "2026-08-01-2026-08-31", "Comparison date": "--", "Creator name": "tokomasteguh",
+  "Creator follower count": "31133", "Product ID": "1732273583328232565",
+  "Product name": "[FREE Hand Clapper] Zwitsal Cologne Natural Soft Touch 100ml Twinpack",
+  "Shop code": "IDLCJRL27W", "Shop ID": "7494925843634358389", "Shop name": "Zwitsal",
+  "Level 1 category": "Baby & Maternity", "Level 2 category": "Baby Care & Health",
+  "Creator-attributed GMV": "Rp12.500.000", "Affiliate video-attributed GMV": "Rp0",
+  "Creator LIVE-attributed GMV": "Rp12.500.000", "Creator-attributed orders": "20",
+  "Affiliate orders": "22", "Video views": "0", "LIVE views": "2790", "LIVE streams": "1", Videos: "0",
+  "Products added to Showcase": "5", "Estimated affiliate partner commission ": "Rp250.000",
+  "Actual affiliate partner commission": "Rp240.000", "Estimated creator commission ": "Rp625.000",
+  "Actual creator commission ": "Rp600.000", "GMV (refund)": "Rp100.000", "Settled GMV": "Rp12.400.000",
+  "Revenue (Showcase)": "Rp0", "Creator-attributed items sold": "21", "Link GMV": "Rp0",
+  "Link items sold": "0", "Link orders": "0", "Link partner est. commission": "Rp0",
+  "Link creator est. commission": "Rp0",
+};
+
+describe("parseMcnFile — 2026-08 Custom report headers (extra break-down columns)", () => {
+  it("ignores the new LIVE/video/product-card breakdown columns and still maps the read fields", async () => {
+    const file = xlsxFile([MCN_V3_DATA_ROW]);
+    const { rows, skipped } = await parseMcnFile(file);
+    expect(rows).toHaveLength(1);
+    expect(skipped).toEqual([]);
+
+    const [row] = rows;
+    expect(row.followerCount).toBe(31_133);
+    expect(row.affiliateGmv).toBe(567_531_159);
+    expect(row.affiliateLiveGmv).toBe(565_926_713);
+    expect(row.affiliateVideoGmv).toBe(0);
+    expect(row.orders).toBe(335);
+    expect(row.liveOrders).toBe(334);
+    expect(row.videoOrders).toBe(0);
+    expect(row.directGmv).toBe(529_319_971);
+    expect(row.itemsSold).toBe(338);
+    expect(row.refundGmv).toBe(10_440_147);
+    expect(row.ctr).toBeCloseTo(4.97);
+    expect(row.ctor).toBeCloseTo(2.76);
+  });
+});
+
+describe("parseTapFile — 2026-08 Custom report headers (extra break-down columns)", () => {
+  it("ignores the new views/showcase/link columns and still maps the read fields", async () => {
+    const file = xlsxFile([TAP_V3_DATA_ROW]);
+    const { rows, skipped } = await parseTapFile(file);
+    expect(rows).toHaveLength(1);
+    expect(skipped).toEqual([]);
+
+    const [row] = rows;
+    expect(row.affiliateGmv).toBe(12_500_000);
+    expect(row.affiliateLiveGmv).toBe(12_500_000);
+    expect(row.affiliateVideoGmv).toBe(0);
+    // "orders" reads "Creator-attributed orders" (698 alias target), NOT the new "Affiliate orders" column
+    expect(row.orders).toBe(20);
+    expect(row.itemsSold).toBe(21);
+    expect(row.estPartnerCommission).toBe(250_000);
+    expect(row.actualPartnerCommission).toBe(240_000);
+    expect(row.estCreatorCommission).toBe(625_000);
+    expect(row.actualCreatorCommission).toBe(600_000);
+    expect(row.refundGmv).toBe(100_000);
+  });
+});
+
 describe("English header path unaffected by ID alias translation", () => {
   it("parseMcnFile still parses pure-English headers correctly", async () => {
     const file = xlsxFile([MCN_DATA_ROW]);
