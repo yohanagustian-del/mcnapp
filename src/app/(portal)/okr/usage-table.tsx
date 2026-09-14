@@ -2,7 +2,7 @@
 
 import { useMemo } from "react";
 import {
-  PAGE_SIZES_10_20_50,
+  PAGE_SIZES_10_50_100,
   SortableTh,
   TableFilterBar,
   TablePagination,
@@ -80,7 +80,7 @@ export function UsageAdoptionTable({ rows }: { rows: UsageRow[] }) {
       }),
       []
     ),
-    pageSizes: PAGE_SIZES_10_20_50,
+    pageSizes: PAGE_SIZES_10_50_100,
     itemLabel: "baris",
   });
 
