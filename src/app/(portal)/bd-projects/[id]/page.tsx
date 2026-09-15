@@ -11,6 +11,7 @@ import {
   uploadReportCreators,
 } from "@/lib/deals/report-actions";
 import { ReportTemplateButton } from "@/components/report-template-button";
+import { ReportSessionRowActions } from "@/components/report-session-row-actions";
 import {
   PAYMENT_STATUS_LABEL,
   PROJECT_STATUS_LABEL,
@@ -463,6 +464,7 @@ export default async function BdProjectDetailPage({
               <th className="px-3 py-3">SS Dashboard</th>
               <th className="px-3 py-3">GMV</th>
               <th className="px-3 py-3">ROAS</th>
+              {canReport && <th className="px-3 py-3">Aksi</th>}
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
@@ -484,11 +486,30 @@ export default async function BdProjectDetailPage({
                 </td>
                 <td className="px-3 py-2 font-medium">{formatRp(numeric(s.gmv))}</td>
                 <td className="px-3 py-2">{s.roas != null ? Number(s.roas).toFixed(2) : "—"}</td>
+                {canReport && (
+                  <td className="px-3 py-2 whitespace-nowrap">
+                    <ReportSessionRowActions
+                      projectId={project.id as string}
+                      session={{
+                        id: s.id as number,
+                        creator_name: s.creator_name as string,
+                        session_date: (s.session_date as string | null) ?? null,
+                        event: (s.event as string | null) ?? null,
+                        support_ads: (s.support_ads as string | null) ?? null,
+                        ads_spend_usd: numeric(s.ads_spend_usd),
+                        ads_spend_idr: numeric(s.ads_spend_idr),
+                        ss_link: (s.ss_link as string | null) ?? null,
+                        gmv: numeric(s.gmv),
+                        roas: numeric(s.roas),
+                      }}
+                    />
+                  </td>
+                )}
               </tr>
             ))}
             {shown.length === 0 && (
               <tr>
-                <td colSpan={9} className="px-4 py-6 text-center text-slate-400">
+                <td colSpan={canReport ? 10 : 9} className="px-4 py-6 text-center text-slate-400">
                   Belum ada report sesi{creatorFilter ? ` untuk ${creatorFilter}` : ""}. Upload
                   report performance atau input manual di bawah.
                 </td>
