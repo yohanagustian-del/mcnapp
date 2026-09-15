@@ -10,6 +10,7 @@ import {
   uploadReportSessions,
   uploadReportCreators,
 } from "@/lib/deals/report-actions";
+import { ReportSessionRowActions } from "@/components/report-session-row-actions";
 
 function formatRp(v: number | null | undefined): string {
   return v ? `Rp${Number(v).toLocaleString("id-ID")}` : "—";
@@ -255,6 +256,7 @@ export default async function DealDetailPage({
               <th className="px-3 py-3">SS Dashboard</th>
               <th className="px-3 py-3">GMV</th>
               <th className="px-3 py-3">ROAS</th>
+              {canReport && <th className="px-3 py-3">Aksi</th>}
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
@@ -271,11 +273,16 @@ export default async function DealDetailPage({
                 </td>
                 <td className="px-3 py-2 font-medium">{formatRp(s.gmv)}</td>
                 <td className="px-3 py-2">{s.roas != null ? Number(s.roas).toFixed(2) : "—"}</td>
+                {canReport && (
+                  <td className="px-3 py-2 whitespace-nowrap">
+                    <ReportSessionRowActions dealId={deal.id} session={s} />
+                  </td>
+                )}
               </tr>
             ))}
             {shown.length === 0 && (
               <tr>
-                <td colSpan={9} className="px-4 py-6 text-center text-slate-400">
+                <td colSpan={canReport ? 10 : 9} className="px-4 py-6 text-center text-slate-400">
                   Belum ada report sesi{creatorFilter ? ` untuk ${creatorFilter}` : ""}. Upload
                   report performance atau input manual di bawah.
                 </td>

@@ -153,6 +153,108 @@ export async function uploadReportSessions(formData: FormData): Promise<UploadRe
   return report;
 }
 
+export interface ReportSessionFormState {
+  ok: boolean;
+  message: string;
+}
+
+/**
+ * Baris satu sesi live milik SATU owner (deal_id / project_id) — dipakai untuk
+ * memverifikasi baris yang mau diubah/dihapus benar-benar milik owner yang lagi
+ * dibuka, bukan sekadar percaya id yang dikirim dari klien.
+ */
+async function loadOwnedSession(
+  admin: ReturnType<typeof createAdminClient>,
+  sessionId: number,
+  owner: ReportOwner
+): Promise<Record<string, unknown>> {
+  const { data, error } = await admin
+    .from("deal_live_sessions")
+    .select("*")
+    .eq("id", sessionId)
+    .eq(owner.column, owner.id)
+    .maybeSingle();
+  if (error) throw new Error(`Gagal membaca sesi: ${error.message}`);
+  if (!data) throw new Error(`Sesi #${sessionId} tidak ditemukan di ${owner.id}`);
+  return data;
+}
+
+/** Edit satu baris report sesi live (hasil upload maupun input manual). */
+export async function updateReportSession(
+  _prev: ReportSessionFormState | null,
+  formData: FormData
+): Promise<ReportSessionFormState> {
+  const actor = await requirePermission("m8.brand_report");
+  const sessionId = Number(formData.get("session_id"));
+  if (!Number.isFinite(sessionId)) return { ok: false, message: "Sesi tidak dikenali." };
+  const creatorName = String(formData.get("creator_name") ?? "").trim();
+  if (!creatorName) return { ok: false, message: "Nama creator wajib." };
+
+  const admin = createAdminClient();
+  const owner = await resolveOwner(formData, admin);
+  const before = await loadOwnedSession(admin, sessionId, owner);
+
+  const { byName } = await resolveCreatorNames(admin, [creatorName], actor.id);
+  const after = {
+    creator_id: byName.get(creatorName.toLowerCase()) ?? null,
+    creator_name: creatorName,
+    session_date: parseFlexibleDate(String(formData.get("session_date") ?? "")) ?? null,
+    event: String(formData.get("event") ?? "").trim() || null,
+    support_ads: String(formData.get("support_ads") ?? "").trim() || null,
+    ads_spend_usd: parseUsd(String(formData.get("ads_spend_usd") ?? "")),
+    ads_spend_idr: parseRupiah(String(formData.get("ads_spend_idr") ?? "")),
+    ss_link: String(formData.get("ss_link") ?? "").trim() || null,
+    gmv: parseRupiah(String(formData.get("gmv") ?? "")) ?? 0,
+    roas: parseRoas(String(formData.get("roas") ?? "")),
+  };
+
+  const { error } = await admin.from("deal_live_sessions").update(after).eq("id", sessionId);
+  if (error) return { ok: false, message: `Gagal menyimpan sesi: ${error.message}` };
+
+  await writeAudit({
+    actorId: actor.id,
+    action: "m8.deal_session_update",
+    entityType: "deal_live_sessions",
+    entityId: String(sessionId),
+    before,
+    after,
+    type: "auto",
+  });
+
+  revalidatePath(owner.path);
+  return { ok: true, message: "Sesi tersimpan." };
+}
+
+/** Hapus satu baris report sesi live. */
+export async function deleteReportSession(
+  _prev: ReportSessionFormState | null,
+  formData: FormData
+): Promise<ReportSessionFormState> {
+  const actor = await requirePermission("m8.brand_report");
+  const sessionId = Number(formData.get("session_id"));
+  if (!Number.isFinite(sessionId)) return { ok: false, message: "Sesi tidak dikenali." };
+
+  const admin = createAdminClient();
+  const owner = await resolveOwner(formData, admin);
+  const before = await loadOwnedSession(admin, sessionId, owner);
+
+  const { error } = await admin.from("deal_live_sessions").delete().eq("id", sessionId);
+  if (error) return { ok: false, message: `Gagal menghapus sesi: ${error.message}` };
+
+  await writeAudit({
+    actorId: actor.id,
+    action: "m8.deal_session_delete",
+    entityType: "deal_live_sessions",
+    entityId: String(sessionId),
+    before,
+    after: null,
+    type: "auto",
+  });
+
+  revalidatePath(owner.path);
+  return { ok: true, message: "Sesi dihapus." };
+}
+
 /** Input manual satu sesi live (alternatif upload file). */
 export async function addReportSession(formData: FormData): Promise<void> {
   const actor = await requirePermission("m8.brand_report");
