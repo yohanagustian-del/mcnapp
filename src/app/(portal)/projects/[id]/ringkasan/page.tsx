@@ -26,10 +26,20 @@ export default async function ProjectRingkasanPage({ params }: { params: Promise
 
   const { data: leaderboardRows } = await supabase
     .from("project_creator_report_v")
-    .select("creator_id, gmv, live_share, rank, of, creators(name, username)")
+    .select("creator_id, gmv, live_share, rank, of")
     .eq("project_id", projectId)
     .order("rank")
     .limit(10);
+
+  // Fetched separately rather than embedded on the view select: `project_creator_report_v`
+  // (0057) is built from CTEs + window functions, not a plain passthrough view, so
+  // PostgREST's FK-tracing for embeds isn't guaranteed to resolve through it — same
+  // reason src/lib/m7/report-data.ts queries `creators` on its own instead of embedding.
+  const creatorIds = (leaderboardRows ?? []).map((r) => r.creator_id);
+  const { data: creatorRows } = creatorIds.length
+    ? await supabase.from("creators").select("id, name, username").in("id", creatorIds)
+    : { data: [] };
+  const creatorById = new Map((creatorRows ?? []).map((c) => [c.id, c]));
 
   const summary = (project.result_summary ?? {}) as {
     achievement_pct?: number; gmv_actual?: number; live_gmv?: number; live_contribution?: number;
@@ -122,7 +132,7 @@ export default async function ProjectRingkasanPage({ params }: { params: Promise
           </thead>
           <tbody className="divide-y divide-slate-100">
             {(leaderboardRows ?? []).map((r) => {
-              const c = r.creators as unknown as { name: string; username: string | null } | null;
+              const c = creatorById.get(r.creator_id) ?? null;
               return (
                 <tr key={r.creator_id}>
                   <td className="px-4 py-2">#{r.rank} / {r.of}</td>

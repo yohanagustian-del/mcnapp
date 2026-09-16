@@ -5,7 +5,10 @@ import { createClient } from "@/lib/supabase/server";
 import { getConfig } from "@/lib/config";
 import { filterLiveActive, trackDaily, type CurveShape, type LiveActivityRow } from "@/lib/m7/tracking";
 import { canManageProjectParticipants } from "@/lib/m7/access";
-import { assignManpower, setProjectStatus, setSignupOpen, upsertDailyMetric } from "../actions";
+import {
+  assignManpower, decideProjectCancellation, requestProjectCancellation,
+  setProjectStatus, setSignupOpen, upsertDailyMetric,
+} from "../actions";
 import { MANPOWER_ROLES } from "@/lib/m7/project-type";
 import { suggestParticipantTargetGmv } from "@/lib/m7/participant-target";
 import { generateProjectReports } from "./report-actions";
@@ -38,10 +41,16 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
   const supabase = await createClient();
   const { data: project } = await supabase
     .from("special_projects")
-    .select("id, name, type, start_date, end_date, target_gmv, ads_budget_cap, target_creators, daily_target_curve, status, result_summary, slug, open_for_signup, signup_deadline")
+    .select(
+      "id, name, type, start_date, end_date, target_gmv, ads_budget_cap, target_creators, daily_target_curve, status, result_summary, slug, open_for_signup, signup_deadline, cancellation_requested_at, cancellation_requested_by, cancellation_reason"
+    )
     .eq("id", projectId)
     .maybeSingle();
   if (!project) notFound();
+
+  const { data: cancelRequester } = project.cancellation_requested_by
+    ? await supabase.from("team_members").select("name").eq("id", project.cancellation_requested_by).maybeSingle()
+    : { data: null };
 
   const [{ data: metrics }, { data: participants }, { data: manpower }, { data: alerts }, tolerance, liveMin] =
     await Promise.all([
@@ -316,13 +325,52 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
               Buka Kembali (koreksi upload terlambat)
             </button>
           )}
-          {project.status !== "selesai" && (
-            <button name="status" value="dibatalkan"
-              className="rounded-md border border-red-300 px-3 py-1.5 text-sm font-medium text-red-700 hover:bg-red-50">
-              Batalkan Project
-            </button>
-          )}
         </form>
+      )}
+
+      {/* Pembatalan project butuh approval Director (CLAUDE.md #2) — bukan tombol
+          langsung seperti transisi status lain. */}
+      {canManage && project.status !== "selesai" && project.status !== "dibatalkan" && (
+        project.cancellation_requested_at ? (
+          <div className="mt-3 rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm">
+            <p className="font-medium text-amber-900">
+              Menunggu keputusan Director untuk pembatalan project
+            </p>
+            <p className="mt-1 text-amber-800">
+              Diajukan oleh {cancelRequester?.name ?? "—"} · {new Date(project.cancellation_requested_at).toLocaleString("id-ID")}
+            </p>
+            <p className="mt-1 text-amber-800">Alasan: {project.cancellation_reason}</p>
+            {member.role === "director" && (
+              <div className="mt-2 flex gap-2">
+                <form action={decideProjectCancellation}>
+                  <input type="hidden" name="project_id" value={project.id} />
+                  <input type="hidden" name="decision" value="approve" />
+                  <button className="rounded-md bg-red-700 px-3 py-1.5 text-sm font-medium text-white hover:bg-red-600">
+                    Setujui Pembatalan
+                  </button>
+                </form>
+                <form action={decideProjectCancellation}>
+                  <input type="hidden" name="project_id" value={project.id} />
+                  <input type="hidden" name="decision" value="reject" />
+                  <button className="rounded-md border border-slate-300 px-3 py-1.5 text-sm font-medium hover:bg-white">
+                    Tolak
+                  </button>
+                </form>
+              </div>
+            )}
+          </div>
+        ) : (
+          <form action={requestProjectCancellation} className="mt-3 flex flex-wrap items-center gap-2">
+            <input type="hidden" name="project_id" value={project.id} />
+            <input
+              name="reason" placeholder="Alasan pembatalan (wajib)" required
+              className="rounded-md border border-slate-300 px-2 py-1.5 text-sm"
+            />
+            <button className="rounded-md border border-red-300 px-3 py-1.5 text-sm font-medium text-red-700 hover:bg-red-50">
+              Ajukan Pembatalan Project
+            </button>
+          </form>
+        )
       )}
 
       {(alerts ?? []).length > 0 && (
