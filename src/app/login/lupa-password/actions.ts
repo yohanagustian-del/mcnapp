@@ -1,9 +1,9 @@
 "use server";
 
-import { headers } from "next/headers";
 import { createClient } from "@/lib/supabase/server";
 import { writeAudit } from "@/lib/audit";
 import { findEligiblePrincipalByEmail } from "@/lib/auth/principal";
+import { resolveOrigin } from "@/lib/auth/origin";
 import {
   buildResetRedirectUrl,
   isValidEmail,
@@ -12,20 +12,6 @@ import {
 
 /** State untuk form lupa password (useActionState). */
 export type ForgotPasswordState = { ok: boolean; error?: string } | null;
-
-/**
- * Origin used to build the recovery link. NEXT_PUBLIC_SITE_URL wins when set
- * (stable across preview deploys); otherwise derive from the proxy headers.
- */
-async function resolveOrigin(): Promise<string> {
-  const configured = process.env.NEXT_PUBLIC_SITE_URL;
-  if (configured) return configured.replace(/\/+$/, "");
-
-  const h = await headers();
-  const host = h.get("x-forwarded-host") ?? h.get("host");
-  const proto = h.get("x-forwarded-proto") ?? (host?.startsWith("localhost") ? "http" : "https");
-  return `${proto}://${host}`;
-}
 
 /**
  * Kirim email reset password (self-service, tanpa login).

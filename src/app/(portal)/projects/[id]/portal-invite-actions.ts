@@ -5,22 +5,20 @@ import { revalidatePath } from "next/cache";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { writeAudit } from "@/lib/audit";
 import { requirePermission } from "@/lib/rbac";
+import { resolveOrigin } from "@/lib/auth/origin";
 
 /**
  * Undang peserta ke Creator Portal (PRD R36, K8: manual oleh CPM, tanpa Sebari).
  * Gated `m7.curate` — satu-satunya permission M7 yang memuat role `cpm` polos
  * (m7.manage/m7.metrics tidak), sesuai R36 yang eksplisit menyebut CPM.
  *
- * SCOPE NOTE: ini hanya membuat baris `creator_users` (status 'invited' +
- * token) dan menampilkan tokennya — repo ini BELUM punya halaman konsumsi
- * token (set password → auth_uid ter-link) di mana pun (dicek: tidak ada
- * route /join, /invite, /activate). Itu infrastruktur M9 yang sudah ada
- * skemanya (creator_users.invite_token) tapi belum ada sisi penerimanya;
- * membangunnya bukan scope M7 v2 — tim mengirim token ini manual sesuai
- * proses yang sudah berjalan, sampai halaman aktivasi itu dibangun.
+ * Membuat baris `creator_users` (status 'invited' + token) dan mengembalikan
+ * link `/aktivasi?token=...` siap kirim (CPM masih mengirimnya manual via WA
+ * — K8, tidak ada integrasi Sebari). Halaman `/aktivasi` (src/app/aktivasi/)
+ * yang menukar token itu jadi akun aktif.
  */
 export type InvitePortalResult =
-  | { ok: true; token: string; alreadyInvited: boolean }
+  | { ok: true; link: string; alreadyActive: boolean }
   | { ok: false; error: string };
 
 export async function invitePortalAccount(formData: FormData): Promise<InvitePortalResult> {
@@ -31,10 +29,14 @@ export async function invitePortalAccount(formData: FormData): Promise<InvitePor
     if (!creatorId) throw new Error("Kreator tidak valid");
 
     const admin = createAdminClient();
+    const origin = await resolveOrigin();
     const { data: existing } = await admin
       .from("creator_users").select("id, status, invite_token").eq("creator_id", creatorId).maybeSingle();
     if (existing) {
-      return { ok: true, token: existing.invite_token ?? "", alreadyInvited: true };
+      if (existing.status === "active") return { ok: true, link: "", alreadyActive: true };
+      // Still 'invited' (or 'suspended') — re-show the same token's link rather
+      // than minting a new one, so an earlier link sent to the creator stays valid.
+      return { ok: true, link: `${origin}/aktivasi?token=${existing.invite_token}`, alreadyActive: false };
     }
     if (!email) throw new Error("Email kreator wajib diisi untuk undangan pertama");
 
@@ -50,7 +52,7 @@ export async function invitePortalAccount(formData: FormData): Promise<InvitePor
     });
 
     revalidatePath("/projects");
-    return { ok: true, token, alreadyInvited: false };
+    return { ok: true, link: `${origin}/aktivasi?token=${token}`, alreadyActive: false };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : "Terjadi kesalahan tidak terduga." };
   }
