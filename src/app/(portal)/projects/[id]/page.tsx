@@ -8,6 +8,8 @@ import { canManageProjectParticipants } from "@/lib/m7/access";
 import { assignManpower, setProjectStatus, upsertDailyMetric } from "../actions";
 import { MANPOWER_ROLES } from "@/lib/m7/project-type";
 import { suggestParticipantTargetGmv } from "@/lib/m7/participant-target";
+import { generateProjectReports } from "./report-actions";
+import { PortalInviteButton } from "./portal-invite-button";
 import { ParticipantForm, type CreatorUsernameOption } from "./participant-form";
 import { DailyMetricsTable, type DailyMetricRow } from "./daily-metrics-table";
 import { CreatorPerformanceTable, type CreatorPerformanceRow } from "./creator-performance-table";
@@ -31,6 +33,7 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
   const member = await requireMember();
   const canManage = hasPermission("m7.manage", member.role);
   const canMetrics = hasPermission("m7.metrics", member.role);
+  const canInvitePortal = hasPermission("m7.curate", member.role);
 
   const supabase = await createClient();
   const { data: project } = await supabase
@@ -111,6 +114,23 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
     hasManagePermission: canManage,
     isAssignedManpower,
   });
+
+  // Status akun portal per peserta (R36) — creator_users belum tentu ada untuk semua.
+  const participantCreatorIds = (participants ?? []).map((p) => p.creator_id);
+  const { data: portalAccountRows } = participantCreatorIds.length
+    ? await supabase.from("creator_users").select("creator_id, status").in("creator_id", participantCreatorIds)
+    : { data: [] as { creator_id: string; status: string }[] };
+  const portalStatusByCreator = new Map((portalAccountRows ?? []).map((r) => [r.creator_id, r.status]));
+
+  // Status report peserta (§3.3): per creator, prefer 'final' kalau ada draft+final.
+  const { data: reportRows } = await supabase
+    .from("creator_reports").select("creator_id, status").eq("project_id", projectId);
+  const reportStatusByCreator = new Map<string, "draft" | "final">();
+  for (const r of reportRows ?? []) {
+    if (r.status === "final" || !reportStatusByCreator.has(r.creator_id)) {
+      reportStatusByCreator.set(r.creator_id, r.status as "draft" | "final");
+    }
+  }
 
   // Daftar username untuk form peserta — orang hafal handle akun, bukan ID internal.
   // Kreator yang sudah jadi peserta tidak ditawarkan lagi.
@@ -380,7 +400,24 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
       <div className="mt-8 grid gap-6 lg:grid-cols-2">
         {/* ===== Participants ===== */}
         <div>
-          <h2 className="text-lg font-medium">Peserta ({(participants ?? []).length})</h2>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <h2 className="text-lg font-medium">Peserta ({(participants ?? []).length})</h2>
+            <div className="flex gap-2">
+              {canManage && (
+                <form action={generateProjectReports}>
+                  <input type="hidden" name="project_id" value={project.id} />
+                  <button type="submit"
+                    className="rounded-md bg-slate-900 px-3 py-1.5 text-xs font-medium text-white hover:bg-slate-700">
+                    Generate Report Peserta (semua)
+                  </button>
+                </form>
+              )}
+              <Link href={`/projects/${project.id}/ringkasan`}
+                className="rounded-md border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50">
+                Report Gabungan →
+              </Link>
+            </div>
+          </div>
           {canAddParticipant && (
             <ParticipantForm
               projectId={project.id}
@@ -401,11 +438,14 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
                   <th className="px-4 py-3">Tipe</th>
                   <th className="px-4 py-3">Live</th>
                   <th className="px-4 py-3">Binding</th>
+                  <th className="px-4 py-3">Report</th>
+                  {canInvitePortal && <th className="px-4 py-3">Akun Portal</th>}
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {(participants ?? []).map((p) => {
                   const c = p.creators as unknown as { name: string; username: string | null } | null;
+                  const reportStatus = reportStatusByCreator.get(p.creator_id);
                   return (
                   <tr key={p.creator_id}>
                     <td className="px-4 py-2 font-medium">
@@ -427,11 +467,28 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
                         <span className="text-red-700">pending</span>
                       )}
                     </td>
+                    <td className="px-4 py-2">
+                      {reportStatus ? (
+                        <Link href={`/projects/${project.id}/report/${p.creator_id}`} className="text-blue-700 hover:underline">
+                          {reportStatus === "final" ? "Final" : "Draft"} →
+                        </Link>
+                      ) : (
+                        <span className="text-slate-400">—</span>
+                      )}
+                    </td>
+                    {canInvitePortal && (
+                      <td className="px-4 py-2">
+                        <PortalInviteButton
+                          creatorId={p.creator_id}
+                          existingStatus={portalStatusByCreator.get(p.creator_id) ?? null}
+                        />
+                      </td>
+                    )}
                   </tr>
                   );
                 })}
                 {(participants ?? []).length === 0 && (
-                  <tr><td colSpan={4} className="px-4 py-6 text-center text-slate-400">Belum ada peserta.</td></tr>
+                  <tr><td colSpan={canInvitePortal ? 6 : 5} className="px-4 py-6 text-center text-slate-400">Belum ada peserta.</td></tr>
                 )}
               </tbody>
             </table>
