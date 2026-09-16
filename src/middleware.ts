@@ -32,7 +32,14 @@ export async function middleware(request: NextRequest) {
 
   const isPublic =
     request.nextUrl.pathname.startsWith("/login") ||
-    request.nextUrl.pathname.startsWith("/auth");
+    request.nextUrl.pathname.startsWith("/auth") ||
+    // M7 v2 §3.5/§6.6: public signup link + its submit endpoint — anonymous by
+    // design, no team_members/creator_users session involved at all.
+    request.nextUrl.pathname.startsWith("/join") ||
+    request.nextUrl.pathname.startsWith("/api/join") ||
+    // PRD R36/PR-18: invite-token activation — the creator has no session yet
+    // (that's what this page creates), so it must be reachable unauthenticated.
+    request.nextUrl.pathname.startsWith("/aktivasi");
 
   if (!user && !isPublic) {
     const url = request.nextUrl.clone();

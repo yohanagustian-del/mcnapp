@@ -24,10 +24,13 @@ export interface CreatorUsernameOption {
 export function ParticipantForm({
   projectId,
   creators,
+  suggestedTargetGmv,
   note,
 }: {
   projectId: number;
   creators: CreatorUsernameOption[];
+  /** R4: saran otomatis = sisa target project / sisa kuota — tim boleh ubah. */
+  suggestedTargetGmv: number;
   /** Keterangan tambahan di bawah input (mis. alasan kenapa user ini boleh menambah). */
   note?: string;
 }) {
@@ -73,11 +76,18 @@ export function ParticipantForm({
         </p>
       </div>
 
-      <input
-        name="target_gmv"
-        placeholder="Target GMV kreator (Rp, opsional)"
-        className="rounded-md border border-slate-300 px-3 py-2"
-      />
+      <div>
+        <input
+          name="target_gmv"
+          required
+          defaultValue={suggestedTargetGmv > 0 ? suggestedTargetGmv : undefined}
+          placeholder="Target GMV kreator (Rp, wajib)"
+          className="w-full rounded-md border border-slate-300 px-3 py-2"
+        />
+        <p className="mt-1 text-xs text-slate-400">
+          Saran otomatis: sisa target project ÷ sisa kuota — boleh diubah.
+        </p>
+      </div>
       <select name="live_type" className="rounded-md border border-slate-300 px-3 py-2">
         <option value="solo">Live solo</option>
         <option value="cohost">Live co-host (cek manual — scale up lebih lama)</option>

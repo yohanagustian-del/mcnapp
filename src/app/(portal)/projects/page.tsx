@@ -1,8 +1,10 @@
 import { requireMember, hasPermission } from "@/lib/rbac";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { PROJECT_TYPES } from "@/lib/m7/project-type";
 import { createProject } from "./actions";
 import { JoinRequestPanel, type JoinRequestRow } from "./join-request-panel";
+import { ExternalApplicantPanel, type ExternalApplicantRow } from "./external-applicant-panel";
 import { ProjectsTable, type ProjectRow } from "./projects-table";
 
 export default async function ProjectsPage() {
@@ -24,10 +26,12 @@ export default async function ProjectsPage() {
     // No RLS policy grants team_members read access on project_join_requests (only
     // is_creator_user() self-read exists) — service-role client is required here.
     const admin = createAdminClient();
+    // 'diundang' juga ditampilkan (tim bisa memutuskan tanpa menunggu respons
+    // kreator di portal — R11/R14) di samping 'diajukan' (pendaftaran portal).
     const { data: pendingRequests } = await admin
       .from("project_join_requests")
       .select("id, project_id, creator_id, created_at, special_projects(name), creators(name)")
-      .eq("status", "diajukan")
+      .in("status", ["diajukan", "diundang"])
       .order("created_at", { ascending: true })
       .limit(100);
     joinRequestRows = (pendingRequests ?? []).map((r) => ({
@@ -36,6 +40,29 @@ export default async function ProjectsPage() {
       projectName: (r.special_projects as unknown as { name: string } | null)?.name ?? `#${r.project_id}`,
       creatorId: r.creator_id,
       creatorName: (r.creators as unknown as { name: string } | null)?.name ?? r.creator_id,
+      createdAt: r.created_at,
+    }));
+  }
+
+  // Pendaftar eksternal (link publik /join/{slug}) — sub-tab terpisah dari internal.
+  let externalApplicantRows: ExternalApplicantRow[] = [];
+  if (canDecideJoin) {
+    const admin = createAdminClient();
+    const { data: pendingApplicants } = await admin
+      .from("project_external_applicants")
+      .select("id, project_id, full_name, username, platform, followers, niche, created_at, special_projects(name)")
+      .eq("status", "pending")
+      .order("created_at", { ascending: true })
+      .limit(100);
+    externalApplicantRows = (pendingApplicants ?? []).map((r) => ({
+      id: r.id,
+      projectId: r.project_id,
+      projectName: (r.special_projects as unknown as { name: string } | null)?.name ?? `#${r.project_id}`,
+      fullName: r.full_name,
+      username: r.username,
+      platform: r.platform,
+      followers: r.followers,
+      niche: r.niche,
       createdAt: r.created_at,
     }));
   }
@@ -77,8 +104,17 @@ export default async function ProjectsPage() {
 
       {canDecideJoin && (
         <section className="mt-6">
-          <h2 className="text-lg font-medium">Pengajuan Bergabung Kreator</h2>
+          <h2 className="text-lg font-medium">Pendaftar — Internal</h2>
+          <p className="text-xs text-slate-500">Kreator terdaftar yang mengajukan/diundang lewat portal.</p>
           <JoinRequestPanel rows={joinRequestRows} />
+        </section>
+      )}
+
+      {canDecideJoin && (
+        <section className="mt-6">
+          <h2 className="text-lg font-medium">Pendaftar — Eksternal</h2>
+          <p className="text-xs text-slate-500">Daftar lewat link publik /join/{"{slug}"}, belum jadi kreator terdaftar.</p>
+          <ExternalApplicantPanel rows={externalApplicantRows} />
         </section>
       )}
 
@@ -89,8 +125,11 @@ export default async function ProjectsPage() {
         >
           <input name="name" required placeholder="Nama project"
             className="rounded-md border border-slate-300 px-3 py-2 text-sm" />
-          <input name="type" placeholder="Tipe (showcase/bootcamp/China trip)"
-            className="rounded-md border border-slate-300 px-3 py-2 text-sm" />
+          <select name="type" required className="rounded-md border border-slate-300 px-3 py-2 text-sm">
+            {PROJECT_TYPES.map((t) => (
+              <option key={t.value} value={t.value}>{t.label}</option>
+            ))}
+          </select>
           <label className="flex items-center gap-2 text-xs text-slate-500">
             Mulai
             <input type="date" name="start_date" required
