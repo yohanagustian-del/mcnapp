@@ -3,13 +3,12 @@
 import { revalidatePath } from "next/cache";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { writeAudit } from "@/lib/audit";
-import { getConfig } from "@/lib/config";
 import { hasPermission, requireMember, requirePermission, type TeamMember } from "@/lib/rbac";
 import { fetchAll } from "@/lib/supabase/fetch-all";
 import { parseRupiah } from "@/lib/utils/rupiah";
 import { canManageProjectParticipants, isAssignedManpower } from "@/lib/m7/access";
 import { likePatternForUsername, normalizeUsername, pickExactUsername } from "@/lib/creators/username";
-import { checkProfitability, trackDaily, type CurveShape } from "@/lib/m7/tracking";
+import { checkProfitability, type CurveShape } from "@/lib/m7/tracking";
 import { isManpowerRole, isProjectType } from "@/lib/m7/project-type";
 import { slugifyProjectName } from "@/lib/m7/slug";
 import { suggestParticipantTargetGmv } from "@/lib/m7/participant-target";
@@ -122,7 +121,7 @@ export async function setProjectStatus(formData: FormData): Promise<void> {
   const admin = createAdminClient();
   const { data: project, error } = await admin
     .from("special_projects")
-    .select("id, name, status, start_date, end_date, target_gmv, ads_budget_cap, daily_target_curve")
+    .select("id, name, status")
     .eq("id", projectId)
     .single();
   if (error || !project) throw new Error("Project tidak ditemukan");
@@ -145,42 +144,28 @@ export async function setProjectStatus(formData: FormData): Promise<void> {
     }
   }
 
-  const patch: Record<string, unknown> = { status };
-  if (status === "selesai") {
-    const [metrics, tolerance] = await Promise.all([
-      fetchAll<{ date: string; gmv_actual: number | null; ads_spend: number | null; creator_commission: number | null; mea_revenue: number | null }>(
-        admin, "project_daily_metrics", "date, gmv_actual, ads_spend, creator_commission, mea_revenue",
-        (q) => q.eq("project_id", projectId)),
-      getConfig<number>("m7.status_tolerance"),
-    ]);
-    const shape = ((project.daily_target_curve as { shape?: CurveShape } | null)?.shape ?? "ramp") as CurveShape;
-    const tracking = trackDaily(
-      metrics.map((m) => ({ date: m.date, gmv: m.gmv_actual ?? 0 })),
-      project.start_date, project.end_date, Number(project.target_gmv), tolerance, shape, project.end_date
-    );
-    const cumAds = metrics.reduce((s, m) => s + (m.ads_spend ?? 0), 0);
-    const cumMea = metrics.reduce((s, m) => s + (m.mea_revenue ?? 0), 0);
-    const cumGmv = tracking.cumActual;
-    const liveContribution = null; // per-format daily split not captured in v1
-    patch.result_summary = {
-      achievement_pct: tracking.achievementPct,
-      gmv_actual: cumGmv,
-      target_gmv: Number(project.target_gmv),
-      margin: cumMea - cumAds,
-      ads_spend: cumAds,
-      mea_revenue: cumMea,
-      live_contribution: liveContribution,
-      closed_at: new Date().toISOString(),
-    };
-  }
-
-  const { error: updError } = await admin.from("special_projects").update(patch).eq("id", projectId);
+  const { error: updError } = await admin.from("special_projects").update({ status }).eq("id", projectId);
   if (updError) throw new Error(`Gagal update status: ${updError.message}`);
+
+  // Closing a project stamps its final result_summary. Recomputed through the SAME
+  // pipeline every other M7 v2 write path uses (CLAUDE.md #4 — single source of
+  // truth), instead of a hand-built subset: a bespoke object here previously
+  // omitted participants_total/participants_active/sum_personal_targets/
+  // creator_commission/feedback, which the Ringkasan tab reads and would show as
+  // 0/blank right after closing until some other write happened to refresh it.
+  let resultSummary: Record<string, unknown> | null = null;
+  if (status === "selesai") {
+    await admin.rpc("recompute_project_daily", { p: projectId });
+    await admin.rpc("recompute_project_summary", { p: projectId });
+    const { data: closed } = await admin
+      .from("special_projects").select("result_summary").eq("id", projectId).single();
+    resultSummary = (closed?.result_summary as Record<string, unknown> | null) ?? null;
+  }
 
   await writeAudit({
     actorId: actor.id, action: `m7.project_${status}`, entityType: "special_projects",
     entityId: String(projectId), before: { status: project.status },
-    after: { status, ...(patch.result_summary ? { result_summary: patch.result_summary } : {}) },
+    after: { status, ...(resultSummary ? { result_summary: resultSummary } : {}) },
     type: "auto",
   });
   revalidatePath("/projects");
