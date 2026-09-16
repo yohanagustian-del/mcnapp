@@ -407,7 +407,14 @@ export async function upsertDailyMetric(formData: FormData): Promise<void> {
         entityId: String(projectId), after: { margin: check.margin, date }, type: "platform_alert",
       });
     } else if (!flag && open) {
-      await admin.from("platform_alerts").update({ resolved: true }).eq("id", open.id);
+      const { error: resolveError } = await admin
+        .from("platform_alerts").update({ resolved: true }).eq("id", open.id);
+      if (resolveError) throw new Error(`Gagal menutup alert: ${resolveError.message}`);
+      await writeAudit({
+        actorId: null, action: `m7.${alertType}_resolved`, entityType: "special_projects",
+        entityId: String(projectId), before: { resolved: false }, after: { resolved: true, margin: check.margin, date },
+        type: "platform_alert",
+      });
     }
   }
 

@@ -73,7 +73,7 @@ export async function togglePinAnnouncement(formData: FormData): Promise<void> {
   if (error) throw new Error(error.message);
 
   await writeAudit({
-    actorId: actor.id, action: "m7.announcement_publish", entityType: "project_announcements",
+    actorId: actor.id, action: "m7.announcement_pin_toggle", entityType: "project_announcements",
     entityId: String(announcementId), after: { pinned: nextPinned }, type: "auto",
   });
   revalidatePath(`/projects/${projectId}/info`);
