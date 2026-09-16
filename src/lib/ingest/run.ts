@@ -18,6 +18,7 @@ import {
 } from "./creator-autofill";
 import { runLeakAnalysis, type LeakAnalysisResult } from "@/lib/m4/leak-analysis";
 import { recomputeCapabilityForBatch } from "@/lib/px/capability-recompute";
+import { pushCoverageForBatch, type CoveragePushResult } from "@/lib/px/coverage-push";
 // Retention lives in its own module (leak-retention.ts) so the leak analysis can
 // import it without a cycle through this file; re-exported here for the existing
 // importers of `enforceLeakRetention` from "./run".
@@ -65,6 +66,16 @@ export interface RunIngestResult {
   capability: number | null;
   capabilitySkipped: string | null;
   capabilityError: string | null;
+  /**
+   * PX-M3-A: result of pushing the FULL current coverage snapshot (all
+   * creators, not just this batch — bridge.px_coverage_map() reads the whole
+   * registry) to CDPS at the end of this ingest run. Null when it didn't run
+   * (see coveragePushSkipped/coveragePushError). Never fails the ingest — a
+   * push error (network, CDPS down, bad secret) is reported here, not thrown.
+   */
+  coveragePush: CoveragePushResult | null;
+  coveragePushSkipped: string | null;
+  coveragePushError: string | null;
 }
 
 /** sha256 of the raw file bytes — cheap provenance record in upload_batches (no row content kept). */
@@ -139,6 +150,15 @@ function describeMcnParseFailure(mcnParsed: ParseResult<McnRow>): string {
  *   9. Link-leakage analysis (runLeakAnalysis) when a TAP file is present — its own
  *      try/catch: the aggregates are already committed, so a leak failure is reported
  *      in the result (leakError) instead of failing/rolling back the batch.
+ *   10. PX-M3-A coverage push (pushCoverageForBatch) — POSTs the full current
+ *       bridge.px_creator_capability coverage snapshot to CDPS
+ *       (docs/BRIDGE_PRODUCT_EXCHANGE_CONTRACT.md), so a weekly ingest run is
+ *       also the (only) trigger for this push — zero new scheduler, same
+ *       decision PX-M1's own recompute already made in step 7. Runs AFTER step
+ *       7 (needs this batch's fresh proven_* already written) but does not
+ *       depend on step 9's leak analysis. Own try/catch, own result fields
+ *       (coveragePush/coveragePushSkipped/coveragePushError): never fails or
+ *       rolls back an ingest that already committed everything else.
  */
 export async function runIngest(input: RunIngestInput): Promise<RunIngestResult> {
   const admin = createAdminClient();
@@ -390,6 +410,10 @@ export async function runIngest(input: RunIngestInput): Promise<RunIngestResult>
       }
     }
 
+    // ---- 10. PX-M3-A: push the full coverage snapshot to CDPS (own try/catch,
+    // never fails the ingest — see step doc above and coverage-push.ts) ----
+    const coveragePushResult = await pushCoverageForBatch(admin, actorId);
+
     return {
       batchId,
       periodStart,
@@ -411,6 +435,9 @@ export async function runIngest(input: RunIngestInput): Promise<RunIngestResult>
       capability: capabilityResult.rows,
       capabilitySkipped: capabilityResult.skipped,
       capabilityError: capabilityResult.error,
+      coveragePush: coveragePushResult.result,
+      coveragePushSkipped: coveragePushResult.skipped,
+      coveragePushError: coveragePushResult.error,
     };
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);
