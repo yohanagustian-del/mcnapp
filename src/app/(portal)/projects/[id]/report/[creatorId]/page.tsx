@@ -2,7 +2,7 @@ import { notFound } from "next/navigation";
 import Link from "next/link";
 import { requireMember, hasPermission } from "@/lib/rbac";
 import { createClient } from "@/lib/supabase/server";
-import { ProjectReportView } from "../../project-report-view";
+import { ProjectReportView } from "@/components/project-report-view";
 import { finalizeProjectReport } from "../../report-actions";
 import type { ProjectReportData } from "@/lib/m7/report-data";
 

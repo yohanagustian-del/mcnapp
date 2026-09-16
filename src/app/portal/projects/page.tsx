@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { requireCreator } from "@/lib/m9/creator-auth";
 import { requestJoinProject } from "../actions";
@@ -23,6 +24,22 @@ export default async function ProjectsPage() {
     .from("creator_project_progress_v")
     .select("project_name, gmv_actual, target_gmv, date")
     .eq("creator_id", creatorId).order("date", { ascending: false }).limit(10);
+
+  // Fase 1D (R28): tab Progress & Report — hanya muncul kalau tim sudah pernah
+  // generate report untuk project ini (draft atau final); status='final'
+  // menampilkan narasi, 'draft' hanya angka (ditegakkan di halaman report itu
+  // sendiri, bukan di sini).
+  const { data: myReports } = await admin
+    .from("creator_reports")
+    .select("project_id, status, special_projects(name)")
+    .eq("creator_id", creatorId).not("project_id", "is", null)
+    .in("status", ["draft", "final"]);
+  const reportByProject = new Map(
+    (myReports ?? []).map((r) => [
+      r.project_id as number,
+      { status: r.status, name: (r.special_projects as unknown as { name: string } | null)?.name },
+    ])
+  );
 
   return (
     <div className="space-y-6">
@@ -57,6 +74,25 @@ export default async function ProjectsPage() {
           })}
         </div>
       </section>
+
+      {reportByProject.size > 0 && (
+        <section>
+          <h2 className="text-lg font-semibold">Progress &amp; Report</h2>
+          <div className="mt-3 grid gap-3 md:grid-cols-2">
+            {[...reportByProject.entries()].map(([projectId, r]) => (
+              <Link
+                key={projectId} href={`/portal/projects/report/${projectId}`}
+                className="rounded-lg border border-slate-200 bg-white p-4 hover:border-slate-300"
+              >
+                <p className="font-medium">{r.name ?? `Project #${projectId}`}</p>
+                <p className="mt-1 text-xs text-slate-500">
+                  {r.status === "final" ? "Report final — lihat hasil & narasi →" : "Progress berjalan →"}
+                </p>
+              </Link>
+            ))}
+          </div>
+        </section>
+      )}
 
       <section>
         <h2 className="text-lg font-semibold">Kontribusi Saya</h2>

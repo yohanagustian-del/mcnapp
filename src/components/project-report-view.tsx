@@ -13,10 +13,12 @@ const rupiahAxis = (v: number) => {
 
 /**
  * Report peserta project (PRD §6.13 tanpa template unduhan — B3 LOCKED): satu
- * komponen dipakai halaman tim (`/projects/[id]/report/[creatorId]`) dan,
- * nanti, tab portal kreator (Fase 1D) — presentasi murni, semua angka SUDAH
- * dihitung server-side (report-data.ts). Insight hanya dari `data_json`, tidak
- * ada angka lain ditampilkan yang tidak berasal dari sana (R27).
+ * komponen dipakai halaman tim (`/projects/[id]/report/[creatorId]`) DAN tab
+ * portal kreator (`/portal/projects/report/[projectId]`, Fase 1D) — presentasi
+ * murni, semua angka SUDAH dihitung server-side (report-data.ts). Insight
+ * hanya dari `data_json`, tidak ada angka lain ditampilkan yang tidak berasal
+ * dari sana (R27). Dipindah ke src/components (bukan di bawah salah satu route
+ * group) justru karena dipakai dua route group berbeda.
  */
 export function ProjectReportView({
   data, insight, status,
