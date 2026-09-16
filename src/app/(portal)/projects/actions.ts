@@ -10,6 +10,9 @@ import { parseRupiah } from "@/lib/utils/rupiah";
 import { canManageProjectParticipants, isAssignedManpower } from "@/lib/m7/access";
 import { likePatternForUsername, normalizeUsername, pickExactUsername } from "@/lib/creators/username";
 import { checkProfitability, trackDaily, type CurveShape } from "@/lib/m7/tracking";
+import { isManpowerRole, isProjectType } from "@/lib/m7/project-type";
+import { slugifyProjectName } from "@/lib/m7/slug";
+import { suggestParticipantTargetGmv } from "@/lib/m7/participant-target";
 
 const isIsoDate = (s: string) => /^\d{4}-\d{2}-\d{2}$/.test(s);
 
@@ -37,7 +40,10 @@ export async function createProject(formData: FormData): Promise<void> {
   const actor = await requirePermission("m7.manage");
 
   const name = String(formData.get("name") ?? "").trim();
-  const type = String(formData.get("type") ?? "").trim() || null;
+  // R1: type is now enum project_type_t (NOT NULL); anything unrecognized falls
+  // back to 'other' rather than rejecting the submit (form always sends a valid value).
+  const typeRaw = String(formData.get("type") ?? "").trim();
+  const type = isProjectType(typeRaw) ? typeRaw : "other";
   const startDate = String(formData.get("start_date") ?? "");
   const endDate = String(formData.get("end_date") ?? "");
   const targetGmv = parseRupiah(String(formData.get("target_gmv") ?? ""));
@@ -68,9 +74,14 @@ export async function createProject(formData: FormData): Promise<void> {
     .single();
   if (error) throw new Error(`Gagal membuat project: ${error.message}`);
 
+  // R3: slug butuh id (unik by construction) → dibuat setelah insert, bukan di dalamnya.
+  const slug = slugifyProjectName(name, data.id);
+  const { error: slugError } = await admin.from("special_projects").update({ slug }).eq("id", data.id);
+  if (slugError) throw new Error(`Gagal membuat slug: ${slugError.message}`);
+
   await writeAudit({
     actorId: actor.id, action: "m7.create_project", entityType: "special_projects",
-    entityId: String(data.id), after: { name, type, startDate, endDate, targetGmv, adsCap, shape },
+    entityId: String(data.id), after: { name, type, startDate, endDate, targetGmv, adsCap, shape, slug },
     type: "auto",
   });
   revalidatePath("/projects");
@@ -81,7 +92,7 @@ export async function setProjectStatus(formData: FormData): Promise<void> {
   const actor = await requirePermission("m7.manage");
   const projectId = Number(formData.get("project_id"));
   const status = String(formData.get("status") ?? "");
-  if (!projectId || !["planning", "aktif", "selesai"].includes(status)) {
+  if (!projectId || !["planning", "aktif", "selesai", "dibatalkan"].includes(status)) {
     throw new Error("Transisi status tidak valid");
   }
 
@@ -92,6 +103,11 @@ export async function setProjectStatus(formData: FormData): Promise<void> {
     .eq("id", projectId)
     .single();
   if (error || !project) throw new Error("Project tidak ditemukan");
+
+  // R2 (LOCKED): koreksi "selesai → aktif" (upload terlambat) hanya Director/Head.
+  if (project.status === "selesai" && status === "aktif" && !["director", "head"].includes(actor.role)) {
+    throw new Error("Hanya Director/Head yang bisa mengaktifkan kembali project yang sudah selesai");
+  }
 
   // External participants must be bound before the project goes active (PRD §2.7).
   if (status === "aktif") {
@@ -225,11 +241,15 @@ export async function addParticipant(formData: FormData): Promise<AddParticipant
       throw new Error("Project sudah aktif — peserta external wajib sudah binding TikTok");
     }
 
+    // R4 (LOCKED): target_gmv peserta wajib diisi — kolomnya NOT NULL sejak v2.
+    // Form sudah mengisi saran otomatis (sisa target / sisa kuota); ini jaring terakhir.
     const targetGmv = parseRupiah(String(formData.get("target_gmv") ?? ""));
+    if (targetGmv === null) throw new Error("Target GMV peserta wajib diisi");
+
     const { error } = await admin.from("project_participants").upsert({
       project_id: projectId, creator_id: creatorId, is_external: isExternal,
       tiktok_binding_status: isExternal ? binding : "bound",
-      live_type: liveType, target_gmv: targetGmv,
+      live_type: liveType, target_gmv: targetGmv, added_via: "manual",
     }, { onConflict: "project_id,creator_id" });
     if (error) throw new Error(`Gagal menambah peserta: ${error.message}`);
 
@@ -246,69 +266,50 @@ export async function addParticipant(formData: FormData): Promise<AddParticipant
   }
 }
 
-/** Metrik GMV per kreator per hari (QA: monitor performa tiap kreator project). */
-export async function upsertCreatorMetric(formData: FormData): Promise<void> {
-  const actor = await requirePermission("m7.metrics");
-  const projectId = Number(formData.get("project_id"));
-  const creatorId = String(formData.get("creator_id") ?? "").trim();
-  const date = String(formData.get("date") ?? "");
-  if (!projectId || !creatorId || !isIsoDate(date)) {
-    throw new Error("Project, creator & tanggal wajib diisi");
-  }
-  const gmv = parseRupiah(String(formData.get("gmv_actual") ?? "")) ?? 0;
-  const itemsSold = Number(String(formData.get("items_sold") ?? "").trim() || 0);
-
-  const admin = createAdminClient();
-  const { data: participant } = await admin
-    .from("project_participants")
-    .select("creator_id")
-    .eq("project_id", projectId)
-    .eq("creator_id", creatorId)
-    .maybeSingle();
-  if (!participant) throw new Error(`${creatorId} bukan peserta project ini — tambah sebagai peserta dulu`);
-
-  const { error } = await admin.from("project_creator_metrics").upsert(
-    { project_id: projectId, creator_id: creatorId, date, gmv_actual: gmv, items_sold: itemsSold },
-    { onConflict: "project_id,creator_id,date" }
-  );
-  if (error) throw new Error(`Gagal menyimpan metrik kreator: ${error.message}`);
-
-  await writeAudit({
-    actorId: actor.id, action: "m7.creator_metric", entityType: "project_creator_metrics",
-    entityId: `${projectId}:${creatorId}:${date}`,
-    after: { gmv, items_sold: itemsSold }, type: "auto",
-  });
-  revalidatePath(`/projects/${projectId}`);
-}
-
-/** Assign man power in-charge (PRD §2.5) + audit. */
+/**
+ * Assign man power in-charge (PRD §2.5) + audit. `role` is now the enum
+ * manpower_role_t and `involvement_pct` a 0–100 integer (M7 v2 §6.2) — both
+ * validated here since they're server-enforced, not just UI dropdowns/inputs.
+ */
 export async function assignManpower(formData: FormData): Promise<void> {
   const actor = await requirePermission("m7.manage");
   const projectId = Number(formData.get("project_id"));
   const memberId = String(formData.get("member_id") ?? "").trim();
-  const role = String(formData.get("role") ?? "").trim() || null;
-  const involvement = String(formData.get("involvement") ?? "").trim() || null;
+  const roleRaw = String(formData.get("role") ?? "").trim();
+  const role = isManpowerRole(roleRaw) ? roleRaw : null;
+  const involvementRaw = String(formData.get("involvement_pct") ?? "").trim();
+  const involvementPct = involvementRaw === "" ? null : Number(involvementRaw);
   if (!projectId || !memberId) throw new Error("Project & anggota tim wajib dipilih");
+  if (
+    involvementPct !== null &&
+    (!Number.isInteger(involvementPct) || involvementPct < 0 || involvementPct > 100)
+  ) {
+    throw new Error("Porsi keterlibatan harus bilangan bulat 0–100");
+  }
 
   const admin = createAdminClient();
   const { error } = await admin.from("project_manpower").upsert(
-    { project_id: projectId, member_id: memberId, role, involvement },
+    { project_id: projectId, member_id: memberId, role, involvement_pct: involvementPct },
     { onConflict: "project_id,member_id" }
   );
   if (error) throw new Error(`Gagal assign man power: ${error.message}`);
 
   await writeAudit({
     actorId: actor.id, action: "m7.assign_manpower", entityType: "project_manpower",
-    entityId: `${projectId}:${memberId}`, after: { role, involvement }, type: "auto",
+    entityId: `${projectId}:${memberId}`, after: { role, involvement_pct: involvementPct }, type: "auto",
   });
   revalidatePath(`/projects/${projectId}`);
 }
 
 /**
- * Daily metric entry (PRD §2.2/§2.4, update harian — LOCKED): gmv, ads spend,
- * komisi creator, revenue MEA per hari. After each write the profitability
- * engine re-checks: ads spend > revenue MEA → alert anti-rugi; ads > cap →
- * alert over-cap. Alerts are EVENTS (platform_alert), never approvals.
+ * Daily COST entry (PRD §2.2/§2.4, update harian): ads spend manual, komisi
+ * creator, revenue MEA. GMV/items/orders are upload-only since M7 v2 B5 —
+ * `project_daily_metrics.gmv_actual` etc. are written exclusively by
+ * `recompute_project_daily()` from `project_creator_metrics` (CLAUDE.md #3: no
+ * manual edit path for a platform-sourced number). After each write the SQL
+ * pipeline recomputes ads_spend (manual + project_ads_spend_v) and the
+ * profitability engine re-checks: ads spend > revenue MEA → alert anti-rugi;
+ * ads > cap → alert over-cap. Alerts are EVENTS (platform_alert), never approvals.
  */
 export async function upsertDailyMetric(formData: FormData): Promise<void> {
   const actor = await requirePermission("m7.metrics");
@@ -316,8 +317,7 @@ export async function upsertDailyMetric(formData: FormData): Promise<void> {
   const date = String(formData.get("date") ?? "");
   if (!projectId || !isIsoDate(date)) throw new Error("Project & tanggal wajib diisi");
 
-  const gmv = parseRupiah(String(formData.get("gmv_actual") ?? "")) ?? 0;
-  const ads = parseRupiah(String(formData.get("ads_spend") ?? "")) ?? 0;
+  const adsManual = parseRupiah(String(formData.get("ads_spend_manual") ?? "")) ?? 0;
   const creatorCommission = parseRupiah(String(formData.get("creator_commission") ?? "")) ?? 0;
   const meaRevenue = parseRupiah(String(formData.get("mea_revenue") ?? "")) ?? 0;
 
@@ -331,16 +331,24 @@ export async function upsertDailyMetric(formData: FormData): Promise<void> {
 
   const { error } = await admin.from("project_daily_metrics").upsert({
     project_id: projectId, date,
-    gmv_actual: gmv, ads_spend: ads, creator_commission: creatorCommission, mea_revenue: meaRevenue,
+    ads_spend_manual: adsManual, creator_commission: creatorCommission, mea_revenue: meaRevenue,
   }, { onConflict: "project_id,date" });
   if (error) throw new Error(`Gagal menyimpan metrik harian: ${error.message}`);
 
   await writeAudit({
     actorId: actor.id, action: "m7.daily_metric", entityType: "project_daily_metrics",
     entityId: `${projectId}:${date}`,
-    after: { gmv, ads, creator_commission: creatorCommission, mea_revenue: meaRevenue },
+    after: { ads_spend_manual: adsManual, creator_commission: creatorCommission, mea_revenue: meaRevenue },
     type: "auto",
   });
+
+  // ads_spend (manual + project_ads_spend_v) is recomputed in SQL, not here in JS
+  // (CLAUDE.md #1: aggregation is SQL, not an app loop) — this also folds in any
+  // ads_briefs tied to this project for the profitability check right below.
+  const { error: recomputeError } = await admin.rpc("recompute_project_daily", { p: projectId });
+  if (recomputeError) throw new Error(`Gagal recompute metrik harian: ${recomputeError.message}`);
+  const { error: summaryError } = await admin.rpc("recompute_project_summary", { p: projectId });
+  if (summaryError) throw new Error(`Gagal recompute ringkasan project: ${summaryError.message}`);
 
   // ---- profitability re-check on cumulative numbers ----
   const metrics = await fetchAll<{ ads_spend: number | null; mea_revenue: number | null }>(
@@ -421,9 +429,24 @@ export async function decideProjectJoinRequest(formData: FormData): Promise<Proj
     });
 
     // Auto-bind accepted creators as participants so M7 tracking picks them up.
+    // R4: target_gmv is NOT NULL since v2 — suggest sisa target / sisa kuota here too
+    // (same rule as the manual add-participant form; PR-21/Fase 2 will let the team
+    // review/override this before it's saved instead of only after).
     if (decision === "diterima") {
+      const [{ data: project }, { data: existingParticipants }] = await Promise.all([
+        admin.from("special_projects").select("target_gmv, target_creators").eq("id", reqRow.project_id).single(),
+        admin.from("project_participants").select("target_gmv").eq("project_id", reqRow.project_id),
+      ]);
+      const suggestedTargetGmv = suggestParticipantTargetGmv({
+        projectTargetGmv: Number(project?.target_gmv ?? 0),
+        targetCreators: project?.target_creators ?? null,
+        existingParticipantTargets: (existingParticipants ?? []).map((p) => Number(p.target_gmv ?? 0)),
+      });
       const { error: upsertError } = await admin.from("project_participants").upsert(
-        { project_id: reqRow.project_id, creator_id: reqRow.creator_id },
+        {
+          project_id: reqRow.project_id, creator_id: reqRow.creator_id,
+          target_gmv: suggestedTargetGmv, added_via: "portal",
+        },
         { onConflict: "project_id,creator_id", ignoreDuplicates: true }
       );
       if (upsertError) throw new Error(`Gagal menambah peserta: ${upsertError.message}`);
