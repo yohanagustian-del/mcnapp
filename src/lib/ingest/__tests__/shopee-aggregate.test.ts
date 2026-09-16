@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildShopeePeriodSummary } from "../shopee-aggregate";
+import { buildShopeePeriodSummary, buildShopeeSubcatSegment } from "../shopee-aggregate";
 import type { ShopeeRow } from "../shopee-csv";
 
 function shopeeRow(overrides: Partial<ShopeeRow> = {}): ShopeeRow {
@@ -68,5 +68,57 @@ describe("buildShopeePeriodSummary", () => {
 
   it("returns an empty array for no rows", () => {
     expect(buildShopeePeriodSummary([], "2026-07-01", "2026-07-07")).toEqual([]);
+  });
+});
+
+describe("buildShopeeSubcatSegment", () => {
+  it("groups by (creator, normalized category), summing gmv and counting orders", () => {
+    const rows = [
+      shopeeRow({ level2Category: "Dress", gmv: 100_000 }),
+      shopeeRow({ level2Category: "dress", gmv: 50_000 }), // different casing, same category
+    ];
+    const segments = buildShopeeSubcatSegment(rows, "2026-07-07");
+    expect(segments).toHaveLength(1);
+    expect(segments[0]).toMatchObject({ level2Category: "Dress", gmv: 150_000, orders: 2 });
+  });
+
+  it("sums liveGmv only from bucket='live' rows, priceSegment/itemsSold/avgPrice stay neutral", () => {
+    const rows = [
+      shopeeRow({ level2Category: "Dress", gmv: 100_000, bucket: "live" }),
+      shopeeRow({ level2Category: "Dress", gmv: 50_000, bucket: "video" }),
+    ];
+    const [segment] = buildShopeeSubcatSegment(rows, "2026-07-07");
+    expect(segment.gmv).toBe(150_000);
+    expect(segment.liveGmv).toBe(100_000);
+    expect(segment.priceSegment).toBeNull();
+    expect(segment.itemsSold).toBe(0);
+    expect(segment.avgPrice).toBeNull();
+  });
+
+  it("excludes rows whose category isn't in the official Shopee list, rather than guessing", () => {
+    const rows = [
+      shopeeRow({ level2Category: "Dress", gmv: 100_000 }),
+      shopeeRow({ level2Category: "Kategori Karangan", gmv: 999_999 }),
+      shopeeRow({ level2Category: null, gmv: 999_999 }),
+    ];
+    const segments = buildShopeeSubcatSegment(rows, "2026-07-07");
+    expect(segments).toHaveLength(1);
+    expect(segments[0].gmv).toBe(100_000);
+  });
+
+  it("separates categories per creator", () => {
+    const rows = [
+      shopeeRow({ affiliateUsername: "CRT-001", level2Category: "Dress", gmv: 100_000 }),
+      shopeeRow({ affiliateUsername: "CRT-002", level2Category: "Dress", gmv: 200_000 }),
+    ];
+    const segments = buildShopeeSubcatSegment(rows, "2026-07-07");
+    expect(segments).toHaveLength(2);
+    const byCreator = new Map(segments.map((s) => [s.creatorId, s]));
+    expect(byCreator.get("CRT-001")?.gmv).toBe(100_000);
+    expect(byCreator.get("CRT-002")?.gmv).toBe(200_000);
+  });
+
+  it("returns an empty array for no rows", () => {
+    expect(buildShopeeSubcatSegment([], "2026-07-07")).toEqual([]);
   });
 });

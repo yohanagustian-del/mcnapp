@@ -583,8 +583,9 @@ function formatFollowerCount(n: number): string {
  * untouched. The shared parts (status/platform/gmv-avg/jenis_creator update +
  * audit) are factored into src/lib/ingest/creator-autofill.ts and reused by the
  * Shopee pipeline (src/lib/ingest/shopee-run.ts) — CLAUDE.md #4, one
- * implementation. Niche/top_niches stays TikTok-only here (Shopee ingest has no
- * subcat data per task decision).
+ * implementation. Niche/top_niches is computed here from this pipeline's own
+ * subcatSegment via rankTopNiches(); the Shopee pipeline ranks its own the
+ * same way from its category data (shopee-category.ts/shopee-aggregate.ts).
  */
 async function autoFillCreators(
   admin: SupabaseClient,
