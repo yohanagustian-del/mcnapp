@@ -13,18 +13,29 @@ export interface JoinRequestRow {
 }
 
 function JoinRequestCard({ row, onDone }: { row: JoinRequestRow; onDone: () => void }) {
+  const [rejecting, setRejecting] = useState(false);
+  const [reason, setReason] = useState("");
+  const [targetGmv, setTargetGmv] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [warning, setWarning] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
 
   function decide(decision: "diterima" | "ditolak") {
     setError(null);
+    if (decision === "ditolak" && !reason.trim()) {
+      setRejecting(true); // reveal the reason field instead of submitting
+      return;
+    }
     const formData = new FormData();
     formData.set("request_id", String(row.id));
     formData.set("decision", decision);
+    if (decision === "ditolak") formData.set("reason", reason.trim());
+    if (decision === "diterima" && targetGmv.trim()) formData.set("target_gmv", targetGmv.trim());
     startTransition(async () => {
       const res = await decideProjectJoinRequest(formData);
       if (res.ok) {
-        onDone();
+        if (res.warning) { setWarning(res.warning); setTimeout(onDone, 1500); }
+        else onDone();
       } else {
         setError(res.error);
       }
@@ -37,25 +48,42 @@ function JoinRequestCard({ row, onDone }: { row: JoinRequestRow; onDone: () => v
         <p className="font-medium">{row.creatorName} <span className="text-xs text-slate-400">{row.creatorId}</span></p>
         <p className="text-xs text-slate-500">Mengajukan ikut: {row.projectName}</p>
       </div>
-      <div className="flex items-center gap-2">
+      <div className="flex flex-wrap items-center gap-2">
+        <input
+          value={targetGmv} onChange={(e) => setTargetGmv(e.target.value)}
+          placeholder="Target GMV (opsional, saran otomatis)"
+          className="w-48 rounded-md border border-slate-300 px-2 py-1 text-xs"
+        />
         <button
-          type="button"
-          disabled={pending}
-          onClick={() => decide("diterima")}
+          type="button" disabled={pending} onClick={() => decide("diterima")}
           className="rounded-md bg-green-700 px-3 py-1.5 text-xs font-medium text-white hover:bg-green-600 disabled:opacity-50"
         >
           {pending ? "..." : "Terima"}
         </button>
         <button
-          type="button"
-          disabled={pending}
-          onClick={() => decide("ditolak")}
+          type="button" disabled={pending} onClick={() => decide("ditolak")}
           className="rounded-md bg-red-700 px-3 py-1.5 text-xs font-medium text-white hover:bg-red-600 disabled:opacity-50"
         >
           {pending ? "..." : "Tolak"}
         </button>
       </div>
+      {rejecting && (
+        <div className="flex w-full items-center gap-2">
+          <input
+            value={reason} onChange={(e) => setReason(e.target.value)} autoFocus
+            placeholder="Alasan penolakan (wajib)"
+            className="flex-1 rounded-md border border-slate-300 px-2 py-1 text-xs"
+          />
+          <button
+            type="button" disabled={pending || !reason.trim()} onClick={() => decide("ditolak")}
+            className="rounded-md bg-red-700 px-3 py-1.5 text-xs font-medium text-white hover:bg-red-600 disabled:opacity-50"
+          >
+            Konfirmasi Tolak
+          </button>
+        </div>
+      )}
       {error && <p className="w-full text-xs text-red-700">{error}</p>}
+      {warning && <p className="w-full text-xs text-amber-700">{warning}</p>}
     </div>
   );
 }

@@ -5,6 +5,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { writeAudit } from "@/lib/audit";
 import { requireCreator, creatorActor } from "@/lib/m9/creator-auth";
 import { weekStart, hasReportCredit } from "@/lib/m9/portal";
+import { suggestParticipantTargetGmv } from "@/lib/m7/participant-target";
 
 /**
  * M9 creator intake actions. Every write:
@@ -106,6 +107,59 @@ export async function requestJoinProject(formData: FormData): Promise<void> {
     actorLabel: creatorActor(creatorId), action: "m9.project_join",
     entityType: "project_join_requests", entityId: String(projectId), type: "auto",
   });
+  revalidatePath("/portal/projects");
+}
+
+/**
+ * §3.5/R11 — creator accepts/declines an invite the team sent from the
+ * shortlist. Accept auto-binds as a participant (R4: target_gmv NOT NULL —
+ * suggested here the same way as everywhere else since there's no team review
+ * step in this path); decline just closes the invite, no reason required.
+ */
+export async function respondToInvite(formData: FormData): Promise<void> {
+  const { creatorId } = await requireCreator();
+  const requestId = Number(formData.get("request_id"));
+  const decision = String(formData.get("decision") ?? "");
+  if (!Number.isFinite(requestId)) throw new Error("Undangan tidak valid");
+  if (!["diterima", "ditolak"].includes(decision)) throw new Error("Keputusan tidak valid");
+
+  const admin = createAdminClient();
+  const { data: reqRow } = await admin
+    .from("project_join_requests")
+    .select("id, project_id, creator_id, status")
+    .eq("id", requestId).eq("creator_id", creatorId).maybeSingle();
+  if (!reqRow) throw new Error("Undangan tidak ditemukan");
+  if (reqRow.status !== "diundang") throw new Error("Undangan ini sudah diproses");
+
+  const { error } = await admin
+    .from("project_join_requests")
+    .update({ status: decision, decided_at: new Date().toISOString() })
+    .eq("id", requestId);
+  if (error) throw new Error(error.message);
+
+  await writeAudit({
+    actorLabel: creatorActor(creatorId), action: "m9.project_invite_respond",
+    entityType: "project_join_requests", entityId: String(requestId),
+    before: { status: reqRow.status }, after: { status: decision }, type: "auto",
+  });
+
+  if (decision === "diterima") {
+    const [{ data: project }, { data: existingParticipants }] = await Promise.all([
+      admin.from("special_projects").select("target_gmv, target_creators").eq("id", reqRow.project_id).single(),
+      admin.from("project_participants").select("target_gmv").eq("project_id", reqRow.project_id),
+    ]);
+    const suggestedTargetGmv = suggestParticipantTargetGmv({
+      projectTargetGmv: Number(project?.target_gmv ?? 0),
+      targetCreators: project?.target_creators ?? null,
+      existingParticipantTargets: (existingParticipants ?? []).map((p) => Number(p.target_gmv ?? 0)),
+    });
+    const { error: upsertError } = await admin.from("project_participants").upsert(
+      { project_id: reqRow.project_id, creator_id: creatorId, target_gmv: suggestedTargetGmv, added_via: "invite" },
+      { onConflict: "project_id,creator_id", ignoreDuplicates: true }
+    );
+    if (upsertError) throw new Error(upsertError.message);
+  }
+
   revalidatePath("/portal/projects");
 }
 

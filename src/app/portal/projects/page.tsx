@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { requireCreator } from "@/lib/m9/creator-auth";
-import { requestJoinProject } from "../actions";
+import { requestJoinProject, respondToInvite } from "../actions";
 
 /** §2.6 — see open special projects + ask to join (PM decides, M7). Track own contribution. */
 export default async function ProjectsPage() {
@@ -19,6 +19,12 @@ export default async function ProjectsPage() {
   const { data: myReqs } = await admin
     .from("project_join_requests").select("project_id, status").eq("creator_id", creatorId);
   const reqByProject = new Map((myReqs ?? []).map((r) => [r.project_id, r.status]));
+
+  // §3.7 — pending invites from the team's shortlist (R11): accept/decline here.
+  const { data: invites } = await admin
+    .from("project_join_requests")
+    .select("id, project_id, special_projects(name)")
+    .eq("creator_id", creatorId).eq("status", "diundang");
 
   const { data: progress } = await admin
     .from("creator_project_progress_v")
@@ -74,6 +80,33 @@ export default async function ProjectsPage() {
           })}
         </div>
       </section>
+
+      {(invites ?? []).length > 0 && (
+        <section>
+          <h2 className="text-lg font-semibold">Undangan</h2>
+          <div className="mt-3 space-y-2">
+            {(invites ?? []).map((inv) => (
+              <div key={inv.id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-slate-200 bg-white p-3 text-sm">
+                <p className="font-medium">
+                  {(inv.special_projects as unknown as { name: string } | null)?.name ?? `Project #${inv.project_id}`}
+                </p>
+                <div className="flex gap-2">
+                  <form action={respondToInvite}>
+                    <input type="hidden" name="request_id" value={inv.id} />
+                    <input type="hidden" name="decision" value="diterima" />
+                    <button className="rounded bg-green-700 px-3 py-1.5 text-xs text-white">Terima</button>
+                  </form>
+                  <form action={respondToInvite}>
+                    <input type="hidden" name="request_id" value={inv.id} />
+                    <input type="hidden" name="decision" value="ditolak" />
+                    <button className="rounded bg-red-700 px-3 py-1.5 text-xs text-white">Tolak</button>
+                  </form>
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
 
       {reportByProject.size > 0 && (
         <section>
