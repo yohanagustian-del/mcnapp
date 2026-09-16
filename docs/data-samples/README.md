@@ -55,3 +55,42 @@ Link TAP | Contact PIC | Nama Grup | **Komisi Kreator** | **Komisi Mea** | Openp
 - Banyak sel kosong → jangan crash, flag review
 
 **→ Deal BARU wajib lewat FORM tervalidasi (M8) supaya tidak berantakan lagi.**
+
+---
+
+## M7 v2 — TikTok LIVE Center sesi (Fase 1A, dikonfirmasi 16 Sep 2026)
+
+2 kreator, 1 sesi masing-masing (`haikalpratama136`, `beayik`) — file asli dari
+Google Drive, bukan asumsi PRD. Kolom sheet **sama persis** dengan yang sudah
+diasumsikan `src/lib/m7/live-parse.ts` (tidak perlu perbaikan alias kolom).
+
+**Product** (sumber GMV sesi, §10.2 V6): `Product ID, Product name, Attributed
+GMV, Attributed items sold, Customers, AOV, Attributed SKU orders, Attributed
+orders, Payment Rate, Product Impressions, CTR, Added to cart, CTOR (SKU
+orders), CTOR, Watch GPM, Product Clicks, Available stock`.
+
+**Trend Stat** (timeline per interval, bukan sumber GMV): `Time, Attributed
+GMV, Attributed items sold, Customers, Attributed SKU orders, Attributed
+orders, Viewers, Views, Product Impressions, LIVE CTR, Tap-through rate,
+Product Clicks, Impressions, New followers, Shares, Comments, Likes, Comment
+rate, Follow rate, Like rate, Share rate, AOV, CTOR (SKU orders), Watch GPM,
+CTOR, Payment Rate, Show GPM, Order rate (SKU orders)`.
+
+**Nama file — TERNYATA BEDA dari asumsi PRD** (PRD menduga
+`{user}_{product|trend_stats}_Sesi_{n}__{d}_{Bulan}_{yyyy}.xlsx` dengan
+underscore ganda sebelum tanggal; kenyataannya pakai koma, dan pemisah
+username↔kind tidak konsisten antar akun pengunggah):
+- `haikalpratama136 Product sesi 1, 15 September 2026.xlsx` (spasi sebelum kind)
+- `haikalpratama136 Trend Stat Sesi 1, 15 September 2026.xlsx`
+- `beayik_product Sesi 1, 15 September 2026.xlsx` (underscore sebelum kind)
+- `beayik_trend stats Sesi 1, 15 September 2026.xlsx`
+
+`src/lib/m7/live-filename.ts` sudah diperbaiki (16 Sep 2026) untuk menerima
+kedua bentuk ini sekaligus bentuk lama yang diasumsikan PRD — lihat komentar
+di file itu dan `__tests__/live-filename.test.ts` untuk detail regex-nya.
+
+**Belum ada sampel** untuk Fase 1B (export harian `mcn_tiktok_product`,
+`tap_tiktok_product`, `mcn_tiktok_live`, `tap_tiktok_live`, `shopee`) — ini
+file per-SESI single-creator (Fase 1A), bukan file agregat harian
+multi-creator/multi-shop yang dibutuhkan Fase 1B (lihat struktur "Multi-creator
+report" di atas untuk perbandingan bentuknya).

@@ -61,4 +61,39 @@ describe("parseLiveFilename", () => {
   it("returns null for a non-.xlsx extension", () => {
     expect(parseLiveFilename("haikal_product_Sesi_1__5_September_2026.csv")).toBeNull();
   });
+
+  // Real TikTok LIVE Center export filenames (2 creators, 16 Sep 2026 sample
+  // batch) — comma-separated date, NOT the double-underscore the PRD assumed
+  // before any real sample existed. Two different real uploaders even disagree
+  // with each other on the username/kind separator (space vs underscore) and on
+  // "Trend Stat" vs "trend stats" — both must parse.
+  it("parses real export filenames with a space before the kind and a comma before the date", () => {
+    expect(parseLiveFilename("haikalpratama136 Product sesi 1, 15 September 2026.xlsx")).toEqual({
+      username: "haikalpratama136",
+      sessionNo: 1,
+      date: "2026-09-15",
+      kind: "product",
+    });
+    expect(parseLiveFilename("haikalpratama136 Trend Stat Sesi 1, 15 September 2026.xlsx")).toEqual({
+      username: "haikalpratama136",
+      sessionNo: 1,
+      date: "2026-09-15",
+      kind: "trend_stats",
+    });
+  });
+
+  it("parses real export filenames with an underscore before the kind and a comma before the date", () => {
+    expect(parseLiveFilename("beayik_product Sesi 1, 15 September 2026.xlsx")).toEqual({
+      username: "beayik",
+      sessionNo: 1,
+      date: "2026-09-15",
+      kind: "product",
+    });
+    expect(parseLiveFilename("beayik_trend stats Sesi 1, 15 September 2026.xlsx")).toEqual({
+      username: "beayik",
+      sessionNo: 1,
+      date: "2026-09-15",
+      kind: "trend_stats",
+    });
+  });
 });

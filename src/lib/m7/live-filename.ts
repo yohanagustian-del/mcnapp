@@ -2,11 +2,23 @@
  * M7 v2 Special Project — TikTok LIVE Center export filename parser (PRD addendum
  * §9, 16 Sep 2026). Username, session number, and date live ONLY in the filename —
  * the sheets themselves carry none of them. Real-world exports are inconsistent:
- * `product`/`Product`, `trend_stats`/`Trend_Stat`, `Sesi`/`sesi`. Pure function,
- * no I/O — returns null on anything unreadable so the caller can fall back to
+ * `product`/`Product`, `trend_stats`/`Trend Stat`/`trend stats`, `Sesi`/`sesi`,
+ * `_` or ` ` as the separator before the kind/before "sesi". Pure function, no
+ * I/O — returns null on anything unreadable so the caller can fall back to
  * manual entry (R37) instead of crashing (CLAUDE.md #7).
  *
- * Expected shape: `{username}_{product|trend_stats}_Sesi_{n}__{d}_{Bulan}_{yyyy}.xlsx`
+ * Two real filename shapes confirmed against actual TikTok LIVE Center exports
+ * (2 creators, 16 Sep 2026 sample batch — see docs/data-samples/README.md):
+ *   `haikalpratama136 Product sesi 1, 15 September 2026.xlsx`
+ *   `haikalpratama136 Trend Stat Sesi 1, 15 September 2026.xlsx`
+ *   `beayik_product Sesi 1, 15 September 2026.xlsx`
+ *   `beayik_trend stats Sesi 1, 15 September 2026.xlsx`
+ * — day/month/year is comma-separated, NOT the double-underscore the PRD assumed
+ * before any real sample existed. That legacy `__d_Bulan_yyyy` shape is also still
+ * accepted (harmless — some export tooling may still produce it), but a SINGLE
+ * underscore before the day is deliberately rejected: with no comma and no double
+ * underscore to disambiguate, "Sesi_1_5_..." could mean session 1 day 5 or session
+ * 15 — never guess (CLAUDE.md #7).
  */
 export interface ParsedLiveFilename {
   username: string;
@@ -22,7 +34,7 @@ const MONTHS_ID: Record<string, number> = {
 };
 
 const FILENAME_RE =
-  /^([a-z0-9._]+)_(product|trend[_ ]?stats?)_sesi_(\d+)__(\d{1,2})_([a-z]+)_(\d{4})\.xlsx$/i;
+  /^([a-z0-9._]+)[ _]+(product|trend[ _]?stats?)[ _]+sesi[ _]*(\d+)(?:,\s*|__)(\d{1,2})[ _]+([a-z]+)[ _]+(\d{4})\.xlsx$/i;
 
 export function parseLiveFilename(filename: string): ParsedLiveFilename | null {
   const match = FILENAME_RE.exec(filename.trim());
