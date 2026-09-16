@@ -13,7 +13,7 @@ export function PortalInviteButton({
 }: { creatorId: string; existingStatus: string | null }) {
   const [open, setOpen] = useState(false);
   const [email, setEmail] = useState("");
-  const [token, setToken] = useState<string | null>(null);
+  const [link, setLink] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
 
@@ -28,16 +28,16 @@ export function PortalInviteButton({
     fd.set("email", email);
     startTransition(async () => {
       const res = await invitePortalAccount(fd);
-      if (res.ok) setToken(res.token);
+      if (res.ok) setLink(res.link);
       else setError(res.error);
     });
   }
 
-  if (token) {
+  if (link) {
     return (
       <div className="text-xs">
-        <p className="text-green-700">Undangan dibuat — kirim token ini manual (WA):</p>
-        <input readOnly value={token} onFocus={(e) => e.target.select()}
+        <p className="text-green-700">Undangan dibuat — kirim link ini manual (WA):</p>
+        <input readOnly value={link} onFocus={(e) => e.target.select()}
           className="mt-1 w-40 rounded border border-slate-300 px-1 py-0.5 font-mono text-[10px]" />
       </div>
     );
