@@ -1,4 +1,5 @@
 import { notFound } from "next/navigation";
+import Link from "next/link";
 import { requireMember, hasPermission } from "@/lib/rbac";
 import { createClient } from "@/lib/supabase/server";
 import { getConfig } from "@/lib/config";
@@ -42,7 +43,7 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
   const [{ data: metrics }, { data: participants }, { data: manpower }, { data: alerts }, tolerance, liveMin] =
     await Promise.all([
       supabase.from("project_daily_metrics")
-        .select("date, gmv_actual, ads_spend, creator_commission, mea_revenue")
+        .select("date, gmv_actual, gmv_live, ads_spend, creator_commission, mea_revenue")
         .eq("project_id", projectId).order("date"),
       // creators(...) ikut membawa CM pemiliknya (owner_cpm_id → team_members).
       // creators punya dua FK ke team_members (CM + Akuisitor), jadi embed-nya
@@ -74,6 +75,9 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
   const cumAds = (metrics ?? []).reduce((s, m) => s + Number(m.ads_spend ?? 0), 0);
   const cumMea = (metrics ?? []).reduce((s, m) => s + Number(m.mea_revenue ?? 0), 0);
   const cumKomisiCreator = (metrics ?? []).reduce((s, m) => s + Number(m.creator_commission ?? 0), 0);
+  const cumLiveGmv = (metrics ?? []).reduce((s, m) => s + Number(m.gmv_live ?? 0), 0);
+  const liveContribution = tracking.cumActual > 0 ? cumLiveGmv / tracking.cumActual : 0;
+  const daysRemaining = Math.max(tracking.totalDays - tracking.daysElapsed, 0);
 
   // Live-active helper (PRD §2.3): live GMV ≥ config over the recent ~1 month.
   // Module 0.5 Fase 2: creator_period_summary (satu baris per creator per
@@ -180,6 +184,8 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
     };
   });
 
+  const participantsActive = creatorPerformanceRows.filter((r) => r.gmv > 0).length;
+
   // Performa per CM = ROLLUP dari baris performa kreator di atas (CLAUDE.md #4:
   // agregasi sumber yang sama, bukan hitung ulang dari project_creator_metrics).
   // Dihitung di server; komponen kliennya hanya mengurutkan + memaginasi.
@@ -221,6 +227,11 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
         <h1 className="text-2xl font-semibold">{project.name}</h1>
         <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-600">{project.status}</span>
         {project.type && <span className="text-sm text-slate-400">{project.type}</span>}
+        {canMetrics && (
+          <Link href={`/projects/${project.id}/performa`} className="text-sm text-blue-700 hover:underline">
+            Upload Performa (Live) →
+          </Link>
+        )}
       </div>
       <p className="mt-1 text-sm text-slate-500">
         {project.start_date} → {project.end_date} · Target {rupiah(project.target_gmv)} · Ads cap {rupiah(project.ads_budget_cap)}
@@ -296,6 +307,24 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
           <p className="text-xs text-slate-400">
             Revenue MEA {rupiah(cumMea)} − ads {rupiah(cumAds)} · komisi creator {rupiah(cumKomisiCreator)}
           </p>
+        </div>
+      </div>
+
+      <div className="mt-3 grid gap-4 sm:grid-cols-3">
+        <div className="rounded-lg border border-slate-200 bg-white p-4">
+          <p className="text-xs uppercase text-slate-500">Hari Tersisa</p>
+          <p className="mt-1 text-lg font-semibold">{daysRemaining} hari</p>
+          <p className="text-xs text-slate-400">dari total {tracking.totalDays} hari periode project</p>
+        </div>
+        <div className="rounded-lg border border-slate-200 bg-white p-4">
+          <p className="text-xs uppercase text-slate-500">Peserta Aktif</p>
+          <p className="mt-1 text-lg font-semibold">{participantsActive} / {(participants ?? []).length}</p>
+          <p className="text-xs text-slate-400">peserta dengan GMV &gt; 0</p>
+        </div>
+        <div className="rounded-lg border border-slate-200 bg-white p-4">
+          <p className="text-xs uppercase text-slate-500">Live Contribution</p>
+          <p className="mt-1 text-lg font-semibold">{(liveContribution * 100).toFixed(0)}%</p>
+          <p className="text-xs text-slate-400">GMV live {rupiah(cumLiveGmv)} dari total {rupiah(tracking.cumActual)}</p>
         </div>
       </div>
 
