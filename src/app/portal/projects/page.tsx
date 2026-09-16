@@ -26,6 +26,40 @@ export default async function ProjectsPage() {
     .select("id, project_id, special_projects(name)")
     .eq("creator_id", creatorId).eq("status", "diundang");
 
+  // §3.7/PR-24: tab Info — pengumuman project yang diikuti, dengan badge belum dibaca.
+  const { data: myParticipations } = await admin
+    .from("project_participants")
+    .select("project_id, special_projects(name)")
+    .eq("creator_id", creatorId);
+  const participatedProjectIds = (myParticipations ?? []).map((p) => p.project_id as number);
+  let infoSections: { projectId: number; projectName: string; total: number; unread: number }[] = [];
+  if (participatedProjectIds.length > 0) {
+    const [{ data: announcementRows }, { data: readRows }] = await Promise.all([
+      admin
+        .from("project_announcements")
+        .select("id, project_id")
+        .in("project_id", participatedProjectIds)
+        .not("published_at", "is", null)
+        .lte("published_at", new Date().toISOString()),
+      admin.from("project_announcement_reads").select("announcement_id").eq("creator_id", creatorId),
+    ]);
+    const readIds = new Set((readRows ?? []).map((r) => r.announcement_id as number));
+    const byProject = new Map<number, { total: number; unread: number }>();
+    for (const a of announcementRows ?? []) {
+      const cur = byProject.get(a.project_id) ?? { total: 0, unread: 0 };
+      cur.total += 1;
+      if (!readIds.has(a.id)) cur.unread += 1;
+      byProject.set(a.project_id, cur);
+    }
+    infoSections = (myParticipations ?? [])
+      .filter((p) => byProject.has(p.project_id))
+      .map((p) => ({
+        projectId: p.project_id,
+        projectName: (p.special_projects as unknown as { name: string } | null)?.name ?? `Project #${p.project_id}`,
+        ...byProject.get(p.project_id)!,
+      }));
+  }
+
   const { data: progress } = await admin
     .from("creator_project_progress_v")
     .select("project_name, gmv_actual, target_gmv, date")
@@ -103,6 +137,27 @@ export default async function ProjectsPage() {
                   </form>
                 </div>
               </div>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {infoSections.length > 0 && (
+        <section>
+          <h2 className="text-lg font-semibold">Info</h2>
+          <div className="mt-3 grid gap-3 md:grid-cols-2">
+            {infoSections.map((s) => (
+              <Link
+                key={s.projectId} href={`/portal/projects/info/${s.projectId}`}
+                className="flex items-center justify-between rounded-lg border border-slate-200 bg-white p-4 hover:border-slate-300"
+              >
+                <span className="font-medium">{s.projectName}</span>
+                {s.unread > 0 && (
+                  <span className="rounded-full bg-red-100 px-2 py-0.5 text-xs font-medium text-red-800">
+                    {s.unread} belum dibaca
+                  </span>
+                )}
+              </Link>
             ))}
           </div>
         </section>

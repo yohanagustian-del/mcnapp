@@ -436,3 +436,166 @@ export async function voidLiveSession(formData: FormData): Promise<{ ok: boolean
     return { ok: false, error: e instanceof Error ? e.message : "Terjadi kesalahan tidak terduga." };
   }
 }
+
+/**
+ * Sanggahan sesi (PRD §10.3/PR-26). A disputed session already dropped out of the
+ * roll-up the moment `disputeLiveSession` (portal) flipped `attribution_status`
+ * (view `project_creator_daily_live_v` filters to verified/confirmed_manual —
+ * CLAUDE.md #4, same enforcement point as everywhere else in this table). These
+ * two actions are how the team resolves it.
+ */
+async function recomputeAffected(
+  admin: ReturnType<typeof createAdminClient>,
+  entries: { projectId: number; creatorId: string; date: string }[]
+) {
+  const seenProjects = new Set<number>();
+  for (const e of entries) {
+    await admin.rpc("recompute_creator_daily_live", { p: e.projectId, c: e.creatorId, d: e.date });
+    seenProjects.add(e.projectId);
+  }
+  for (const p of seenProjects) {
+    await admin.rpc("recompute_project_daily", { p });
+    await admin.rpc("recompute_project_summary", { p });
+  }
+}
+
+/** Tolak sanggahan → kembali `verified`, alasan tim dicatat (R41/§10.3). */
+export async function rejectLiveSessionDispute(formData: FormData): Promise<{ ok: boolean; error?: string }> {
+  try {
+    const actor = await requirePermission("m7.metrics");
+    const sessionId = Number(formData.get("session_id"));
+    const reason = String(formData.get("reason") ?? "").trim();
+    if (!sessionId) throw new Error("Sesi tidak valid");
+    if (!reason) throw new Error("Alasan menolak sanggahan wajib diisi");
+
+    const admin = createAdminClient();
+    const { data: session } = await admin
+      .from("project_live_sessions")
+      .select("id, project_id, creator_id, session_date, attribution_status")
+      .eq("id", sessionId).single();
+    if (!session) throw new Error("Sesi tidak ditemukan");
+    if (session.attribution_status !== "disputed") throw new Error("Sesi ini tidak sedang disanggah");
+
+    const { error } = await admin
+      .from("project_live_sessions")
+      .update({
+        attribution_status: "verified", attribution_note: `Sanggahan ditolak: ${reason}`,
+        confirmed_by: actor.id, confirmed_at: new Date().toISOString(), updated_at: new Date().toISOString(),
+      })
+      .eq("id", sessionId);
+    if (error) throw new Error(error.message);
+
+    await writeAudit({
+      actorId: actor.id, action: "m7.live_session_dispute", entityType: "project_live_sessions",
+      entityId: String(sessionId), before: { attribution_status: "disputed" },
+      after: { attribution_status: "verified", reject_reason: reason }, type: "auto",
+    });
+
+    await recomputeAffected(admin, [{ projectId: session.project_id, creatorId: session.creator_id, date: session.session_date }]);
+
+    revalidatePath(`/projects/${session.project_id}/performa`);
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "Terjadi kesalahan tidak terduga." };
+  }
+}
+
+/**
+ * Pindahkan sesi disanggah ke peserta lain — jalankan ulang V1-V7 untuk peserta
+ * tujuan (§10.3). A block-level result refuses the move outright (the team should
+ * void + re-upload manually instead); a warn-level result is allowed but the
+ * session lands as `confirmed_manual`, same as a normal upload override.
+ */
+export async function reassignLiveSession(formData: FormData): Promise<{ ok: boolean; error?: string }> {
+  try {
+    const actor = await requirePermission("m7.metrics");
+    const sessionId = Number(formData.get("session_id"));
+    const targetCreatorId = String(formData.get("target_creator_id") ?? "").trim();
+    if (!sessionId || !targetCreatorId) throw new Error("Sesi & peserta tujuan wajib dipilih");
+
+    const admin = createAdminClient();
+    const { data: session } = await admin
+      .from("project_live_sessions")
+      .select(
+        "id, project_id, creator_id, session_date, session_no, start_time, end_time, gmv, gmv_trend, filename_product, attribution_status"
+      )
+      .eq("id", sessionId).single();
+    if (!session) throw new Error("Sesi tidak ditemukan");
+    if (session.attribution_status !== "disputed") throw new Error("Sesi ini tidak sedang disanggah");
+    if (targetCreatorId === session.creator_id) throw new Error("Peserta tujuan sama dengan peserta saat ini");
+
+    const parsedFilename = session.filename_product ? parseLiveFilename(session.filename_product) : null;
+    if (!parsedFilename) {
+      throw new Error("Nama file asli sesi ini tidak terbaca — tidak bisa dijalankan ulang V1, pindahkan manual (batalkan + upload ulang).");
+    }
+
+    const [{ data: project }, { data: targetCreator }, { data: aliasRows }, { data: existingRows }, tolerance] =
+      await Promise.all([
+        admin.from("special_projects").select("start_date, end_date").eq("id", session.project_id).single(),
+        admin.from("creators").select("username").eq("id", targetCreatorId).single(),
+        admin.from("creator_username_aliases").select("username").eq("creator_id", targetCreatorId),
+        admin
+          .from("project_live_sessions")
+          .select("session_date, session_no, start_time, end_time")
+          .eq("project_id", session.project_id).eq("creator_id", targetCreatorId)
+          .neq("attribution_status", "voided"),
+        getConfig<number>("m7.gmv_trend_tolerance"),
+      ]);
+    if (!project) throw new Error("Project tidak ditemukan");
+    if (!targetCreator) throw new Error("Peserta tujuan tidak ditemukan");
+
+    const existingSessions = (existingRows ?? []).map((s) => ({
+      sessionDate: s.session_date, sessionNo: s.session_no, startTime: s.start_time, endTime: s.end_time,
+    }));
+
+    const checks = verifyLiveSession({
+      selectedUsername: (targetCreator.username ?? "").toLowerCase(),
+      aliasUsernames: (aliasRows ?? []).map((a) => a.username.toLowerCase()),
+      filenameUsername: parsedFilename.username,
+      sessionDate: session.session_date,
+      projectStartDate: project.start_date,
+      projectEndDate: project.end_date,
+      sessionNo: session.session_no,
+      existingSessions,
+      newSession: { startTime: session.start_time, endTime: session.end_time },
+      // Not a new file ingestion — moving ownership of an already-stored file, so
+      // the V4 dedupe check (which exists to catch a file uploaded twice) doesn't apply.
+      fileHashExists: false,
+      hasProductFile: true,
+      hasTrendFile: Boolean(session.filename_product),
+      gmvProduct: session.gmv, gmvTrend: session.gmv_trend, gmvTrendTolerance: tolerance,
+    });
+    if (checks.some((c) => c.level === "block")) {
+      const blockMsg = checks.find((c) => c.level === "block")!.message;
+      throw new Error(`Tidak bisa dipindahkan ke peserta ini: ${blockMsg}`);
+    }
+    const attributionStatus = checks.some((c) => c.level === "warn") ? "confirmed_manual" : "verified";
+
+    const { error } = await admin
+      .from("project_live_sessions")
+      .update({
+        creator_id: targetCreatorId, attribution_status: attributionStatus,
+        attribution_note: "Dipindahkan dari peserta lain (sanggahan)", confirmed_by: actor.id,
+        confirmed_at: new Date().toISOString(), checks_json: checks, updated_at: new Date().toISOString(),
+      })
+      .eq("id", sessionId);
+    if (error) throw new Error(error.message);
+
+    await writeAudit({
+      actorId: actor.id, action: "m7.live_session_reassign", entityType: "project_live_sessions",
+      entityId: String(sessionId),
+      before: { creator_id: session.creator_id }, after: { creator_id: targetCreatorId, attribution_status: attributionStatus },
+      type: "auto",
+    });
+
+    await recomputeAffected(admin, [
+      { projectId: session.project_id, creatorId: session.creator_id, date: session.session_date },
+      { projectId: session.project_id, creatorId: targetCreatorId, date: session.session_date },
+    ]);
+
+    revalidatePath(`/projects/${session.project_id}/performa`);
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "Terjadi kesalahan tidak terduga." };
+  }
+}

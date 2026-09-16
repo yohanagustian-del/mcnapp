@@ -35,7 +35,12 @@ export default async function ProjectRingkasanPage({ params }: { params: Promise
     achievement_pct?: number; gmv_actual?: number; live_gmv?: number; live_contribution?: number;
     participants_total?: number; participants_active?: number; sum_personal_targets?: number;
     ads_spend?: number; creator_commission?: number; mea_revenue?: number; margin?: number;
+    feedback?: {
+      responses?: number; avg_overall?: number; avg_materi?: number; avg_mentor?: number;
+      avg_organisasi?: number; nps?: number; would_join_again_pct?: number;
+    };
   };
+  const fb = summary.feedback;
 
   return (
     <div>
@@ -76,6 +81,32 @@ export default async function ProjectRingkasanPage({ params }: { params: Promise
           </p>
         </div>
       </div>
+
+      {fb && (fb.responses ?? 0) > 0 && (
+        <>
+          <h2 className="mt-8 text-lg font-medium">Feedback ({fb.responses} respons)</h2>
+          <div className="mt-2 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            <div className="rounded-lg border border-slate-200 bg-white p-4">
+              <p className="text-xs uppercase text-slate-500">Rating Keseluruhan</p>
+              <p className="mt-1 text-2xl font-semibold">{(fb.avg_overall ?? 0).toFixed(1)} / 5</p>
+            </div>
+            <div className="rounded-lg border border-slate-200 bg-white p-4">
+              <p className="text-xs uppercase text-slate-500">NPS</p>
+              <p className="mt-1 text-2xl font-semibold">{Math.round((fb.nps ?? 0) * 100)}</p>
+            </div>
+            <div className="rounded-lg border border-slate-200 bg-white p-4">
+              <p className="text-xs uppercase text-slate-500">Mau Ikut Lagi</p>
+              <p className="mt-1 text-2xl font-semibold">{pct(fb.would_join_again_pct)}</p>
+            </div>
+            <div className="rounded-lg border border-slate-200 bg-white p-4">
+              <p className="text-xs uppercase text-slate-500">Materi / Mentor / Acara</p>
+              <p className="mt-1 text-lg font-semibold">
+                {(fb.avg_materi ?? 0).toFixed(1)} / {(fb.avg_mentor ?? 0).toFixed(1)} / {(fb.avg_organisasi ?? 0).toFixed(1)}
+              </p>
+            </div>
+          </div>
+        </>
+      )}
 
       <h2 className="mt-8 text-lg font-medium">Leaderboard (Top 10)</h2>
       <div className="mt-2 overflow-x-auto rounded-lg border border-slate-200 bg-white">

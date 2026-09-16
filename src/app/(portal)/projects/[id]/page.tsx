@@ -257,6 +257,11 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
             Kebutuhan Kreator →
           </Link>
         )}
+        {canManage && (
+          <Link href={`/projects/${project.id}/info`} className="text-sm text-blue-700 hover:underline">
+            Info Acara →
+          </Link>
+        )}
         {project.open_for_signup && project.slug && (
           <Link href={`/join/${project.slug}`} className="text-sm text-blue-700 hover:underline">
             Link Pendaftaran Publik →

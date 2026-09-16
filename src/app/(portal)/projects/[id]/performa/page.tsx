@@ -4,6 +4,7 @@ import { requireMember, hasPermission } from "@/lib/rbac";
 import { createClient } from "@/lib/supabase/server";
 import { LiveUploadForm, type ParticipantOption } from "./live-upload-form";
 import { LiveSessionHistoryTable, type LiveSessionHistoryRow } from "./live-session-history-table";
+import { DisputeResolutionPanel, type DisputedSessionRow, type ReassignTargetOption } from "./dispute-resolution-panel";
 
 /** Tab Performa (M7 v2 Fase 1A, §3.1/§10.2): upload sesi live berkonteks kreator. */
 export default async function ProjectPerformaPage({ params }: { params: Promise<{ id: string }> }) {
@@ -77,6 +78,22 @@ export default async function ProjectPerformaPage({ params }: { params: Promise<
     };
   });
 
+  // §10.3/PR-26: sesi disanggah kreator, menunggu resolusi tim.
+  const { data: disputedRows } = canUpload
+    ? await supabase
+        .from("project_live_sessions")
+        .select("id, creator_id, session_date, session_no, gmv, brand, dispute_reason, disputed_at, creators(name)")
+        .eq("project_id", projectId).eq("attribution_status", "disputed")
+        .order("disputed_at", { ascending: true })
+    : { data: null };
+  const disputed: DisputedSessionRow[] = (disputedRows ?? []).map((r) => ({
+    id: r.id, creatorId: r.creator_id,
+    creatorName: (r.creators as unknown as { name: string } | null)?.name ?? r.creator_id,
+    sessionDate: r.session_date, sessionNo: r.session_no, gmv: Number(r.gmv ?? 0),
+    brand: r.brand, disputeReason: r.dispute_reason, disputedAt: r.disputed_at,
+  }));
+  const reassignTargets: ReassignTargetOption[] = participants.map((p) => ({ creatorId: p.creatorId, name: p.name }));
+
   return (
     <div>
       <div className="flex items-center gap-3">
@@ -94,6 +111,8 @@ export default async function ProjectPerformaPage({ params }: { params: Promise<
       ) : (
         <p className="mt-6 text-sm text-red-700">Role Anda tidak punya izin mengunggah performa project.</p>
       )}
+
+      {canUpload && <DisputeResolutionPanel rows={disputed} targets={reassignTargets} />}
 
       <h2 className="mt-8 text-lg font-medium">Riwayat Sesi</h2>
       <LiveSessionHistoryTable rows={history} canManage={canUpload} />
