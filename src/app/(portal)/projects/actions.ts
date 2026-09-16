@@ -13,6 +13,7 @@ import { checkProfitability, trackDaily, type CurveShape } from "@/lib/m7/tracki
 import { isManpowerRole, isProjectType } from "@/lib/m7/project-type";
 import { slugifyProjectName } from "@/lib/m7/slug";
 import { suggestParticipantTargetGmv } from "@/lib/m7/participant-target";
+import { genId } from "@/lib/utils/id";
 
 const isIsoDate = (s: string) => /^\d{4}-\d{2}-\d{2}$/.test(s);
 
@@ -23,7 +24,7 @@ const isIsoDate = (s: string) => /^\d{4}-\d{2}-\d{2}$/.test(s);
  * src/app/(portal)/schedule/actions.ts.
  */
 export type ProjectJoinDecisionResult =
-  | { ok: true }
+  | { ok: true; warning?: string }
   | { ok: false; error: string };
 
 /**
@@ -85,6 +86,28 @@ export async function createProject(formData: FormData): Promise<void> {
     type: "auto",
   });
   revalidatePath("/projects");
+}
+
+/** Buka/tutup pendaftaran publik (R8/§3.4 langkah 3) + tenggat opsional. */
+export async function setSignupOpen(formData: FormData): Promise<void> {
+  const actor = await requirePermission("m7.manage");
+  const projectId = Number(formData.get("project_id"));
+  const open = formData.get("open_for_signup") === "on";
+  const deadlineRaw = String(formData.get("signup_deadline") ?? "").trim();
+  if (!projectId) throw new Error("Project tidak valid");
+
+  const admin = createAdminClient();
+  const { error } = await admin
+    .from("special_projects")
+    .update({ open_for_signup: open, signup_deadline: deadlineRaw ? new Date(deadlineRaw).toISOString() : null })
+    .eq("id", projectId);
+  if (error) throw new Error(`Gagal mengubah status pendaftaran: ${error.message}`);
+
+  await writeAudit({
+    actorId: actor.id, action: "m7.signup_toggle", entityType: "special_projects",
+    entityId: String(projectId), after: { open_for_signup: open, signup_deadline: deadlineRaw || null }, type: "auto",
+  });
+  revalidatePath(`/projects/${projectId}`);
 }
 
 /** Status transition planning → aktif → selesai; closing stores the result summary (PRD §2.6). */
@@ -402,8 +425,13 @@ export async function decideProjectJoinRequest(formData: FormData): Promise<Proj
     const actor = await requirePermission("m9.project_join_decide");
     const requestId = Number(formData.get("request_id"));
     const decision = String(formData.get("decision") ?? "");
+    const reason = String(formData.get("reason") ?? "").trim();
+    const targetGmvRaw = String(formData.get("target_gmv") ?? "");
     if (!Number.isFinite(requestId)) throw new Error("Pengajuan tidak valid");
     if (!["diterima", "ditolak"].includes(decision)) throw new Error("Keputusan tidak valid");
+    // R14: reject wajib reason.
+    if (decision === "ditolak" && !reason) throw new Error("Alasan penolakan wajib diisi");
+    let warning: string | undefined;
 
     const admin = createAdminClient();
     const { data: reqRow, error: fetchError } = await admin
@@ -413,25 +441,30 @@ export async function decideProjectJoinRequest(formData: FormData): Promise<Proj
       .maybeSingle();
     if (fetchError) throw new Error(`Gagal memuat pengajuan: ${fetchError.message}`);
     if (!reqRow) throw new Error("Pengajuan tidak ditemukan");
-    if (reqRow.status !== "diajukan") throw new Error("Pengajuan ini sudah diproses");
+    // 'diundang' juga bisa diputuskan langsung oleh tim (tanpa menunggu respons
+    // kreator di portal) — bukan cuma 'diajukan' (R11/R14).
+    if (!["diajukan", "diundang"].includes(reqRow.status)) throw new Error("Pengajuan ini sudah diproses");
 
     const { error } = await admin
       .from("project_join_requests")
-      .update({ status: decision, decided_by: actor.id, decided_at: new Date().toISOString() })
+      .update({
+        status: decision, decided_by: actor.id, decided_at: new Date().toISOString(),
+        reason: decision === "ditolak" ? reason : null,
+      })
       .eq("id", requestId);
     if (error) throw new Error(`Gagal menyimpan keputusan: ${error.message}`);
 
     await writeAudit({
       actorId: actor.id, action: "m9.project_join_decide", entityType: "project_join_requests",
       entityId: String(requestId), before: { status: reqRow.status },
-      after: { status: decision, project_id: reqRow.project_id, creator_id: reqRow.creator_id },
+      after: { status: decision, project_id: reqRow.project_id, creator_id: reqRow.creator_id, reason: reason || null },
       type: "approval",
     });
 
     // Auto-bind accepted creators as participants so M7 tracking picks them up.
-    // R4: target_gmv is NOT NULL since v2 — suggest sisa target / sisa kuota here too
-    // (same rule as the manual add-participant form; PR-21/Fase 2 will let the team
-    // review/override this before it's saved instead of only after).
+    // R4: target_gmv is NOT NULL since v2 — system suggests sisa target / sisa
+    // kuota, tim boleh ubah lewat form (target_gmv di formData); jatuh ke saran
+    // kalau kosong/tidak valid.
     if (decision === "diterima") {
       const [{ data: project }, { data: existingParticipants }] = await Promise.all([
         admin.from("special_projects").select("target_gmv, target_creators").eq("id", reqRow.project_id).single(),
@@ -442,18 +475,116 @@ export async function decideProjectJoinRequest(formData: FormData): Promise<Proj
         targetCreators: project?.target_creators ?? null,
         existingParticipantTargets: (existingParticipants ?? []).map((p) => Number(p.target_gmv ?? 0)),
       });
+      const overrideTargetGmv = targetGmvRaw ? parseRupiah(targetGmvRaw) : null;
       const { error: upsertError } = await admin.from("project_participants").upsert(
         {
           project_id: reqRow.project_id, creator_id: reqRow.creator_id,
-          target_gmv: suggestedTargetGmv, added_via: "portal",
+          target_gmv: overrideTargetGmv ?? suggestedTargetGmv, added_via: "portal",
         },
         { onConflict: "project_id,creator_id", ignoreDuplicates: true }
       );
       if (upsertError) throw new Error(`Gagal menambah peserta: ${upsertError.message}`);
+
+      // R16: melebihi target_creators → warning, bukan blokir — tetap disimpan,
+      // pesannya saja yang beda (bukan error).
+      if (project?.target_creators) {
+        const newCount = (existingParticipants?.length ?? 0) + 1;
+        if (newCount > project.target_creators) {
+          warning = `Peserta (${newCount}) melebihi target_creators (${project.target_creators}) — tetap ditambahkan.`;
+        }
+      }
     }
 
     revalidatePath("/projects");
     revalidatePath(`/projects/${reqRow.project_id}`);
+    return warning ? { ok: true, warning } : { ok: true };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "Terjadi kesalahan tidak terduga." };
+  }
+}
+
+/**
+ * Decide an external applicant from `/join/{slug}` (PRD §2.3/§6.6, R15). Approve
+ * is ONE transaction: creates `creators` (`tim_akuisisi='special_project'`) then
+ * `project_participants` — a portal account is NOT auto-created (R36 stays manual).
+ * Reject wajib reason, sejajar dengan decideProjectJoinRequest (R14).
+ */
+export async function decideExternalApplicant(formData: FormData): Promise<ProjectJoinDecisionResult> {
+  try {
+    const actor = await requirePermission("m9.project_join_decide");
+    const applicantId = Number(formData.get("applicant_id"));
+    const decision = String(formData.get("decision") ?? "");
+    const reason = String(formData.get("reason") ?? "").trim();
+    const targetGmvRaw = String(formData.get("target_gmv") ?? "");
+    if (!Number.isFinite(applicantId)) throw new Error("Pendaftar tidak valid");
+    if (!["approved", "rejected"].includes(decision)) throw new Error("Keputusan tidak valid");
+    if (decision === "rejected" && !reason) throw new Error("Alasan penolakan wajib diisi");
+
+    const admin = createAdminClient();
+    const { data: applicant, error: fetchError } = await admin
+      .from("project_external_applicants")
+      .select("id, project_id, full_name, username, platform, niche, status")
+      .eq("id", applicantId)
+      .maybeSingle();
+    if (fetchError) throw new Error(`Gagal memuat pendaftar: ${fetchError.message}`);
+    if (!applicant) throw new Error("Pendaftar tidak ditemukan");
+    if (applicant.status !== "pending") throw new Error("Pendaftar ini sudah diproses");
+
+    let createdCreatorId: string | null = null;
+
+    if (decision === "approved") {
+      let lastError = "";
+      for (let attempt = 0; attempt < 3 && !createdCreatorId; attempt++) {
+        const id = genId("CRT");
+        const { error } = await admin.from("creators").insert({
+          id, name: applicant.full_name, username: applicant.username,
+          niche: applicant.niche, platform: applicant.platform === "shopee" ? "shopee" : "tiktok",
+          tim_akuisisi: "special_project",
+        });
+        if (!error) createdCreatorId = id;
+        else if (error.code === "23505") lastError = error.message; // id bentrok → coba id baru
+        else { lastError = error.message; break; }
+      }
+      if (!createdCreatorId) throw new Error(`Gagal membuat kreator: ${lastError}`);
+
+      const [{ data: project }, { data: existingParticipants }] = await Promise.all([
+        admin.from("special_projects").select("target_gmv, target_creators").eq("id", applicant.project_id).single(),
+        admin.from("project_participants").select("target_gmv").eq("project_id", applicant.project_id),
+      ]);
+      const suggestedTargetGmv = suggestParticipantTargetGmv({
+        projectTargetGmv: Number(project?.target_gmv ?? 0),
+        targetCreators: project?.target_creators ?? null,
+        existingParticipantTargets: (existingParticipants ?? []).map((p) => Number(p.target_gmv ?? 0)),
+      });
+      const overrideTargetGmv = targetGmvRaw ? parseRupiah(targetGmvRaw) : null;
+      const { error: participantError } = await admin.from("project_participants").insert({
+        project_id: applicant.project_id, creator_id: createdCreatorId,
+        is_external: true, tiktok_binding_status: "pending",
+        target_gmv: overrideTargetGmv ?? suggestedTargetGmv, added_via: "external",
+      });
+      if (participantError) throw new Error(`Gagal menambah peserta: ${participantError.message}`);
+    }
+
+    const { error: updateError } = await admin
+      .from("project_external_applicants")
+      .update({
+        status: decision, reviewed_by: actor.id, reviewed_at: new Date().toISOString(),
+        review_note: reason || null, created_creator_id: createdCreatorId,
+      })
+      .eq("id", applicantId);
+    if (updateError) throw new Error(`Gagal menyimpan keputusan: ${updateError.message}`);
+
+    await writeAudit({
+      actorId: actor.id,
+      action: decision === "approved" ? "m7.external_approve" : "m7.external_reject",
+      entityType: "project_external_applicants", entityId: String(applicantId),
+      before: { status: applicant.status },
+      after: { status: decision, created_creator_id: createdCreatorId, reason: reason || null },
+      type: "approval",
+    });
+
+    revalidatePath("/projects");
+    revalidatePath(`/projects/${applicant.project_id}`);
     return { ok: true };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : "Terjadi kesalahan tidak terduga." };

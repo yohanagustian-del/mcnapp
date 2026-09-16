@@ -5,7 +5,7 @@ import { createClient } from "@/lib/supabase/server";
 import { getConfig } from "@/lib/config";
 import { filterLiveActive, trackDaily, type CurveShape, type LiveActivityRow } from "@/lib/m7/tracking";
 import { canManageProjectParticipants } from "@/lib/m7/access";
-import { assignManpower, setProjectStatus, upsertDailyMetric } from "../actions";
+import { assignManpower, setProjectStatus, setSignupOpen, upsertDailyMetric } from "../actions";
 import { MANPOWER_ROLES } from "@/lib/m7/project-type";
 import { suggestParticipantTargetGmv } from "@/lib/m7/participant-target";
 import { generateProjectReports } from "./report-actions";
@@ -38,7 +38,7 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
   const supabase = await createClient();
   const { data: project } = await supabase
     .from("special_projects")
-    .select("id, name, type, start_date, end_date, target_gmv, ads_budget_cap, target_creators, daily_target_curve, status, result_summary")
+    .select("id, name, type, start_date, end_date, target_gmv, ads_budget_cap, target_creators, daily_target_curve, status, result_summary, slug, open_for_signup, signup_deadline")
     .eq("id", projectId)
     .maybeSingle();
   if (!project) notFound();
@@ -252,7 +252,38 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
             Upload Performa (Live) →
           </Link>
         )}
+        {canManage && (
+          <Link href={`/projects/${project.id}/shortlist`} className="text-sm text-blue-700 hover:underline">
+            Kebutuhan Kreator →
+          </Link>
+        )}
+        {project.open_for_signup && project.slug && (
+          <Link href={`/join/${project.slug}`} className="text-sm text-blue-700 hover:underline">
+            Link Pendaftaran Publik →
+          </Link>
+        )}
       </div>
+
+      {canManage && (
+        <form action={setSignupOpen} className="mt-2 flex flex-wrap items-center gap-2 text-xs">
+          <input type="hidden" name="project_id" value={project.id} />
+          <label className="flex items-center gap-1">
+            <input type="checkbox" name="open_for_signup" defaultChecked={Boolean(project.open_for_signup)} />
+            Buka pendaftaran publik
+          </label>
+          <input
+            type="date" name="signup_deadline"
+            defaultValue={project.signup_deadline ? String(project.signup_deadline).slice(0, 10) : ""}
+            className="rounded-md border border-slate-300 px-2 py-1"
+          />
+          <button type="submit" className="rounded-md border border-slate-300 px-2 py-1 font-medium hover:bg-slate-50">
+            Simpan
+          </button>
+          {project.slug && (
+            <span className="text-slate-400">/join/{project.slug}</span>
+          )}
+        </form>
+      )}
       <p className="mt-1 text-sm text-slate-500">
         {project.start_date} → {project.end_date} · Target {rupiah(project.target_gmv)} · Ads cap {rupiah(project.ads_budget_cap)}
         {project.target_creators ? ` · Target ${project.target_creators} creator` : ""}
