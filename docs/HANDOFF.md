@@ -1,7 +1,57 @@
 # HANDOFF — MCN MEA AI Platform
 
 > Catatan serah-terima antar sesi. Baca ini + `CLAUDE.md` + `docs/BUILD_PLAN.md` sebelum lanjut.
-> Update terakhir: 2026-07-03. Branch kerja: `claude/mcn-phase-3-kickoff-zjtfyo`.
+> Update terakhir: 2026-09-16 (PX-M3-A). Isi di bawah sampai baris "Update terakhir: 2026-07-03"
+> adalah historis — repo sudah jauh lebih maju dari situ (lihat `supabase/migrations/0008..0051`,
+> termasuk PX-M1 `bridge.px_creator_capability`) tapi dokumen ini tidak diperbarui setiap sesi;
+> jangan asumsikan "Sisa pekerjaan" di bawah masih akurat tanpa cek kode.
+
+## 2026-09-16 — PX-M3-A: coverage push ke CDPS (Flow C)
+
+Sesi ini menutup tiket M3-A dari `MEAgrup/AgencyAPP` (`docs/backlog/PX_M3_BACKLOG.md`
+sisi CDPS) — PX-M1 (`bridge.px_creator_capability`, migrasi 0051) sudah ADA dari sesi
+sebelumnya; yang belum ada adalah pengirimannya ke CDPS.
+
+- **Kontrak**: `docs/BRIDGE_PRODUCT_EXCHANGE_CONTRACT.md` + `docs/fixtures/px_coverage_v1.json`
+  disalin **byte-identik** dari `MEAgrup/AgencyAPP`. Dokumen itu (bukan repo mana pun) adalah
+  sumber kebenaran bentuk payload — jangan menebak bentuknya dari kode CDPS atau sebaliknya.
+- **Eksporter**: `src/lib/px/coverage-push.ts` (`pushCoverageSnapshot`/`pushCoverageForBatch`).
+  **Deviasi dari tiket asli**: tiket membayangkan fungsi SQL baru `bridge.px_coverage_export()`
+  yang menambah `snapshot_at` di atas `bridge.px_coverage_map()`. Itu tidak dibangun — `public.px_coverage()`
+  (sudah ada, migrasi 0051) sudah persis passthrough yang dibutuhkan, dan `listCoverage()` sudah
+  jadi satu-satunya jalur baca (CLAUDE.md #4). `snapshot_at` ditambahkan di TypeScript, saat
+  payload benar-benar dibangun — nol migrasi baru untuk M3-A.
+- **Trigger**: dipicu dari **akhir pipeline ingest yang sudah ada** (`src/lib/ingest/run.ts`,
+  step 10, setelah step 7 recompute kapabilitas) — nol scheduler baru, sama kebijakan PX-M1.
+  Own try/catch: gagal push (jaringan/CDPS down/secret salah) dilaporkan di
+  `coveragePush`/`coveragePushSkipped`/`coveragePushError`, TIDAK PERNAH menggagalkan ingest yang
+  sudah commit.
+- **Secret**: `BRIDGE_PX_SECRET` (env baru, lihat `.env.example`) — TERPISAH dari
+  `SUPABASE_SERVICE_ROLE_KEY`/`ANTHROPIC_API_KEY`, disepakati out-of-band dengan sisi CDPS,
+  JANGAN commit nilai asli. Tanpa `BRIDGE_PX_SECRET`/`CDPS_BRIDGE_URL`, push dilewati (dilaporkan,
+  bukan dianggap gagal) — aman untuk dev lokal yang belum diberi secretnya.
+- **Idempotensi**: `Idempotency-Key: px-coverage-<YYYYMMDD>-<sha256(payload)[0:12]>` dihitung dari
+  body PERSIS yang dikirim (urutan key JSON stabil — object literal ditulis urutan tetap) supaya
+  retry mengirim key yang sama.
+- **K-2 (nol identitas kreator)**: strukural, bukan filter yang bisa lupa — `bridge.px_coverage_map()`
+  adalah agregat `GROUP BY (level2_category, price_segment)`, jadi tidak ada kolom `creator_id` untuk
+  diteruskan sejak awal. Diuji eksplisit di `coverage-push.test.ts` (assert body tidak mengandung
+  string `creator_id`/`creator_ids`/`creatorId`).
+- **Tes**: `src/lib/px/__tests__/coverage-push.test.ts` (11 kasus unit, mock `fetch`+`listCoverage`+
+  `writeAudit`: skip saat env kosong, skip saat nol baris, tolak >5.000 baris, bentuk payload persis
+  6 kolom+3 top-level, koersi numeric/bigint string→number, non-2xx→throw, duplicate:true bukan error,
+  wrapper `pushCoverageForBatch` never-throws+audit). `src/lib/px/__tests__/bridge-push.qa-manual.test.ts`
+  (skip — dokumentasi langkah manual push ke CDPS staging, pola sama `overcommit.qa-manual.test.ts`;
+  tidak ada CDPS_BRIDGE_URL/BRIDGE_PX_SECRET nyata di sandbox ini untuk push sungguhan).
+- **Diverifikasi**: `npx tsc --noEmit` bersih, `npx vitest run` — 840 lulus + 5 skip (0 gagal), termasuk
+  67 file test lain yang TIDAK disentuh sesi ini (nol regresi).
+- **Belum dikerjakan** (bukan lupa, di luar tiket M3-A): OQ-8-setara di sisi MCN (token pass-through)
+  tidak relevan — payload ini tidak membawa token; wiring `CDPS_BRIDGE_URL`/`BRIDGE_PX_SECRET` yang
+  SUNGGUHAN di Vercel env vars (prasyarat go-live, bukan blocker kode); QA manual real push ke
+  staging CDPS (langkah ada di `bridge-push.qa-manual.test.ts`, belum dijalankan — perlu koordinasi
+  kredensial dengan sesi CDPS).
+
+---
 
 ## Status besar
 **Semua fase pembangunan (0–4) SELESAI** — mencakup M1–M8. Tidak ada Fase 5.
