@@ -19,6 +19,7 @@ sebagai catatan alasan di balik tiap pemecahan, bukan lagi sebagai antrian kerja
 | Fase 1C + 1D (PR-13…18) | #27, #31 | ✅ merged |
 | Fase 2 (PR-19…22) | #28 | ✅ merged |
 | Fase 3 (PR-23…26) | #29 | ✅ merged |
+| Perbaikan pasca-QA staging | #32, #33 | ✅ merged (audit-log + approval batal project, migrasi 0060) |
 | **Fase 1B (PR-11, PR-12)** | — | ⛔ **belum** — menunggu sampel export harian |
 
 Skema untuk Fase 1B sudah siap (`source_type` product/shopee + `rollback_batch` sudah

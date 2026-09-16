@@ -82,7 +82,10 @@ peserta sama sekali.
 > **Status 16 Sep 2026:** Fase 0, 1A, 1C, 1D, 2, dan 3 sudah dikerjakan dan merge ke `main`
 > lewat PR #25–#31. Yang tersisa hanya **Fase 1B** (upload export harian), masih menunggu
 > sampel file. Migrasi aktual: 0052 enums · 0053 hardening · 0054 metrics · 0055 cron/config ·
-> 0056 live sessions · 0057 reports · 0058 recruitment · 0059 portal.
+> 0056 live sessions · 0057 reports · 0058 recruitment · 0059 portal · 0060 cancel-approval.
+> Perbaikan pasca-QA staging menambah aturan yang tidak ada di rencana awal: **membatalkan
+> project butuh approval Director** (#33), sejalan dengan CLAUDE.md #2 — aksi manusia yang
+> berpotensi merugikan wajib approval, bukan langsung berlaku.
 
 Fase 1 PRD dipecah jadi **1A / 1B / 1C / 1D**. 1A bisa jalan sekarang (format live session sudah
 lengkap di addendum §9); 1B menunggu sampel file; 1D menggantikan Fase 4 lama.
