@@ -7,6 +7,28 @@ PRD: `docs/prd/MCN_MEA_AI_Platform_Module07_Special_Project_v2.md`.
 Keputusan terkunci (B1/B2 tolak, B3 report di dashboard, B4 rule-based, B5 full upload):
 lihat §2 rencana induk.
 
+## Status per 16 Sep 2026 — sebagian besar SUDAH dikerjakan
+
+Rencana ini dieksekusi lewat PR #25–#31 yang sudah merge ke `main`. Dokumen tetap disimpan
+sebagai catatan alasan di balik tiap pemecahan, bukan lagi sebagai antrian kerja.
+
+| Blok | PR pelaksana | Status |
+|---|---|---|
+| Fase 0 (PR-01…04) | #25 | ✅ merged |
+| Fase 1A (PR-05…10) | #26, #30 | ✅ merged |
+| Fase 1C + 1D (PR-13…18) | #27, #31 | ✅ merged |
+| Fase 2 (PR-19…22) | #28 | ✅ merged |
+| Fase 3 (PR-23…26) | #29 | ✅ merged |
+| **Fase 1B (PR-11, PR-12)** | — | ⛔ **belum** — menunggu sampel export harian |
+
+Skema untuk Fase 1B sudah siap (`source_type` product/shopee + `rollback_batch` sudah
+menanganinya di migrasi 0054), yang belum ada cuma parser + UI upload-nya
+(`src/lib/m7/metrics-parse.ts` belum dibuat).
+
+**Nomor migrasi aktual berbeda dari draft awal** karena cron mengambil migrasi sendiri
+(0055): live sessions jadi 0056, reports 0057, recruitment 0058, portal 0059. Tabel di bawah
+sudah dikoreksi ke nomor yang benar-benar dipakai.
+
 ## Aturan pemecahan
 
 1. **Satu PR = maksimal satu file migrasi.** Migrasi bernomor urut, tidak boleh dua PR terbuka
@@ -27,8 +49,8 @@ lihat §2 rencana induk.
 | 01 | Enum M7 v2 | 0 | 0052 | — | 0,5 h |
 | 02 | Hardening `special_projects` + purge project test | 0 | 0053 | 01 | 1 h |
 | 03 | Pipeline metrik + cabut input GMV manual | 0 | 0054 | 02 | 1,5 h |
-| 04 | Recompute terjadwal + seed `app_config` | 0 | — | 03 | 0,5 h |
-| 05 | Skema sesi live + alias username | 1A | 0055 | 03 | 0,5 h |
+| 04 | Recompute terjadwal + seed `app_config` | 0 | 0055 | 03 | 0,5 h |
+| 05 | Skema sesi live + alias username | 1A | 0056 | 03 | 0,5 h |
 | 06 | Lib parse nama file & isi file sesi live | 1A | — | — | 1 h |
 | 07 | Lib verifikasi V1–V7 | 1A | — | 05, 06 | 1 h |
 | 08 | Upload sesi live berkonteks kreator + layar konfirmasi | 1A | — | 07 | 1,5 h |
@@ -36,17 +58,17 @@ lihat §2 rencana induk.
 | 10 | Riwayat batch + batalkan sesi | 1A | — | 08 | 0,5 h |
 | 11 | Lib parser export harian (tolak rekap periode) | 1B | — | sampel file | 1 h |
 | 12 | Upload export harian + preview + replace | 1B | — | 11 | 1 h |
-| 13 | Skema report project | 1C | 0056 | 03 | 0,5 h |
+| 13 | Skema report project | 1C | 0057 | 03 | 0,5 h |
 | 14 | Lib `report-data` (data_json + blok live) | 1C | — | 13 | 1,5 h |
 | 15 | Generate & finalkan report peserta | 1C | — | 14 | 1 h |
 | 16 | Halaman report peserta & report gabungan | 1C | — | 15 | 1 h |
 | 17 | Portal: tab Progress & Report | 1D | — | 16 | 1 h |
 | 18 | Undang akun portal (CPM) | 1D | — | 02 | 1 h |
-| 19 | Skema rekrutmen (requirements, applicants, join requests) | 2 | 0057 | 02 | 1 h |
+| 19 | Skema rekrutmen (requirements, applicants, join requests) | 2 | 0058 | 02 | 1 h |
 | 20 | Kebutuhan kreator + shortlist + undang | 2 | — | 19 | 2 h |
 | 21 | Kurasi: perluas keputusan join + tab Pendaftar | 2 | — | 19 | 1,5 h |
 | 22 | Link publik `/join/{slug}` + endpoint | 2 | — | 19 | 1,5 h |
-| 23 | Skema info acara & feedback | 3 | 0058 | 02 | 0,5 h |
+| 23 | Skema info acara & feedback | 3 | 0059 | 02 | 0,5 h |
 | 24 | Info acara (publish tim + baca portal) | 3 | — | 23 | 1 h |
 | 25 | Feedback + sentimen rule-based | 3 | — | 23 | 1,5 h |
 | 26 | Sanggahan sesi + pindah peserta | 3 | — | 08, 17 | 1,5 h |
@@ -148,7 +170,7 @@ harus hilang di commit yang sama.
 ## Fase 1A — Upload sesi live
 
 ### PR-05 — Skema sesi live + alias username
-- `supabase/migrations/0055_m7_v2_live_sessions.sql`
+- `supabase/migrations/0056_m7_v2_live_sessions.sql`
   - `project_live_sessions` (kolom §9 + atribusi §10.4: `attribution_status`, `attribution_note`,
     `confirmed_by/at`, `checks_json`, `filename_product`, `filename_trend`, `uploaded_by`,
     `disputed_at`, `dispute_reason`), unique `(project_id, creator_id, session_date, session_no)`.
@@ -264,7 +286,7 @@ hanya `live_gmv` terisi (uji anti-dobel R21).
 ## Fase 1C — Report
 
 ### PR-13 — Skema report project
-- `supabase/migrations/0056_m7_v2_reports.sql`
+- `supabase/migrations/0057_m7_v2_reports.sql`
   - `creator_reports.project_id` FK `special_projects(id)`.
   - Unique partial `(project_id, creator_id) where project_id is not null and status='final'`.
   - Policy `cr_creator_self_final` (`is_creator_user()` + `auth_creator_id()` + `status='final'`).
@@ -331,7 +353,7 @@ bukan lewat UI).
 ## Fase 2 — Rekrutmen & kurasi
 
 ### PR-19 — Skema rekrutmen
-- `supabase/migrations/0057_m7_v2_recruitment.sql`
+- `supabase/migrations/0058_m7_v2_recruitment.sql`
   - `project_creator_requirements` (§6.4).
   - `project_join_requests`: status → `diajukan|diundang|diterima|ditolak|waitlist|dibatalkan`;
     += `source`, `reason`, `note`, `score`; RLS creator_user hanya `diundang → diterima/ditolak`.
@@ -380,7 +402,7 @@ bukan lewat UI).
 ## Fase 3 — Info acara, feedback, sanggahan
 
 ### PR-23 — Skema info acara & feedback
-- `supabase/migrations/0058_m7_v2_portal.sql`
+- `supabase/migrations/0059_m7_v2_portal.sql`
   - `project_announcements` + `project_announcement_reads` (§6.10).
   - `project_feedback` (§6.11), unique `(project_id, creator_id)`.
   - RLS creator_user: peserta project, `published_at <= now()`, jendela feedback R31.

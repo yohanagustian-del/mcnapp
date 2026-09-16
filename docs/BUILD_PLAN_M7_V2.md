@@ -79,6 +79,11 @@ peserta sama sekali.
 
 ## 3. Urutan build
 
+> **Status 16 Sep 2026:** Fase 0, 1A, 1C, 1D, 2, dan 3 sudah dikerjakan dan merge ke `main`
+> lewat PR #25–#31. Yang tersisa hanya **Fase 1B** (upload export harian), masih menunggu
+> sampel file. Migrasi aktual: 0052 enums · 0053 hardening · 0054 metrics · 0055 cron/config ·
+> 0056 live sessions · 0057 reports · 0058 recruitment · 0059 portal.
+
 Fase 1 PRD dipecah jadi **1A / 1B / 1C / 1D**. 1A bisa jalan sekarang (format live session sudah
 lengkap di addendum §9); 1B menunggu sampel file; 1D menggantikan Fase 4 lama.
 
@@ -185,7 +190,7 @@ Format sudah pasti dari addendum §9: dua file per sesi, dan **username/sesi/tan
 nama file** (`{username}_product_Sesi_{n}__{d}_{Bulan}_{yyyy}.xlsx` dan `_trend_stats_`),
 penulisan tidak konsisten (`product`/`Product`, `trend_stats`/`Trend_Stat`, `Sesi`/`sesi`).
 
-- [ ] `0055_m7_v2_live_sessions.sql`: `project_live_sessions` (+ kolom atribusi §10.4),
+- [ ] `0056_m7_v2_live_sessions.sql`: `project_live_sessions` (+ kolom atribusi §10.4),
       `project_live_intervals`, `creator_username_aliases`
       (unique `(platform, lower(username))` — satu username tidak boleh jadi alias dua kreator;
       perhatikan `creators.username` sudah unique sejak migrasi 0050, alias tidak boleh bentrok),
@@ -248,7 +253,7 @@ upload live periode sama → `gmv_actual` **tidak** berubah, hanya `live_gmv` te
 
 ## Fase 1C — Report peserta & gabungan (halaman, tanpa unduhan)
 
-- [ ] `0056_m7_v2_reports.sql`: `creator_reports.project_id` FK, unique partial
+- [ ] `0057_m7_v2_reports.sql`: `creator_reports.project_id` FK, unique partial
       `(project_id, creator_id) where project_id is not null and status='final'`,
       policy `cr_creator_self_final` (`is_creator_user()` + `auth_creator_id()` — kedua helper
       sudah ada di DB), baris `token_baseline` untuk `report_type='project'`.
@@ -292,7 +297,7 @@ bisa melihat report peserta lain (uji dengan dua akun).
 
 ## Fase 2 — Kebutuhan kreator, shortlist, kurasi
 
-- [ ] `0057_m7_v2_recruitment.sql`: `project_creator_requirements`, upgrade
+- [ ] `0058_m7_v2_recruitment.sql`: `project_creator_requirements`, upgrade
       `project_join_requests` (status → `diajukan|diundang|diterima|ditolak|waitlist|dibatalkan`,
       += `source`, `reason`, `note`, `score`; RLS creator_user hanya `diundang → diterima/ditolak`),
       `project_external_applicants` (unique `(project_id, lower(username), platform)`),
@@ -312,7 +317,7 @@ bisa melihat report peserta lain (uji dengan dua akun).
 
 ## Fase 3 — Info acara, feedback, sanggahan
 
-- [ ] `0058_m7_v2_portal.sql`: `project_announcements` + `project_announcement_reads`,
+- [ ] `0059_m7_v2_portal.sql`: `project_announcements` + `project_announcement_reads`,
       `project_feedback` (unique `(project_id, creator_id)`), RLS creator_user (peserta project,
       `published_at <= now()`, jendela feedback R31).
 - [ ] Tab **Info** di portal (pinned maks 3, badge belum dibaca) + **Feedback** (form §3.8).
