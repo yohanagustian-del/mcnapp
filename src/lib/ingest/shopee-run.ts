@@ -2,10 +2,11 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { createHash } from "crypto";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { writeAudit } from "@/lib/audit";
-import { deriveJenisCreator, resolveCreatorNamesByPlatform } from "@/lib/platform-csv";
+import { deriveJenisCreator, rankTopNiches, resolveCreatorNamesByPlatform } from "@/lib/platform-csv";
 import { validateW1W5Period } from "@/lib/utils/date";
 import { parseShopeeFile, validateSingleShopeeWindow, type ShopeeRow, type SkippedShopeeRow } from "./shopee-csv";
-import { buildShopeePeriodSummary, type ShopeePeriodSummaryRow } from "./shopee-aggregate";
+import { buildShopeePeriodSummary, buildShopeeSubcatSegment, type ShopeePeriodSummaryRow } from "./shopee-aggregate";
+import type { SubcatSegmentRow } from "./aggregate";
 import { computeSharedAutoFillFields, fetchMonthlyAvgGmvByCreator, writeCreatorAutoFillUpdate } from "./creator-autofill";
 
 export interface RunShopeeIngestInput {
@@ -48,13 +49,15 @@ async function fileHash(file: File): Promise<string> {
  *      the same username). Unknown usernames become new platform='shopee'
  *      prospects.
  *   4. Aggregate in-memory (shopee-aggregate.ts) -> delete-then-insert into
- *      creator_period_summary ONLY (task rule #4 — no subcat/top-products for
- *      Shopee yet), scoped PER (creator × week), same replace semantics as the
- *      TikTok pipeline.
+ *      creator_period_summary AND creator_subcat_segment_gmv (category GMV,
+ *      normalized against shopee-category.ts's official list — no
+ *      top-products/price-segment still, see that module's doc), scoped PER
+ *      (creator × week/window), same replace semantics as the TikTok pipeline.
  *   5. Auto-fill creators master (gmv/gmv_live/gmv_video monthly average,
- *      status, platform, jenis_creator) via the shared helper in
- *      creator-autofill.ts — niche is NOT touched (task rule #4, no subcat
- *      data for Shopee).
+ *      status, platform, jenis_creator, niche/top_niches) via the shared
+ *      helper in creator-autofill.ts — niche now DOES get touched, ranked
+ *      from this batch's + prior creator_subcat_segment_gmv category GMV via
+ *      the same rankTopNiches() the TikTok pipeline uses (CLAUDE.md #4).
  *   6. upload_batches -> processed; audit_logs.
  *
  * Campaign Type / Partner Promo columns are intentionally ignored — leak/BD
@@ -175,12 +178,13 @@ export async function runShopeeIngest(input: RunShopeeIngestInput): Promise<RunS
   if (batchInsertError) throw new Error(`Gagal mencatat upload_batches Shopee: ${batchInsertError.message}`);
 
   try {
-    // ---- 4. Aggregate in-memory + write (creator_period_summary ONLY) ----
+    // ---- 4. Aggregate in-memory + write (creator_period_summary + creator_subcat_segment_gmv) ----
     const periodSummary = buildShopeePeriodSummary(resolvedRows, periodStart, periodEnd);
-    await writeShopeeAggregates(admin, batchId, [...creatorIdsSet], periodStart, periodSummary);
+    const subcatSegment = buildShopeeSubcatSegment(resolvedRows, periodEnd);
+    await writeShopeeAggregates(admin, batchId, [...creatorIdsSet], periodStart, periodEnd, periodSummary, subcatSegment);
 
-    // ---- 5. Auto-fill creators master (shared helper, no niche for Shopee) ----
-    await autoFillShopeeCreators(admin, actorId, periodSummary);
+    // ---- 5. Auto-fill creators master (shared helper + niche ranking) ----
+    await autoFillShopeeCreators(admin, actorId, periodSummary, subcatSegment);
 
     // ---- 6. upload_batches: processed ----
     const { error: doneError } = await admin
@@ -240,13 +244,14 @@ const DELETE_CHUNK = 200;
 
 /**
  * Idempotent PER (creator × week), same design as writeAggregates in run.ts:
- * delete-then-insert into creator_period_summary ONLY, scoped to the creators
- * present in this file and this period. Two CMs (or a CM re-uploading the same
- * window) never clobber each other's creators. nmv/direct_gmv/refund_gmv/ctr/
- * ctor/live_pct/live_orders/video_orders/items_sold have no Shopee source in
- * this report shape — left at their column defaults (0/null), which is a
- * neutral value (not fabricated data) since those columns are NOT NOT-NULL-
- * without-default in the schema (see supabase/migrations/0016_ingest_aggregates.sql).
+ * delete-then-insert into creator_period_summary AND creator_subcat_segment_gmv,
+ * scoped to the creators present in this file and this period/window. Two CMs
+ * (or a CM re-uploading the same window) never clobber each other's creators.
+ * nmv/direct_gmv/refund_gmv/ctr/ctor/live_pct/live_orders/video_orders/
+ * items_sold have no Shopee source in this report shape — left at their column
+ * defaults (0/null), which is a neutral value (not fabricated data) since
+ * those columns are NOT NOT-NULL-without-default in the schema (see
+ * supabase/migrations/0016_ingest_aggregates.sql).
  *
  * Exported for unit tests (idempotency contract, mirrors run.test.ts).
  */
@@ -255,13 +260,17 @@ export async function writeShopeeAggregates(
   batchId: string,
   creatorIds: string[],
   periodStart: string,
-  periodSummary: ShopeePeriodSummaryRow[]
+  periodEnd: string,
+  periodSummary: ShopeePeriodSummaryRow[],
+  subcatSegment: SubcatSegmentRow[]
 ): Promise<void> {
   for (let i = 0; i < creatorIds.length; i += DELETE_CHUNK) {
     const chunk = creatorIds.slice(i, i + DELETE_CHUNK);
     if (chunk.length === 0) continue;
     await admin.from("creator_period_summary").delete()
       .in("creator_id", chunk).eq("period_start", periodStart);
+    await admin.from("creator_subcat_segment_gmv").delete()
+      .in("creator_id", chunk).eq("window_end", periodEnd);
   }
 
   const rows = periodSummary.map((s) => ({
@@ -290,36 +299,91 @@ export async function writeShopeeAggregates(
     const { error } = await admin.from("creator_period_summary").insert(rows.slice(i, i + 500));
     if (error) throw new Error(`Gagal menulis creator_period_summary (Shopee): ${error.message}`);
   }
+
+  const subcatRows = subcatSegment.map((s) => ({
+    creator_id: s.creatorId,
+    level2_category: s.level2Category,
+    price_segment: s.priceSegment,
+    upload_batch: batchId,
+    window_end: s.windowEnd,
+    gmv: s.gmv,
+    live_gmv: s.liveGmv,
+    items_sold: s.itemsSold,
+    orders: s.orders,
+    avg_price: s.avgPrice,
+  }));
+  for (let i = 0; i < subcatRows.length; i += 500) {
+    const { error } = await admin.from("creator_subcat_segment_gmv").insert(subcatRows.slice(i, i + 500));
+    if (error) throw new Error(`Gagal menulis creator_subcat_segment_gmv (Shopee): ${error.message}`);
+  }
 }
 
 /**
  * Auto-fill master creators from this Shopee batch, reusing the shared helper
- * (creator-autofill.ts, CLAUDE.md #4) for status/platform/gmv-avg/jenis_creator.
- * niche/top_niches is NOT touched (task rule #4 — no subcat data for Shopee).
+ * (creator-autofill.ts, CLAUDE.md #4) for status/platform/gmv-avg/jenis_creator,
+ * PLUS niche/top_niches — ranked from this batch's category GMV combined with
+ * prior creator_subcat_segment_gmv history, via the exact same rankTopNiches()
+ * the TikTok pipeline uses (src/lib/ingest/run.ts), same "merge into
+ * updates/before/after before writing" extension point documented in
+ * creator-autofill.ts.
  */
 async function autoFillShopeeCreators(
   admin: SupabaseClient,
   actorId: string,
-  periodSummary: ShopeePeriodSummaryRow[]
+  periodSummary: ShopeePeriodSummaryRow[],
+  subcatSegment: SubcatSegmentRow[]
 ): Promise<void> {
   if (periodSummary.length === 0) return;
   const creatorIds = periodSummary.map((s) => s.creatorId);
 
   const { data: existingCreators, error: existingError } = await admin
     .from("creators")
-    .select("id, status, platform, jenis_creator")
+    .select("id, status, platform, jenis_creator, niche, top_niches")
     .in("id", creatorIds);
   if (existingError) throw new Error(`Gagal membaca master creator (Shopee): ${existingError.message}`);
   const existingById = new Map((existingCreators ?? []).map((c) => [c.id, c]));
+
+  // Niche ranking: this batch's category GMV + prior history from
+  // creator_subcat_segment_gmv (mirrors run.ts's TikTok-side niche block).
+  const { data: historyRows, error: historyError } = await admin
+    .from("creator_subcat_segment_gmv")
+    .select("creator_id, level2_category, gmv")
+    .in("creator_id", creatorIds);
+  if (historyError) throw new Error(`Gagal membaca histori niche (Shopee): ${historyError.message}`);
+
+  const nicheInput = [
+    ...subcatSegment.map((s) => ({ creator_id: s.creatorId, sub_category: s.level2Category, value: s.gmv })),
+    ...(historyRows ?? []).map((r) => ({
+      creator_id: r.creator_id as string,
+      sub_category: r.level2_category as string,
+      value: Number(r.gmv ?? 0),
+    })),
+  ];
+  const topNichesByCreator = rankTopNiches(nicheInput);
 
   const avgGmvByCreator = await fetchMonthlyAvgGmvByCreator(admin, creatorIds);
 
   for (const s of periodSummary) {
     const existing = existingById.get(s.creatorId);
     const jenisCreator = deriveJenisCreator(s.affiliateLiveGmv, s.affiliateVideoGmv);
+    const topNiches = topNichesByCreator.get(s.creatorId);
     const avgGmv = avgGmvByCreator.get(s.creatorId)!;
 
     const { updates, before, after } = computeSharedAutoFillFields(existing, "shopee", jenisCreator, avgGmv);
+
+    const nichesChanged =
+      topNiches && topNiches.length > 0 &&
+      (topNiches[0] !== existing?.niche ||
+        JSON.stringify(topNiches) !== JSON.stringify(existing?.top_niches ?? null));
+    if (nichesChanged) {
+      updates.niche = topNiches![0];
+      updates.top_niches = topNiches;
+      before.niche = existing?.niche ?? null;
+      before.top_niches = existing?.top_niches ?? null;
+      after.niche = topNiches![0];
+      after.top_niches = topNiches;
+    }
+
     await writeCreatorAutoFillUpdate(admin, actorId, s.creatorId, updates, before, after);
   }
 }

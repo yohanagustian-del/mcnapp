@@ -6,8 +6,9 @@ import { buildMonthlyAverages, type AvgMonthlyGmv, type AvgMonthlyGmvInputRow } 
  * Shared creator auto-fill helpers (CLAUDE.md #4 — one implementation, reused by
  * both TikTok (src/lib/ingest/run.ts) and Shopee (src/lib/ingest/shopee-run.ts)
  * pipelines instead of two copies of the same monthly-average query + update/audit
- * dance). Platform-specific fields (niche/top_niches — TikTok only, since Shopee
- * ingest has no subcat data per CLAUDE.md task decision) stay in each caller.
+ * dance). Platform-specific fields (niche/top_niches, ranked from each
+ * pipeline's own category-GMV breakdown) stay in each caller — both TikTok
+ * (run.ts) and Shopee (shopee-run.ts) merge them in via the same pattern.
  */
 
 /**
