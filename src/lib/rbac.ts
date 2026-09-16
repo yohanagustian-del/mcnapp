@@ -185,8 +185,17 @@ export const PERMISSIONS: Record<string, Role[]> = {
   "m6.run": [...MANAGEMENT_ROLES, "bizdev_lead", "bizdev"],
   // M7 §2.7: buat/edit project & kelola peserta/man power = management + lead terkait + PM (campaign_ops)
   "m7.manage": [...MANAGEMENT_ROLES, "cm_lead", "bizdev_lead", "acquisition_lead", "campaign_ops"],
-  // M7: input metrik harian (GMV/ads/komisi) — pengelola project + finance (dimensi biaya/ads)
+  // M7: input metrik harian (ads/komisi manual — GMV sendiri upload-only sejak v2 B5)
+  // — pengelola project + finance (dimensi biaya/ads)
   "m7.metrics": [...MANAGEMENT_ROLES, "cm_lead", "bizdev_lead", "acquisition_lead", "campaign_ops", "finance"],
+  // M7 v2 R13: superset kurasi peserta (approve/reject pendaftaran) — lebih luas dari
+  // m7.manage (yang juga memberi hak ubah target/status project, jadi TIDAK dilonggarkan
+  // untuk ini). Ditambahkan di Fase 0; dipakai mulai Fase 2 saat decideProjectJoinRequest
+  // diperluas (BUILD_PLAN_M7_V2 §0.2).
+  "m7.curate": [
+    ...MANAGEMENT_ROLES, "cm_lead", "cpm", "bizdev_lead", "bizdev", "campaign_ops",
+    "acquisition_lead", "acquisition_spec",
+  ],
   // ===== M8 §2F RBAC matrix =====
   // Assign/re-assign creator ke CPM: Director/Head + CM Lead
   "m8.assign_creator": [...MANAGEMENT_ROLES, "cm_lead"],

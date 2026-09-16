@@ -1,6 +1,7 @@
 import { requireMember, hasPermission } from "@/lib/rbac";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { PROJECT_TYPES } from "@/lib/m7/project-type";
 import { createProject } from "./actions";
 import { JoinRequestPanel, type JoinRequestRow } from "./join-request-panel";
 import { ProjectsTable, type ProjectRow } from "./projects-table";
@@ -89,8 +90,11 @@ export default async function ProjectsPage() {
         >
           <input name="name" required placeholder="Nama project"
             className="rounded-md border border-slate-300 px-3 py-2 text-sm" />
-          <input name="type" placeholder="Tipe (showcase/bootcamp/China trip)"
-            className="rounded-md border border-slate-300 px-3 py-2 text-sm" />
+          <select name="type" required className="rounded-md border border-slate-300 px-3 py-2 text-sm">
+            {PROJECT_TYPES.map((t) => (
+              <option key={t.value} value={t.value}>{t.label}</option>
+            ))}
+          </select>
           <label className="flex items-center gap-2 text-xs text-slate-500">
             Mulai
             <input type="date" name="start_date" required

@@ -4,7 +4,9 @@ import { createClient } from "@/lib/supabase/server";
 import { getConfig } from "@/lib/config";
 import { filterLiveActive, trackDaily, type CurveShape, type LiveActivityRow } from "@/lib/m7/tracking";
 import { canManageProjectParticipants } from "@/lib/m7/access";
-import { assignManpower, setProjectStatus, upsertCreatorMetric, upsertDailyMetric } from "../actions";
+import { assignManpower, setProjectStatus, upsertDailyMetric } from "../actions";
+import { MANPOWER_ROLES } from "@/lib/m7/project-type";
+import { suggestParticipantTargetGmv } from "@/lib/m7/participant-target";
 import { ParticipantForm, type CreatorUsernameOption } from "./participant-form";
 import { DailyMetricsTable, type DailyMetricRow } from "./daily-metrics-table";
 import { CreatorPerformanceTable, type CreatorPerformanceRow } from "./creator-performance-table";
@@ -51,7 +53,7 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
         )
         .eq("project_id", projectId),
       supabase.from("project_manpower")
-        .select("member_id, role, involvement, team_members(name)")
+        .select("member_id, role, involvement_pct, team_members(name)")
         .eq("project_id", projectId),
       supabase.from("platform_alerts")
         .select("id, alert_type, message, created_at")
@@ -114,6 +116,13 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
   const usernameOptions: CreatorUsernameOption[] = (creatorChoices ?? [])
     .filter((c) => Boolean(c.username) && !participantIds.has(c.id))
     .map((c) => ({ id: c.id, name: c.name, username: c.username as string }));
+
+  // R4: target_gmv peserta wajib diisi — saran otomatis = sisa target / sisa kuota.
+  const suggestedTargetGmv = suggestParticipantTargetGmv({
+    projectTargetGmv: Number(project.target_gmv),
+    targetCreators: project.target_creators,
+    existingParticipantTargets: (participants ?? []).map((p) => Number(p.target_gmv ?? 0)),
+  });
 
   // Performa per kreator: sum GMV dari project_creator_metrics per peserta.
   const { data: creatorMetricRows } = await supabase
@@ -218,8 +227,8 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
         {project.target_creators ? ` · Target ${project.target_creators} creator` : ""}
       </p>
 
-      {canManage && project.status !== "selesai" && (
-        <form action={setProjectStatus} className="mt-3 flex gap-2">
+      {canManage && project.status !== "dibatalkan" && (
+        <form action={setProjectStatus} className="mt-3 flex flex-wrap gap-2">
           <input type="hidden" name="project_id" value={project.id} />
           {project.status === "planning" && (
             <button name="status" value="aktif"
@@ -231,6 +240,19 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
             <button name="status" value="selesai"
               className="rounded-md bg-blue-700 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-600">
               Tutup Project (hitung hasil)
+            </button>
+          )}
+          {/* R2 (LOCKED): koreksi "selesai → aktif" untuk upload terlambat — Director/Head saja. */}
+          {project.status === "selesai" && ["director", "head"].includes(member.role) && (
+            <button name="status" value="aktif"
+              className="rounded-md bg-green-700 px-3 py-1.5 text-sm font-medium text-white hover:bg-green-600">
+              Buka Kembali (koreksi upload terlambat)
+            </button>
+          )}
+          {project.status !== "selesai" && (
+            <button name="status" value="dibatalkan"
+              className="rounded-md border border-red-300 px-3 py-1.5 text-sm font-medium text-red-700 hover:bg-red-50">
+              Batalkan Project
             </button>
           )}
         </form>
@@ -282,15 +304,17 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
       <p className="mt-1 text-xs text-slate-500">
         Klik judul kolom untuk mengurutkan naik/turun. Baris per halaman bisa diatur 10/20/30.
       </p>
+      <p className="mt-1 text-xs text-amber-700">
+        Angka GMV hanya dari upload — tidak bisa diisi manual. Form di bawah hanya untuk biaya
+        (ads spend manual, komisi creator, revenue MEA).
+      </p>
       {canMetrics && project.status !== "selesai" && (
         <form action={upsertDailyMetric}
-          className="mt-2 grid gap-3 rounded-lg border border-slate-200 bg-white p-4 sm:grid-cols-3 lg:grid-cols-6">
+          className="mt-2 grid gap-3 rounded-lg border border-slate-200 bg-white p-4 sm:grid-cols-3 lg:grid-cols-5">
           <input type="hidden" name="project_id" value={project.id} />
           <input type="date" name="date" required min={project.start_date} max={project.end_date}
             className="rounded-md border border-slate-300 px-3 py-2 text-sm" />
-          <input name="gmv_actual" placeholder="GMV hari ini (Rp)"
-            className="rounded-md border border-slate-300 px-3 py-2 text-sm" />
-          <input name="ads_spend" placeholder="Ads spend (Rp)"
+          <input name="ads_spend_manual" placeholder="Ads spend manual (Rp)"
             className="rounded-md border border-slate-300 px-3 py-2 text-sm" />
           <input name="creator_commission" placeholder="Komisi creator (Rp)"
             className="rounded-md border border-slate-300 px-3 py-2 text-sm" />
@@ -307,33 +331,12 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
       {/* ===== Performa per kreator (QA feedback) ===== */}
       <h2 className="mt-8 text-lg font-medium">Performa per Kreator</h2>
       <p className="mt-1 text-xs text-slate-500">
-        Kontribusi GMV tiap kreator peserta vs target masing-masing. Input harian per kreator.
-        Klik judul kolom untuk mengurutkan naik/turun; baris per halaman 10/50/100.
+        Kontribusi GMV tiap kreator peserta vs target masing-masing. Klik judul kolom untuk
+        mengurutkan naik/turun; baris per halaman 10/50/100.
       </p>
-      {canMetrics && project.status !== "selesai" && (
-        <form action={upsertCreatorMetric}
-          className="mt-2 grid gap-3 rounded-lg border border-slate-200 bg-white p-4 sm:grid-cols-3 lg:grid-cols-5">
-          <input type="hidden" name="project_id" value={project.id} />
-          <select name="creator_id" required className="rounded-md border border-slate-300 px-3 py-2 text-sm">
-            <option value="">— Pilih kreator peserta —</option>
-            {(participants ?? []).map((p) => (
-              <option key={p.creator_id} value={p.creator_id}>
-                {(p.creators as unknown as { name: string } | null)?.name ?? p.creator_id}
-              </option>
-            ))}
-          </select>
-          <input type="date" name="date" required min={project.start_date} max={project.end_date}
-            className="rounded-md border border-slate-300 px-3 py-2 text-sm" />
-          <input name="gmv_actual" placeholder="GMV kreator hari ini (Rp)"
-            className="rounded-md border border-slate-300 px-3 py-2 text-sm" />
-          <input name="items_sold" type="number" min="0" placeholder="Item terjual"
-            className="rounded-md border border-slate-300 px-3 py-2 text-sm" />
-          <button type="submit"
-            className="rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-700">
-            Simpan
-          </button>
-        </form>
-      )}
+      <p className="mt-1 text-xs text-amber-700">
+        Angka GMV hanya dari upload data performa project — tidak ada lagi input manual per kreator.
+      </p>
       <CreatorPerformanceTable rows={creatorPerformanceRows} />
 
       {/* ===== Performa per CM — rollup dari tabel di atas ===== */}
@@ -353,6 +356,7 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
             <ParticipantForm
               projectId={project.id}
               creators={usernameOptions}
+              suggestedTargetGmv={suggestedTargetGmv}
               note={
                 isAssignedManpower && !canManage
                   ? "Anda bisa menambah peserta karena sudah di-assign sebagai man power project ini."
@@ -441,9 +445,13 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
                   <option key={t.id} value={t.id}>{t.name} ({t.role})</option>
                 ))}
               </select>
-              <input name="role" placeholder="Peran di project (mis. Campaign Ops)"
-                className="rounded-md border border-slate-300 px-3 py-2" />
-              <input name="involvement" placeholder="Porsi keterlibatan (mis. 50%)"
+              <select name="role" className="rounded-md border border-slate-300 px-3 py-2">
+                <option value="">— Peran di project —</option>
+                {MANPOWER_ROLES.map((r) => (
+                  <option key={r.value} value={r.value}>{r.label}</option>
+                ))}
+              </select>
+              <input name="involvement_pct" type="number" min="0" max="100" placeholder="Porsi keterlibatan (%)"
                 className="rounded-md border border-slate-300 px-3 py-2" />
               <button type="submit"
                 className="rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-700">
@@ -471,8 +479,10 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
                         </span>
                       )}
                     </td>
-                    <td className="px-4 py-2">{m.role ?? "—"}</td>
-                    <td className="px-4 py-2">{m.involvement ?? "—"}</td>
+                    <td className="px-4 py-2">
+                      {MANPOWER_ROLES.find((r) => r.value === m.role)?.label ?? m.role ?? "—"}
+                    </td>
+                    <td className="px-4 py-2">{m.involvement_pct === null ? "—" : `${m.involvement_pct}%`}</td>
                   </tr>
                 ))}
                 {(manpower ?? []).length === 0 && (
