@@ -37,7 +37,7 @@ PRD menandai beberapa item `[KONFIRMASI DEV]` karena repo belum diaudit. Sudah d
 | "Server action approve/reject join request belum ada → dibuat" (keputusan #12, §6.5) | **Sudah ada**: `decideProjectJoinRequest()` di `src/app/(portal)/projects/actions.ts:392`, gated `m9.project_join_decide`, sudah auto-insert `project_participants` + audit `type:'approval'` | Fase 2 = **memperluas** action itu (wajib `target_gmv`, status `diundang`/`waitlist`, jalur eksternal), bukan menulis dari nol. Nama action dipertahankan supaya tidak ada dua pintu keputusan |
 | `project_participants` 0 baris | **1 baris**, milik project id 10 | Purge id 10 (keputusan #10) ikut menghapus peserta itu → harus masuk dump `m7.project_purge` |
 | Contoh §4: ads spend 1.200.000 "dari `ads_briefs` project 9" | `ads_briefs` dengan `project_id is not null` = **0 baris**; view `project_ads_spend_v` sudah ada tapi selalu 0 | Panel biaya akan menampilkan 0 sampai tim Ads mengisi `project_id` di brief. Bukan bug — kebutuhan operasional, ditulis eksplisit di UI ("belum ada brief ads tertaut project ini") |
-| `creator_reports` "hanya weekly/monthly" | Benar (22 baris, enum `report_period_t` = weekly,monthly) | Butuh `ALTER TYPE ... ADD VALUE 'project'` di **migrasi terpisah** (lihat §2.1) |
+| `creator_reports` "hanya weekly/monthly" | Benar (22 baris, enum `report_period_t` = weekly,monthly) | Butuh `ALTER TYPE ... ADD VALUE 'project'` di **migrasi terpisah** (lihat §3.1) |
 
 Yang sudah ada dan dipakai ulang (jangan ditulis ulang):
 
@@ -53,62 +53,47 @@ Yang sudah ada dan dipakai ulang (jangan ditulis ulang):
 
 ---
 
-## 2. BLOCKER — kunci dulu sebelum coding
+## 2. Keputusan yang sudah dikunci (Yohan, 16 Sep 2026)
 
-Sama seperti BLOCKER M4/M5/M6 di `docs/BUILD_PLAN.md`: item di bawah ini menghentikan
-task yang bergantung padanya, **tapi tidak menghentikan seluruh Fase 1** (lihat §3).
+Kelima blocker desain sudah diputuskan. Dicatat di sini supaya tidak dibuka ulang saat coding.
 
-- [ ] **B1 — Sampel export harian (A2).** Butuh 1 file tiap: product MCN, product TAP, Shopee
-      afiliasi. Yang sudah diterima cuma export **LIVE Center per sesi** (addendum §9), dan itu
-      format lain. Tanpa B1, `source_type` product/shopee tidak bisa dikunci headernya.
-- [ ] **B2 — Keputusan Yohan: export product tanpa kolom tanggal.** Kalau TikTok cuma memberi
-      rekap periode: **tolak** (default PRD, minta export harian) atau **bagi rata per hari**.
-      Bagi rata merusak K2 (angka harian jadi karangan) → rekomendasi tetap tolak, dengan pesan
-      error yang menyebut cara ambil export harian.
-- [ ] **B3 — Stack render PNG/PDF (A13).** Repo belum punya dependensi render apa pun
-      (`package.json` hanya next/react/recharts/xlsx/papaparse/zod/@anthropic-ai/sdk).
-      Rekomendasi: **PNG** lewat `@vercel/og` (satori, ringan, sudah native di Vercel) dan
-      **PDF** lewat route cetak A4 + `window.print()` — pola yang sudah dipakai
-      `src/app/(portal)/reports/[id]/print-button.tsx`. Puppeteer ditolak (bundle size di Vercel).
-      Konsekuensi jujur: "satu komponen React untuk layar, PNG, dan PDF" (§6.13) **tidak** tercapai
-      penuh — satori hanya mendukung subset CSS, jadi kartu PNG jadi komponen terpisah yang
-      membaca `data_json` yang sama. Sumber angkanya tetap satu.
-- [ ] **B4 — Sentimen feedback vs CLAUDE.md #1.** Keputusan #11 PRD: sentimen pakai mesin LLM
-      yang sama. CLAUDE.md #1: "Klasifikasi ... = TANPA LLM" dan "jangan pernah panggil LLM
-      per-row". Jalan tengah yang saya usulkan: **satu call per project per batch malam**, input =
-      daftar komentar yang sudah dipotong, output = label per respons; `token_used` dicatat.
-      Itu memenuhi keputusan #11 tanpa melanggar larangan per-row. Butuh persetujuan Yohan.
-- [ ] **B5 — Nasib input manual metrik.** `upsertCreatorMetric()` dan `upsertDailyMetric()`
-      (actions.ts:250 & 313) sekarang menulis `gmv_actual` langsung. Setelah R18/R21,
-      `project_creator_metrics.gmv_actual` jadi kolom GENERATED dan `project_daily_metrics`
-      jadi roll-up → **kedua action itu akan gagal apa adanya**. Usulan (default plan ini):
-      input manual per kreator diarahkan ke `gmv_product` dengan `batch_product_id = null`
-      (ditandai "input manual" di UI), dan input harian dipersempit hanya ke kolom biaya
-      (`ads_spend_manual`, `creator_commission`, `mea_revenue`). Perlu konfirmasi kalau tim
-      masih mau input GMV harian manual.
+| # | Keputusan | Yang dikerjakan / yang dicoret |
+|---|---|---|
+| **B1/B2** | **Tolak.** Export product tanpa kolom tanggal ditolak — tim diminta mengambil export harian, bukan dibagi rata | Parser product menolak file yang hanya punya rentang periode, dengan pesan error yang menyebut cara mengambil export harian. K2 aman: tidak ada angka harian hasil karangan. **Tetap butuh sampel file** (product MCN, product TAP, Shopee) untuk mengunci header — ini kebutuhan data, bukan keputusan; hanya memblokir Fase 1B |
+| **B3** | **Report cukup di dashboard creator.** Tidak ada template unduhan | R30 + §6.13 (PNG 1080×1350, PDF A4, report gabungan PDF/PNG) **dicoret dari scope**. Tidak ada `@vercel/og`, `react-pdf`, maupun Puppeteer — 0 dependensi baru. Report peserta = halaman di dashboard kreator; report gabungan = halaman dashboard tim. Tombol Print/PDF browser yang sudah ada (`reports/[id]/print-button.tsx`) dipakai ulang apa adanya untuk yang mau cetak sendiri |
+| **B4** | **Feedback rule-based, minimalkan LLM** | Sentimen dihitung deterministik dari rating + NPS + leksikon kata (`src/lib/m7/feedback-sentiment.ts`, fungsi murni + unit test). **Tidak ada LLM sama sekali** di jalur feedback — ini juga menutup konflik dengan CLAUDE.md #1. Ringkasan naratif feedback di report gabungan ikut satu call insight yang sudah ada, bukan call terpisah |
+| **B5** | **Tidak ada input GMV manual — semua lewat upload** | `upsertCreatorMetric()` dihapus beserta form-nya; `upsertDailyMetric()` dipersempit **hanya** ke kolom biaya (`ads_spend_manual`, `creator_commission`, `mea_revenue`) yang memang tidak ada di file platform. GMV/orders/items 100% dari batch upload → `gmv_actual` aman jadi kolom GENERATED |
+
+### Konsekuensi B3 terhadap urutan fase — **penting**
+
+PRD §3.3 memakai unduhan PNG sebagai jalan sementara: tim mengunduh report lalu mengirimnya
+lewat WA, supaya peserta bisa lihat hasil sebelum portal jadi. Jalan itu ikut hilang bersama B3.
+Artinya peserta **hanya** bisa melihat reportnya kalau punya akun portal.
+
+Jadi dua hal yang di PRD ada di Fase 3 dan Fase 4 naik jadi **Fase 1D**, tepat setelah mesin
+report: tab *Progress & Report* di portal, dan tombol *Undang ke portal* (R36). Sisa Fase 3
+(info acara, feedback, sanggahan) tetap di belakang. Tanpa 1D, report Fase 1C tidak sampai ke
+peserta sama sekali.
 
 ---
 
 ## 3. Urutan build
 
-Fase 1 PRD saya pecah jadi **1A / 1B / 1C** karena B1 memblokir sebagian saja. 1A bisa jalan
-sekarang (format live session sudah lengkap di addendum §9), 1C bisa jalan di atas 1A.
+Fase 1 PRD dipecah jadi **1A / 1B / 1C / 1D**. 1A bisa jalan sekarang (format live session sudah
+lengkap di addendum §9); 1B menunggu sampel file; 1D menggantikan Fase 4 lama.
 
-| Fase | Scope | Blocked by | Estimasi |
+| Fase | Scope | Menunggu | Estimasi |
 |---|---|---|---|
 | **0** | Hardening skema + purge + recompute + target peserta wajib | — | 2 hari |
-| **1A** | Upload sesi live (`tiktok_live_session`) + verifikasi V1–V7 + dashboard | — | 4 hari |
-| **1B** | Upload export harian product/shopee | B1, B2 | 2 hari |
-| **1C** | Report peserta + report gabungan + PNG/PDF | 1A (1B untuk project non-live), B3 | 4 hari |
+| **1A** | Upload sesi live (`tiktok_live_session`) + verifikasi V1–V7 + dashboard tim | — | 4 hari |
+| **1B** | Upload export harian product/shopee | sampel file (B1) | 2 hari |
+| **1C** | Report peserta + report gabungan (halaman, tanpa template unduhan) | 1A | 3 hari |
+| **1D** | Portal peserta: Progress & Report + undang akun portal (eks Fase 4) | 1C | 2 hari |
 | **2** | Kebutuhan kreator, shortlist, link publik, kurasi | — | 5 hari |
-| **3** | Portal peserta: info, report, feedback, sanggahan | B4 (sentimen saja) | 6 hari |
-| **4** | Aktivasi portal manual CPM | — | 1 hari |
+| **3** | Portal: info acara, feedback (rule-based), sanggahan sesi | — | 5 hari |
 
-Total ±24 hari kerja (PRD memperkirakan ±9 hari untuk Fase 1 saja; pecahan 1A+1B+1C = 10 hari,
-selisihnya karena verifikasi V1–V7 dan report tiga lapis dihitung terpisah).
-
-Paralel yang aman: 1A ∥ persiapan 1C (template report), Fase 2 ∥ Fase 3 bagian info acara.
-Blocking keras: Fase 0 → semua; 1A → 1C; K5 (`report_period_t`) → 1C.
+Total ±23 hari kerja. Paralel yang aman: 1A ∥ persiapan 1C, Fase 2 ∥ Fase 3 bagian info acara.
+Blocking keras: Fase 0 → semua; 1A → 1C → 1D; K5 (`report_period_t`) → 1C.
 
 ---
 
@@ -175,18 +160,26 @@ Migrasi mulai dari **0052** (terakhir di repo: `0051_px_creator_capability.sql`)
     `ads_spend = ads_spend_manual + project_ads_spend_v`.
   - RLS: semua tabel baru `enable row level security` + policy read `authenticated`,
     mutasi hanya service role (pola 0005).
+- [ ] **B5 — cabut input GMV manual** (satu PR dengan 0054, kalau tidak `gmv_actual` GENERATED
+      akan mematahkan action lama):
+  - hapus `upsertCreatorMetric()` (`projects/actions.ts:250`) + form pemanggilnya di
+    `projects/[id]/creator-performance-table.tsx`;
+  - persempit `upsertDailyMetric()` (`:313`) → hanya `ads_spend_manual`, `creator_commission`,
+    `mea_revenue`; kolom GMV/items/orders di tabel harian jadi read-only hasil roll-up;
+  - label UI: "Angka GMV hanya dari upload — tidak bisa diisi manual."
 - [ ] Cron 06:00 WIB `recompute_project_summary` untuk project `aktif`
       (pg_cron / Edge Function terjadwal — pilih yang sudah dipakai repo; kalau belum ada,
       Edge Function + Supabase schedule).
 - [ ] `app_config` baru: `m7.gmv_trend_tolerance` (0.02, untuk V6), `m7.feedback_window_days`
-      (14), `m7.shortlist_weights`. **Tidak ada angka hardcode** (CLAUDE.md konvensi).
+      (14), `m7.shortlist_weights`, `m7.sentiment_rules`. **Tidak ada angka hardcode**.
 
 **DoD Fase 0:** `npm run typecheck` + `npm run test` hijau; `/projects` dan `/projects/[id]`
-masih render untuk project 7/8/9; tidak ada project id 4/5/10; audit `m7.project_purge` berisi dump.
+masih render untuk project 7/8/9; tidak ada project id 4/5/10; audit `m7.project_purge` berisi dump;
+tidak ada satu pun jalur tulis `gmv_actual` dari UI.
 
 ---
 
-## Fase 1A — Upload sesi live (jalan tanpa B1)
+## Fase 1A — Upload sesi live (jalan tanpa sampel tambahan)
 
 Format sudah pasti dari addendum §9: dua file per sesi, dan **username/sesi/tanggal hanya ada di
 nama file** (`{username}_product_Sesi_{n}__{d}_{Bulan}_{yyyy}.xlsx` dan `_trend_stats_`),
@@ -202,7 +195,7 @@ penulisan tidak konsisten (`product`/`Product`, `trend_stats`/`Trend_Stat`, `Ses
       semua varian penulisan dari sampel.
 - [ ] `src/lib/m7/live-parse.ts` — baca kedua sheet lewat `parseSheet()`, header persis dari
       addendum §9, laporkan `missing_columns`. GMV sesi **selalu** dari file Product; Trend Stats
-      hanya timeline + metrik penonton; selisih disimpan di `gmv_trend` (R: sumber tunggal).
+      hanya timeline + metrik penonton; selisih disimpan di `gmv_trend`.
 - [ ] `src/lib/m7/live-verify.ts` — **fungsi murni** V1–V7 → `{level: ok|warn|block, code, message}[]`.
       V1 alias, V2 periode (R6), V3 tumpang tindih (R39), V4 file hash lintas project,
       V5 pasangan product+trend, V6 selisih GMV ≤ `m7.gmv_trend_tolerance`, V7 nomor sesi bentrok.
@@ -227,11 +220,14 @@ penulisan tidak konsisten (`product`/`Product`, `trend_stats`/`Trend_Stat`, `Ses
 
 ---
 
-## Fase 1B — Upload export harian (butuh B1 + B2)
+## Fase 1B — Upload export harian (menunggu sampel file)
 
 - [ ] `src/lib/m7/metrics-parse.ts` — alias header per `source_type`
       (`mcn_tiktok_product`, `tap_tiktok_product`, `mcn_tiktok_live`, `tap_tiktok_live`, `shopee`),
       `missing_columns` dilaporkan, bukan crash.
+- [ ] **B1/B2 — tolak file rekap periode.** Kalau file product tidak punya kolom tanggal per baris,
+      upload ditolak dengan pesan yang menyebut cara mengambil export harian. Tidak ada opsi
+      bagi rata, tidak ada flag untuk mengaktifkannya.
 - [ ] Pencocokan baris → peserta lewat `creators.username` (case-insensitive, strip `@`) atau `uid`
       (R20). Pakai `likePatternForUsername()`/`pickExactUsername()` yang sudah ada di
       `src/lib/creators/username.ts` — jangan tulis normalisasi kedua.
@@ -250,7 +246,7 @@ upload live periode sama → `gmv_actual` **tidak** berubah, hanya `live_gmv` te
 
 ---
 
-## Fase 1C — Report peserta & gabungan
+## Fase 1C — Report peserta & gabungan (halaman, tanpa unduhan)
 
 - [ ] `0056_m7_v2_reports.sql`: `creator_reports.project_id` FK, unique partial
       `(project_id, creator_id) where project_id is not null and status='final'`,
@@ -261,19 +257,36 @@ upload live periode sama → `gmv_actual` **tidak** berubah, hanya `live_gmv` te
       live tiga lapis (§10.5) untuk project bertipe live. Rank & cohort dihitung di SQL.
 - [ ] Insight: panggil `generateInsight()` yang sudah ada dengan **varian prompt `project`**
       (3 paragraf, larangan menyebut angka di luar `data_json`). Satu call per report,
-      `token_used` dicatat. Lapis sesi memakai catatan **rule-based**, bukan LLM (§10.5) —
-      ini sekaligus yang menjaga CLAUDE.md #1.
+      `token_used` dicatat. Lapis sesi memakai catatan **rule-based**, bukan LLM (§10.5).
 - [ ] Generate massal (semua/terpilih) → draft; generate ulang → draft baru, draft lama diarsip (R26).
       Peserta `gmv_actual=0` tetap dibuatkan report (R29).
 - [ ] Finalkan (reuse pola `finalizeReport`) → audit `m7.report_finalize`.
-- [ ] Template output (§6.13) — sesuai B3: komponen layar + route cetak A4 (PDF) + route
-      `@vercel/og` (PNG 1080×1350). Palet mengikuti **MEA Report Designer**
-      (skill `mea-client-reporting`); hex final menunggu A6.
-- [ ] Report gabungan PDF 2–3 halaman + PNG ringkas tanpa angka biaya/margin (D).
-- [ ] Setiap unduhan → audit `m7.report_download`.
+- [ ] **Tampilan (B3):** satu komponen React `ProjectReportView` dipakai dua tempat — halaman tim
+      `/projects/[id]/report/[creatorId]` dan tab portal kreator (1D). Report gabungan =
+      `/projects/[id]/ringkasan`. Palet mengikuti MEA Report Designer, pakai `recharts` yang sudah
+      ada di repo. **Tidak ada** route PNG, tidak ada generator PDF, tidak ada dependensi baru;
+      yang mau cetak memakai `PrintButton` yang sudah ada.
+- [ ] Export xlsx leaderboard tetap ada (§3.2) — `xlsx` sudah jadi dependensi repo.
 
-**DoD 1C:** 1 project selesai → semua peserta punya draft; finalisasi 1 report menghasilkan PNG
-+ PDF yang angkanya identik dengan dashboard; tidak ada angka di narasi yang tidak ada di `data_json`.
+**DoD 1C:** 1 project selesai → semua peserta punya draft; angka di halaman report identik dengan
+dashboard (sumber sama, tidak ada perhitungan kedua); tidak ada angka di narasi yang tidak ada di
+`data_json`.
+
+---
+
+## Fase 1D — Portal peserta: report sampai ke kreator (eks Fase 4)
+
+Naik ke sini karena B3 mencabut jalur "unduh PNG lalu kirim WA" (§2, konsekuensi B3).
+
+- [ ] Tab **Progress & Report** di `/portal/projects`: angka live (progress) sebelum final,
+      narasi setelah final (R28). Peserta hanya melihat report `final` miliknya —
+      ditegakkan RLS `cr_creator_self_final`, bukan filter query.
+- [ ] Kolom "Akun portal" di daftar peserta + tombol **Undang ke portal** → `creator_users`
+      status `invited` + tampilkan link/token untuk dikirim CPM sendiri (R36, K8).
+      Audit `m7.portal_invite`. Tidak ada pengiriman WA otomatis.
+
+**DoD 1D:** satu peserta yang diundang bisa login dan melihat report finalnya sendiri, dan **tidak**
+bisa melihat report peserta lain (uji dengan dua akun).
 
 ---
 
@@ -297,27 +310,24 @@ upload live periode sama → `gmv_actual` **tidak** berubah, hanya `live_gmv` te
 
 ---
 
-## Fase 3 — Portal peserta
+## Fase 3 — Info acara, feedback, sanggahan
 
 - [ ] `0058_m7_v2_portal.sql`: `project_announcements` + `project_announcement_reads`,
       `project_feedback` (unique `(project_id, creator_id)`), RLS creator_user (peserta project,
       `published_at <= now()`, jendela feedback R31).
-- [ ] Portal: tab **Info** (pinned maks 3, badge belum dibaca), **Progress & Report**
-      (angka live sebelum final, narasi + unduh setelah final — R28), **Feedback**, **Undangan**.
+- [ ] Tab **Info** di portal (pinned maks 3, badge belum dibaca) + **Feedback** (form §3.8).
+- [ ] **Sentimen rule-based (B4)** — `src/lib/m7/feedback-sentiment.ts`, fungsi murni:
+      sinyal utama = `rating_overall` + `nps` (numerik, tidak ambigu), sinyal pendukung =
+      leksikon kata positif/negatif Bahasa Indonesia dari `app_config m7.sentiment_rules`
+      (bisa ditambah tanpa deploy). Output `positif|netral|negatif` + skor. Unit test dengan
+      komentar nyata. **Nol LLM** di jalur ini.
+- [ ] Agregat feedback masuk `result_summary` dan halaman report gabungan; ringkasan naratifnya
+      ikut call insight report gabungan yang sudah ada — bukan call baru.
 - [ ] Sanggahan sesi (§10.3): tombol "Ini bukan data saya" → `disputed` + alasan → keluar dari
       roll-up sementara → notifikasi CPM pemilik + uploader. Tim: pindahkan ke peserta lain
       (jalankan ulang V1–V7) atau tolak sanggahan. Audit `m7.live_session_dispute` /
       `m7.live_session_reassign`.
-- [ ] Sentimen feedback sesuai keputusan B4 (batch malam, satu call per project).
 - [ ] `creator_feedback` lama **tidak** dipakai untuk acara (R33) — biarkan apa adanya.
-
----
-
-## Fase 4 — Aktivasi portal
-
-- [ ] Kolom "Akun portal" di daftar peserta + tombol **Undang ke portal** → `creator_users`
-      status `invited` + tampilkan link/token untuk dikirim CPM sendiri (R36).
-      Audit `m7.portal_invite`. Tidak ada pengiriman WA otomatis.
 
 ---
 
@@ -325,10 +335,10 @@ upload live periode sama → `gmv_actual` **tidak** berubah, hanya `live_gmv` te
 
 | Aturan | Cara plan ini memenuhinya |
 |---|---|
-| #1 LLM hanya reasoning | LLM cuma di: insight report peserta, ringkasan report gabungan, sentimen batch (B4). Parsing, matching username, V1–V7, roll-up, rank, cohort, skor shortlist = SQL/rule-based. Tidak ada LLM per-row. `token_used` dicatat tiap call |
+| #1 LLM hanya reasoning | LLM cuma di dua tempat: insight report peserta dan ringkasan report gabungan. Parsing, matching username, V1–V7, roll-up, rank, cohort, skor shortlist, **dan sentimen feedback (B4)** = SQL/rule-based. Tidak ada LLM per-row. `token_used` dicatat tiap call |
 | #2 Approval & alert | Approve/reject peserta = `type:'approval'`; upload/recompute/purge = `type:'auto'`; `project_rugi`/`project_over_cap` (sudah ada di `checkProfitability`) = `platform_alert` |
-| #3 Read-only | Tidak menyentuh `agency_links.link_status` maupun `creators.commission_share` |
-| #4 Satu sumber kebenaran | `project_creator_metrics` = sumber tunggal performa project; kurva & status dari `m7/tracking.ts`; insight dari `report/insight.ts`; normalisasi username dari `creators/username.ts`; `project_daily_metrics` & `result_summary` = **turunan**, tidak pernah dihitung ulang di tempat lain |
+| #3 Read-only | Tidak menyentuh `agency_links.link_status` maupun `creators.commission_share`. Setelah B5, `gmv_actual` project juga jadi engine-only |
+| #4 Satu sumber kebenaran | `project_creator_metrics` = sumber tunggal performa project; kurva & status dari `m7/tracking.ts`; insight dari `report/insight.ts`; normalisasi username dari `creators/username.ts`; satu `ProjectReportView` untuk halaman tim & portal; `project_daily_metrics` & `result_summary` = **turunan** |
 | #7 Data cleaning | Rupiah campur, tanggal teks bebas, kolom kotor → `parseRupiah()` + flag review; **jangan crash** |
 | Konvensi | DB snake_case, kode camelCase, label UI Bahasa Indonesia, komentar kode Bahasa Inggris, threshold dari `app_config` |
 | DoD | Type-safe, RLS aktif, audit tertulis, threshold dari config, 0 LLM di jalur deterministik |
@@ -339,10 +349,12 @@ upload live periode sama → `gmv_actual` **tidak** berubah, hanya `live_gmv` te
 
 - **Unit (vitest, pola `src/lib/**/__tests__`)**: `live-filename` (semua varian penulisan),
   `live-verify` (V1–V7, termasuk tumpang tindih & alias), `metrics-parse` (header ID/EN,
-  baris Summary, out-of-window), `report-data` (rank, cohort, share_of_project),
-  anti-dobel R21 (product+live hari sama → `gmv_actual` = product).
+  baris Summary, out-of-window, **file rekap periode ditolak** — B1/B2), `report-data`
+  (rank, cohort, share_of_project), `feedback-sentiment` (B4), anti-dobel R21
+  (product+live hari sama → `gmv_actual` = product).
 - **Round-trip**: header template parser ↔ header yang dibaca, pola `lib/deals/report-template.ts`.
 - **Integrasi manual**: skenario §4 PRD di project 9 (staging `MCN MEA Staging` dulu, baru production).
+- **RLS**: dua akun kreator, pastikan report final hanya terlihat pemiliknya (DoD 1D).
 
 ---
 
@@ -350,8 +362,10 @@ upload live periode sama → `gmv_actual` **tidak** berubah, hanya `live_gmv` te
 
 | Risiko | Mitigasi |
 |---|---|
-| B1 tidak datang dalam 1–2 minggu | 1A sudah cukup untuk project live-only; rilis 1A + 1C duluan, 1B menyusul |
-| `gmv_actual` jadi GENERATED merusak input manual | B5 diputuskan sebelum 0054 dijalankan; migrasi + perubahan action masuk satu PR |
+| Sampel export harian tidak datang dalam 1–2 minggu | 1A sudah cukup untuk project live-only; rilis 1A → 1C → 1D duluan, 1B menyusul |
+| Peserta tidak bisa lihat report karena belum punya akun portal (akibat B3) | 1D digeser ke depan; aktivasi akun jadi bagian rilis report, bukan fase terpisah di belakang |
+| `gmv_actual` GENERATED memutus jalur input lama | B5 sudah memutuskan: input GMV manual dicabut; migrasi 0054 + pencabutan action masuk satu PR |
+| Leksikon sentimen meleset untuk bahasa gaul/daerah | Rating + NPS jadi sinyal utama (numerik), leksikon hanya pendukung; kamusnya di `app_config` supaya bisa ditambah tanpa deploy |
 | Username kreator berubah → sesi nyasar | `creator_username_aliases` + V1 blokir, penambahan alias butuh alasan & role cm_lead ke atas |
-| Angka report ≠ angka dashboard | Keduanya baca `project_creator_metrics`/`result_summary` yang sama; tidak ada perhitungan kedua di komponen report |
+| Angka report ≠ angka dashboard | Keduanya baca `project_creator_metrics`/`result_summary` yang sama; satu komponen report dipakai tim & portal |
 | Purge project menghapus data yang ternyata dipakai | Dump lengkap ke `audit_logs` sebelum delete, dijalankan di staging dulu |

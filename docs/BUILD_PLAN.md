@@ -67,9 +67,11 @@ Blocking keras: Fase 0→semua; projectGmv→M5+M6; M3 terakhir.
 
 ## Fase 5 — Special Project v2 (M7/M9, PRD v2.1)
 Rencana lengkap: **`docs/BUILD_PLAN_M7_V2.md`** (PRD: `docs/prd/MCN_MEA_AI_Platform_Module07_Special_Project_v2.md`).
-Urutan: Fase 0 hardening → 1A upload sesi live → 1B upload export harian → 1C report peserta & gabungan → 2 kurasi → 3 portal peserta → 4 aktivasi portal.
-- [ ] **BLOCKER B1:** sampel export harian (product MCN, product TAP, Shopee) — memblokir Fase 1B saja.
-- [ ] **BLOCKER B2:** keputusan export product tanpa kolom tanggal (tolak vs bagi rata; default tolak).
-- [ ] **BLOCKER B3:** stack render PNG/PDF (usulan: `@vercel/og` untuk PNG, route cetak A4 untuk PDF).
-- [ ] **BLOCKER B4:** sentimen feedback — batch 1 call/project supaya tidak melanggar CLAUDE.md #1.
-- [ ] **BLOCKER B5:** nasib input manual metrik setelah `gmv_actual` jadi kolom GENERATED.
+Urutan: Fase 0 hardening → 1A upload sesi live → 1B upload export harian → 1C report (halaman) → 1D portal peserta + undang akun → 2 kurasi → 3 info acara & feedback.
+
+Keputusan Yohan 16 Sep 2026 (sudah dikunci, jangan dibuka ulang):
+- [x] **B1/B2 — tolak.** Export product tanpa kolom tanggal DITOLAK, minta export harian. Tidak ada opsi bagi rata.
+- [x] **B3 — report cukup di dashboard creator.** Template unduhan PNG/PDF (R30, §6.13) dicoret; 0 dependensi render baru. Konsekuensi: portal peserta naik jadi Fase 1D.
+- [x] **B4 — sentimen feedback rule-based** (rating + NPS + leksikon `app_config`), nol LLM.
+- [x] **B5 — tidak ada input GMV manual**, semua lewat upload; `upsertCreatorMetric` dicabut, `upsertDailyMetric` tinggal kolom biaya.
+- [ ] Sisa dependensi (data, bukan keputusan): sampel export harian product MCN/TAP + Shopee — memblokir Fase 1B saja.
