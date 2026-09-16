@@ -76,6 +76,24 @@ export function parsePeriodRange(
 }
 
 /**
+ * A date-only deadline input ("2026-09-16" from a <input type="date"> with no
+ * time component) means "open through the END of that day" to whoever picked
+ * it — but `new Date("2026-09-16")` parses as midnight UTC, which is already
+ * 07:00 WIB. Compared naively against `now()`, a deadline set to TODAY reads
+ * as already-expired for most of the day (the MCN M7 v2 special project
+ * signup toggle hit this live: deadline set to 2026-09-16, page said closed at
+ * 2026-09-16 16:29 UTC / 23:29 WIB). This anchors the cutoff to 23:59:59.999
+ * WIB (UTC+7) of the picked date instead, so "deadline = today" stays open
+ * through the whole WIB day, which is what a human picking a calendar date
+ * means. Returns an ISO instant, or null for empty input.
+ */
+export function endOfDayWib(dateOnly: string): string | null {
+  const s = dateOnly.trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return null;
+  return new Date(`${s}T23:59:59.999+07:00`).toISOString();
+}
+
+/**
  * Number of days in a given month (1-12) of a given year (accounts for leap
  * years). Exported for the ingest calendar UI (need to know whether W5
  * exists for a given month — Feb non-kabisat ends at day 28 == no W5).
