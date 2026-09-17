@@ -6,7 +6,7 @@ import { getConfig } from "@/lib/config";
 import { resolveOrigin } from "@/lib/auth/origin";
 import { CopyLinkButton } from "@/app/(portal)/products/copy-link-button";
 import { filterLiveActive, trackDaily, type CurveShape, type LiveActivityRow } from "@/lib/m7/tracking";
-import { canManageProjectParticipants } from "@/lib/m7/access";
+import { canManageProjectParticipants, canUploadProjectPerformance } from "@/lib/m7/access";
 import {
   assignManpower, decideProjectCancellation, requestProjectCancellation,
   setProjectStatus, setSignupOpen, upsertDailyMetric,
@@ -177,6 +177,12 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
   const isAssignedManpower = (manpower ?? []).some((m) => m.member_id === member.id);
   const canAddParticipant = canManageProjectParticipants({
     hasManagePermission: canManage,
+    isAssignedManpower,
+  });
+  // Orang yang menjalankan project juga yang mengunggah datanya — hak yang sama
+  // seperti menambah peserta, bukan permission global terpisah.
+  const canOpenPerforma = canUploadProjectPerformance({
+    hasMetricsPermission: canMetrics,
     isAssignedManpower,
   });
 
@@ -363,9 +369,9 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
           berdampingan, dan "Tutup Project" mengubah keadaan project (hanya
           Director/Head yang bisa membukanya lagi, R2) sementara keempat ini
           cuma berpindah halaman. */}
-      {(canMetrics || canManage || (project.open_for_signup && project.slug)) && (
+      {(canOpenPerforma || canManage || (project.open_for_signup && project.slug)) && (
         <div className="mt-4 flex flex-wrap gap-2">
-          {canMetrics && (
+          {canOpenPerforma && (
             <Link href={`/projects/${project.id}/performa`}
               className="rounded-md bg-slate-800 px-3 py-1.5 text-sm font-medium text-white hover:bg-slate-700">
               Upload Performa (Live) →
