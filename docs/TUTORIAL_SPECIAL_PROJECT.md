@@ -430,8 +430,10 @@ Setelah semua sesi tersimpan, kembali ke halaman project dan klik
 Cukup **sekali klik**. Tombol ini membuat ulang report semua peserta dari data yang sudah
 tersimpan. Kolom **REPORT** di tabel peserta berubah jadi **Draft →**.
 
-Jalankan ulang tombol ini setiap kali ada sesi baru diupload atau dibatalkan, supaya
-angkanya ikut terbarui.
+Report peserta yang sudah terbit ikut terbarui sendiri setiap kali ada sesi diupload
+atau dibatalkan, jadi angkanya tidak akan tertinggal. Tombol ini tetap dipakai untuk
+membuat report peserta yang belum punya, dan untuk menyegarkan peringkat serta
+perbandingan antar peserta setelah banyak upload.
 
 Isi report peserta: GMV sesi, pesanan/item/pembeli, capaian terhadap target pribadi, grafik
 alur sesi per 30 menit, funnel dari tayang sampai beli, angka efisiensi (CTR, CTOR, nilai per
@@ -487,7 +489,7 @@ Setelah semua sesi terupload dan report final:
 | V7 merah | Nomor sesi sudah dipakai di tanggal itu | Ganti nomor sesi di nama file |
 | Sudah upload tapi GMV masih Rp0 | Berhenti di Pratinjau, belum klik **Simpan Sesi** | Ulangi, pastikan muncul "Tersimpan: …", lalu Generate Report lagi |
 | Report tetap "Draft" walau Generate berkali-kali | Generate memang selalu menghasilkan Draft | Buka reportnya, klik **Finalkan Report** |
-| Angka report tidak berubah setelah upload sesi baru | Report adalah rekaman saat di-generate | Klik **Generate Report Peserta (semua)** lagi |
+| Angka report tidak berubah setelah upload sesi baru | Halaman masih menampilkan versi lama di browser | Refresh halamannya; kalau masih sama, klik **Generate Report Peserta (semua)** |
 | Kreator bilang link aktivasi tidak valid | Sudah pernah diaktifkan, atau link terpotong | Suruh login langsung; kalau lupa password pakai Lupa password. Atau kirim ulang link utuh dari spreadsheet |
 | Kolom AKUN PORTAL sudah "Menunggu aktivasi", link hilang | Link hanya tampil sekali saat dibuat | Ambil dari spreadsheet catatanmu |
 | Tombol yang dicari tidak ada di layar | Role akunmu tidak punya hak itu | Lihat tabel di bagian [Siapa boleh melakukan apa](#siapa-boleh-melakukan-apa) |

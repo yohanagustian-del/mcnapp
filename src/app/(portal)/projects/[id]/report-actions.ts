@@ -23,6 +23,42 @@ async function generateOneProjectReport(
   actorId: string
 ): Promise<number> {
   const dataJson = await buildProjectReportData(admin, projectId, creatorId);
+  const generatedAt = new Date().toISOString();
+
+  const { data: existingRows } = await admin
+    .from("creator_reports")
+    .select("id, status")
+    .eq("project_id", projectId).eq("creator_id", creatorId)
+    .in("status", ["draft", "final"]);
+  const existingDraft = (existingRows ?? []).find((r) => r.status === "draft") ?? null;
+  const existingFinal = (existingRows ?? []).find((r) => r.status === "final") ?? null;
+
+  // Baris `final` adalah yang BENAR-BENAR dilihat tim maupun kreator (kedua
+  // halaman report memilih final lebih dulu). Sebelum ini generate hanya
+  // menulis ke draft, jadi report yang sudah difinalkan tidak pernah berubah
+  // walau sesi baru diupload — tim menekan Generate berkali-kali dan layarnya
+  // tetap memperlihatkan angka lama (temuan QA produksi 2026-09-17, project
+  // #12: final berisi 15 Sep saja padahal sesi 16 Sep sudah masuk).
+  //
+  // Angkanya disegarkan; narasi final milik tim (`insight_final`) dan
+  // statusnya tidak disentuh — finalisasi mengatur narasi (R28), bukan
+  // membekukan angka.
+  if (existingFinal) {
+    const { error } = await admin
+      .from("creator_reports")
+      .update({ data_json: dataJson, generated_by: actorId, generated_at: generatedAt })
+      .eq("id", existingFinal.id);
+    if (error) throw new Error(`Gagal memperbarui report final: ${error.message}`);
+    await writeAudit({
+      actorId, action: "m7.report_generate", entityType: "creator_reports",
+      entityId: String(existingFinal.id),
+      after: { project_id: projectId, creator_id: creatorId, token_used: 0, refreshed_final: true },
+      type: "auto",
+    });
+    // Tanpa draft yang sedang disiapkan, tidak ada lagi yang perlu ditulis —
+    // dan tidak ada alasan memanggil LLM untuk narasi yang tak akan tampil.
+    if (!existingDraft) return 0;
+  }
 
   let insightDraft: string | null = null;
   let tokenUsed = 0;
@@ -37,19 +73,13 @@ async function generateOneProjectReport(
     }
   }
 
-  const { data: existingDraft } = await admin
-    .from("creator_reports")
-    .select("id")
-    .eq("project_id", projectId).eq("creator_id", creatorId).eq("status", "draft")
-    .maybeSingle();
-
   let reportId: number;
   if (existingDraft) {
     const { error } = await admin
       .from("creator_reports")
       .update({
         data_json: dataJson, insight_draft: insightDraft, token_used: tokenUsed,
-        generated_by: actorId, generated_at: new Date().toISOString(),
+        generated_by: actorId, generated_at: generatedAt,
       })
       .eq("id", existingDraft.id);
     if (error) throw new Error(`Gagal memperbarui draft: ${error.message}`);

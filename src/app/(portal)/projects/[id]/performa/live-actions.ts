@@ -9,6 +9,7 @@ import { requirePermission } from "@/lib/rbac";
 import { parseLiveFilename, type ParsedLiveFilename } from "@/lib/m7/live-filename";
 import { detectLiveFileKind, parseLiveProductFile, parseLiveTrendFile } from "@/lib/m7/live-parse";
 import { verifyLiveSession, type ExistingSession, type VerifyResult } from "@/lib/m7/live-verify";
+import { refreshCreatorReportDataSafe } from "@/lib/m7/report-refresh";
 
 /**
  * Upload sesi live TikTok (PRD addendum §9/§10) — SELALU berkonteks satu kreator
@@ -442,6 +443,11 @@ export async function saveLiveSessions(formData: FormData): Promise<SaveLiveSess
     if (touchedDates.size > 0) {
       await admin.rpc("recompute_project_daily", { p: projectId });
       await admin.rpc("recompute_project_summary", { p: projectId });
+      // Report yang sudah terbit harus ikut angka terbaru. Tanpa ini, sesi yang
+      // diupload setelah report dibuat tidak pernah terlihat di halaman report
+      // (temuan QA produksi 2026-09-17) — dan tim tidak punya cara tahu, karena
+      // layarnya tetap menampilkan angka lama dengan yakin.
+      await refreshCreatorReportDataSafe(admin, projectId, creatorId);
     }
 
     revalidatePath(`/projects/${projectId}`);
@@ -484,6 +490,9 @@ export async function voidLiveSession(formData: FormData): Promise<{ ok: boolean
     });
     await admin.rpc("recompute_project_daily", { p: session.project_id });
     await admin.rpc("recompute_project_summary", { p: session.project_id });
+    // Membatalkan sesi mengurangi angka — report yang terbit tidak boleh tetap
+    // memperlihatkan GMV yang sudah tidak dihitung lagi.
+    await refreshCreatorReportDataSafe(admin, session.project_id, session.creator_id);
 
     revalidatePath(`/projects/${session.project_id}`);
     revalidatePath(`/projects/${session.project_id}/performa`);
@@ -512,6 +521,12 @@ async function recomputeAffected(
   for (const p of seenProjects) {
     await admin.rpc("recompute_project_daily", { p });
     await admin.rpc("recompute_project_summary", { p });
+  }
+  // Sanggahan yang ditolak atau sesi yang dipindahkan mengubah angka kedua
+  // belah pihak — report yang sudah terbit ikut disegarkan, alasan yang sama
+  // seperti pada upload dan pembatalan.
+  for (const e of entries) {
+    await refreshCreatorReportDataSafe(admin, e.projectId, e.creatorId);
   }
 }
 
