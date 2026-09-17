@@ -39,8 +39,15 @@ export interface LiveVerifyInput {
   existingSessions: ExistingSession[];
   /** This session's own time range, once known from the Trend Stats file (null before it's uploaded). */
   newSession: { startTime: string | null; endTime: string | null };
-  /** Whether this file's hash has already been ingested, in ANY project. */
+  /** Whether this file's hash is already held by a LIVE (non-voided) session, in ANY project. */
   fileHashExists: boolean;
+  /**
+   * Which session still holds it, when one does — the V4 message names it and
+   * says how to free the file. Without this the block reads "sudah pernah
+   * diupload" and the team has no way to tell that cancelling that session is
+   * exactly what unlocks the re-upload (temuan QA 2026-09-17).
+   */
+  fileHashConflict?: { projectId: number; sessionDate: string; sessionNo: number } | null;
   hasProductFile: boolean;
   hasTrendFile: boolean;
   gmvProduct: number | null;
@@ -105,11 +112,21 @@ export function verifyLiveSession(input: LiveVerifyInput): VerifyResult[] {
     results.push({ level: "ok", code: "V3", message: "Tidak ada tumpang tindih waktu dengan sesi lain di hari ini." });
   }
 
-  // V4: file hash not already ingested, in any project.
+  // V4: file hash not already held by a live session, in any project. A voided
+  // session releases its files on purpose — "batalkan lalu upload ulang" is the
+  // team's correction path (§10.3), so the block says so instead of reading as
+  // a dead end.
+  const conflict = input.fileHashConflict;
   results.push(
     input.fileHashExists
-      ? { level: "block", code: "V4", message: "File ini sudah pernah diupload sebelumnya (project mana pun)." }
-      : { level: "ok", code: "V4", message: "File belum pernah diupload." }
+      ? {
+          level: "block", code: "V4",
+          message: conflict
+            ? `File ini sudah dipakai sesi aktif: project #${conflict.projectId}, ${conflict.sessionDate} sesi ${conflict.sessionNo}. ` +
+              `Batalkan sesi itu dulu kalau memang mau upload ulang file yang sama.`
+            : "File ini sudah dipakai sesi aktif yang lain (project mana pun). Batalkan sesi itu dulu kalau memang mau upload ulang file yang sama.",
+        }
+      : { level: "ok", code: "V4", message: "File belum dipakai sesi mana pun." }
   );
 
   // V5: Product + Trend Stats paired.
