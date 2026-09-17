@@ -72,9 +72,24 @@ describe("verifyLiveSession", () => {
     expect(codeOf(results, "V3").level).toBe("ok");
   });
 
-  it("V4 blocks a file hash that's already been ingested", () => {
+  it("V4 blocks a file hash still held by a live session, and names the session to cancel", () => {
+    const results = verifyLiveSession({
+      ...baseInput,
+      fileHashExists: true,
+      fileHashConflict: { projectId: 11, sessionDate: "2026-09-17", sessionNo: 1 },
+    });
+    expect(codeOf(results, "V4").level).toBe("block");
+    // Tanpa ini tim tidak punya cara tahu bahwa membatalkan sesi itulah yang
+    // melepas filenya (temuan QA 2026-09-17).
+    expect(codeOf(results, "V4").message).toContain("project #11");
+    expect(codeOf(results, "V4").message).toContain("2026-09-17 sesi 1");
+    expect(codeOf(results, "V4").message).toContain("Batalkan sesi itu dulu");
+  });
+
+  it("V4 tetap memblokir walau sesi pemegangnya tidak diketahui", () => {
     const results = verifyLiveSession({ ...baseInput, fileHashExists: true });
     expect(codeOf(results, "V4").level).toBe("block");
+    expect(codeOf(results, "V4").message).toContain("Batalkan sesi itu dulu");
   });
 
   it("V5 warns when only one of Product/Trend Stats is present", () => {

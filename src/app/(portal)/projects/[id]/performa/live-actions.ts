@@ -116,6 +116,9 @@ function toMinutes(hhmm: string): number | null {
   return Number(m[1]) * 60 + Number(m[2]);
 }
 
+/** Sesi (masih hidup) yang memegang hash file yang sedang diunggah — isi pesan V4. */
+type HashConflict = { projectId: number; sessionDate: string; sessionNo: number } | null;
+
 interface AnalyzedGroup {
   group: SessionGroup;
   productResult: Awaited<ReturnType<typeof parseLiveProductFile>> | null;
@@ -165,6 +168,7 @@ async function analyzeGroups(
     startTime: string | null;
     endTime: string | null;
     fileHashExists: boolean;
+    fileHashConflict: HashConflict;
   }
   const parsedGroups: Parsed[] = [];
   const blocked: AnalyzedGroup[] = [];
@@ -195,19 +199,30 @@ async function analyzeGroups(
     // V4 checks BOTH hash columns — a file could've been ingested as either kind before.
     const hashesToCheck = [group.product.hash, group.trend?.hash].filter((h): h is string => Boolean(h));
     let fileHashExists = false;
+    let fileHashConflict: HashConflict = null;
     for (const h of hashesToCheck) {
-      const { count } = await admin
+      const { data: holders } = await admin
         .from("project_live_sessions")
-        .select("id", { count: "exact", head: true })
-        // Voided sessions don't hold a file hostage — "batalkan lalu upload
-        // ulang" is the team's only correction path (§10.3), and the unique
-        // indexes carry the same predicate since migration 0062.
-        .neq("attribution_status", "voided")
-        .or(`file_hash_product.eq.${h},file_hash_trend.eq.${h}`);
-      if ((count ?? 0) > 0) { fileHashExists = true; break; }
+        .select("project_id, session_date, session_no, attribution_status")
+        .or(`file_hash_product.eq.${h},file_hash_trend.eq.${h}`)
+        .limit(10);
+      // A voided session releases its files on purpose — "batalkan lalu upload
+      // ulang" is the team's correction path (§10.3), and the unique indexes
+      // carry the same rule since migration 0062. The status is filtered HERE,
+      // in plain code, rather than as one more PostgREST operator stacked onto
+      // the `or(...)`: this is the check that decides whether a re-upload is
+      // possible at all, so it must be readable and testable on its own.
+      const heldBy = (holders ?? []).find((r) => r.attribution_status !== "voided");
+      if (heldBy) {
+        fileHashExists = true;
+        fileHashConflict = {
+          projectId: heldBy.project_id, sessionDate: heldBy.session_date, sessionNo: heldBy.session_no,
+        };
+        break;
+      }
     }
 
-    parsedGroups.push({ group, productResult, trendResult, startTime, endTime, fileHashExists });
+    parsedGroups.push({ group, productResult, trendResult, startTime, endTime, fileHashExists, fileHashConflict });
   }
 
   // Phase 2: verify each group against BOTH the DB's existing sessions AND its
@@ -234,6 +249,7 @@ async function analyzeGroups(
       existingSessions: [...existingSessions, ...siblingSessions],
       newSession: { startTime: p.startTime, endTime: p.endTime },
       fileHashExists: p.fileHashExists,
+      fileHashConflict: p.fileHashConflict,
       hasProductFile: Boolean(p.group.product),
       hasTrendFile: Boolean(p.group.trend),
       gmvProduct: p.productResult!.totals.gmv,
