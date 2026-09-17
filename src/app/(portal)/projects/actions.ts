@@ -13,6 +13,7 @@ import { isManpowerRole, isProjectType } from "@/lib/m7/project-type";
 import { slugifyProjectName } from "@/lib/m7/slug";
 import { suggestParticipantTargetGmv } from "@/lib/m7/participant-target";
 import { genId } from "@/lib/utils/id";
+import { endOfDayWib } from "@/lib/utils/date";
 
 const isIsoDate = (s: string) => /^\d{4}-\d{2}-\d{2}$/.test(s);
 
@@ -98,7 +99,7 @@ export async function setSignupOpen(formData: FormData): Promise<void> {
   const admin = createAdminClient();
   const { error } = await admin
     .from("special_projects")
-    .update({ open_for_signup: open, signup_deadline: deadlineRaw ? new Date(deadlineRaw).toISOString() : null })
+    .update({ open_for_signup: open, signup_deadline: deadlineRaw ? endOfDayWib(deadlineRaw) : null })
     .eq("id", projectId);
   if (error) throw new Error(`Gagal mengubah status pendaftaran: ${error.message}`);
 
