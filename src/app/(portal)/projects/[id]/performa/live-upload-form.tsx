@@ -3,7 +3,7 @@
 import { useRef, useState, useTransition } from "react";
 import {
   previewLiveSessions, saveLiveSessions,
-  type SaveLiveSessionsResult, type SessionGroupPreview,
+  type SaveLiveSessionsResult, type SessionGroupPreview, type UnreadableFile,
 } from "./live-actions";
 
 export interface ParticipantOption {
@@ -33,7 +33,7 @@ export function LiveUploadForm({
   const [creatorId, setCreatorId] = useState("");
   const [brand, setBrand] = useState("");
   const [preview, setPreview] = useState<SessionGroupPreview[] | null>(null);
-  const [unreadable, setUnreadable] = useState<string[]>([]);
+  const [unreadable, setUnreadable] = useState<UnreadableFile[]>([]);
   const [confirmations, setConfirmations] = useState<Record<string, { confirmed: boolean; reason: string }>>({});
   const [previewError, setPreviewError] = useState<string | null>(null);
   const [saveResult, setSaveResult] = useState<SaveLiveSessionsResult | null>(null);
@@ -106,8 +106,10 @@ export function LiveUploadForm({
         />
       </div>
       <p className="mt-2 text-xs text-slate-400">
-        Drop file Product + Trend Stats sekaligus (bisa banyak sesi/hari). Nama file harus format
-        `{"{username}"}_product_Sesi_{"{n}"}__{"{tanggal}"}.xlsx` (§9) — username di nama file harus cocok peserta terpilih.
+        Drop file Product + Trend Stats sekaligus (bisa banyak sesi/hari). Product vs Trend Stats dideteksi
+        otomatis dari isi file — nama file cukup memuat {"{username}"}, "Sesi {"{n}"}", dan tanggal
+        (mis. `tesakun_Sesi_1__17_September_2026.xlsx` atau `tesakun Sesi 1, 17 September 2026.xlsx`; boleh ada
+        kata lain di antaranya). Username di nama file harus cocok peserta terpilih.
       </p>
 
       <div className="mt-3 flex gap-2">
@@ -126,9 +128,9 @@ export function LiveUploadForm({
       {previewError && <p className="mt-2 text-sm text-red-700">{previewError}</p>}
 
       {unreadable.length > 0 && (
-        <p className="mt-2 text-xs text-amber-700">
-          Nama file tidak terbaca (dilewati): {unreadable.join(", ")}
-        </p>
+        <ul className="mt-2 list-inside list-disc text-xs text-amber-700">
+          {unreadable.map((u, i) => <li key={i}>{u.name}: {u.reason}</li>)}
+        </ul>
       )}
 
       {saveResult && (

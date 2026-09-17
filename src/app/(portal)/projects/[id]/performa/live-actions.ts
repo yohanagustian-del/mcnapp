@@ -7,7 +7,7 @@ import { writeAudit } from "@/lib/audit";
 import { getConfig } from "@/lib/config";
 import { requirePermission } from "@/lib/rbac";
 import { parseLiveFilename, type ParsedLiveFilename } from "@/lib/m7/live-filename";
-import { parseLiveProductFile, parseLiveTrendFile } from "@/lib/m7/live-parse";
+import { detectLiveFileKind, parseLiveProductFile, parseLiveTrendFile } from "@/lib/m7/live-parse";
 import { verifyLiveSession, type ExistingSession, type VerifyResult } from "@/lib/m7/live-verify";
 
 /**
@@ -43,7 +43,7 @@ export interface SessionGroupPreview {
 }
 
 export type PreviewLiveSessionsResult =
-  | { ok: true; sessions: SessionGroupPreview[]; unreadableFiles: string[] }
+  | { ok: true; sessions: SessionGroupPreview[]; unreadableFiles: UnreadableFile[] }
   | { ok: false; error: string };
 
 export interface SaveLiveSessionsResult {
@@ -73,22 +73,36 @@ async function hashFile(file: File): Promise<string> {
   return createHash("sha256").update(buf).digest("hex");
 }
 
+export interface UnreadableFile {
+  name: string;
+  reason: string;
+}
+
 async function groupUploadedFiles(
   files: File[]
-): Promise<{ groups: SessionGroup[]; unreadable: string[] }> {
+): Promise<{ groups: SessionGroup[]; unreadable: UnreadableFile[] }> {
   const groups = new Map<string, SessionGroup>();
-  const unreadable: string[] = [];
+  const unreadable: UnreadableFile[] = [];
   for (const file of files) {
     const parsed = parseLiveFilename(file.name);
     if (!parsed) {
-      unreadable.push(file.name);
+      unreadable.push({ name: file.name, reason: "Nama file tidak terbaca — butuh username, \"sesi\" + nomor, dan tanggal (§9)." });
+      continue;
+    }
+    // Product vs Trend Stats is read from the file's own columns, not the
+    // filename (an AM's rename is free to drop/reword that word — see
+    // live-filename.ts) — a file whose columns match neither sheet can't be
+    // grouped at all.
+    const kind = await detectLiveFileKind(file);
+    if (!kind) {
+      unreadable.push({ name: file.name, reason: "Isi file tidak cocok kolom Product maupun Trend Stats." });
       continue;
     }
     const hash = await hashFile(file);
     const key = `${parsed.username}|${parsed.sessionNo}|${parsed.date}`;
     const entry: SessionGroup =
       groups.get(key) ?? { key, username: parsed.username, sessionNo: parsed.sessionNo, date: parsed.date };
-    if (parsed.kind === "product") entry.product = { file, parsed, hash };
+    if (kind === "product") entry.product = { file, parsed, hash };
     else entry.trend = { file, parsed, hash };
     groups.set(key, entry);
   }
@@ -290,7 +304,7 @@ export async function saveLiveSessions(formData: FormData): Promise<SaveLiveSess
 
     const saved: string[] = [];
     const skipped: { key: string; reason: string }[] = [];
-    for (const f of unreadable) skipped.push({ key: f, reason: "Nama file tidak terbaca (§9 format)" });
+    for (const f of unreadable) skipped.push({ key: f.name, reason: f.reason });
 
     const touchedDates = new Set<string>();
 

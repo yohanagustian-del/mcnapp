@@ -2,10 +2,19 @@
  * M7 v2 Special Project — TikTok LIVE Center export filename parser (PRD addendum
  * §9, 16 Sep 2026). Username, session number, and date live ONLY in the filename —
  * the sheets themselves carry none of them. Real-world exports are inconsistent:
- * `product`/`Product`, `trend_stats`/`Trend Stat`/`trend stats`, `Sesi`/`sesi`,
- * `_` or ` ` as the separator before the kind/before "sesi". Pure function, no
- * I/O — returns null on anything unreadable so the caller can fall back to
- * manual entry (R37) instead of crashing (CLAUDE.md #7).
+ * `Sesi`/`sesi`, `_` or ` ` as the separator, and anything at all between the
+ * username and "sesi" (an Account Manager routinely renames these files before
+ * upload, and whatever word was there — "product", "trend stats", "stats", or
+ * nothing — is the first casualty). Pure function, no I/O — returns null on
+ * anything unreadable so the caller can fall back to manual entry (R37) instead
+ * of crashing (CLAUDE.md #7).
+ *
+ * Whether a file IS the Product sheet or the Trend Stats sheet used to be read
+ * off this same filename word, but that broke the moment a real AM-renamed file
+ * showed up (2026-09-17 QA) — see `detectLiveFileKind()` in live-parse.ts, which
+ * decides that from the sheet's own columns instead (the one thing a rename
+ * can't corrupt). This parser only extracts what genuinely lives ONLY in the
+ * filename: username, session number, date.
  *
  * Two real filename shapes confirmed against actual TikTok LIVE Center exports
  * (2 creators, 16 Sep 2026 sample batch — see docs/data-samples/README.md):
@@ -25,7 +34,6 @@ export interface ParsedLiveFilename {
   sessionNo: number;
   /** ISO yyyy-mm-dd. */
   date: string;
-  kind: "product" | "trend_stats";
 }
 
 const MONTHS_ID: Record<string, number> = {
@@ -33,13 +41,19 @@ const MONTHS_ID: Record<string, number> = {
   juli: 7, agustus: 8, september: 9, oktober: 10, november: 11, desember: 12,
 };
 
+// Username is lazy ("+?") so it stops at the FIRST separator instead of
+// swallowing through it — the username character class also allows "_", so a
+// greedy match would happily eat "_product"/"_stats" as part of the username
+// itself. Anything (".*?", lazy) is then allowed between that separator and
+// "sesi" — an AM's rename can drop or reword the product/trend-stats hint
+// entirely; it's no longer this parser's job to read it (see file header).
 const FILENAME_RE =
-  /^([a-z0-9._]+)[ _]+(product|trend[ _]?stats?)[ _]+sesi[ _]*(\d+)(?:,\s*|__)(\d{1,2})[ _]+([a-z]+)[ _]+(\d{4})\.xlsx$/i;
+  /^([a-z0-9._]+?)[ _]+.*?sesi[ _]*(\d+)(?:,\s*|__)(\d{1,2})[ _]+([a-z]+)[ _]+(\d{4})\.xlsx$/i;
 
 export function parseLiveFilename(filename: string): ParsedLiveFilename | null {
   const match = FILENAME_RE.exec(filename.trim());
   if (!match) return null;
-  const [, username, kindRaw, sessionNoRaw, dayRaw, monthRaw, yearRaw] = match;
+  const [, username, sessionNoRaw, dayRaw, monthRaw, yearRaw] = match;
 
   const monthNum = MONTHS_ID[monthRaw.toLowerCase()];
   if (!monthNum) return null;
@@ -52,6 +66,5 @@ export function parseLiveFilename(filename: string): ParsedLiveFilename | null {
     username: username.toLowerCase(),
     sessionNo: Number(sessionNoRaw),
     date: `${year}-${String(monthNum).padStart(2, "0")}-${String(day).padStart(2, "0")}`,
-    kind: kindRaw.toLowerCase().startsWith("product") ? "product" : "trend_stats",
   };
 }
