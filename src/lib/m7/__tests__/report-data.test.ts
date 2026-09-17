@@ -23,7 +23,7 @@ const PROJECT = {
   id: 9, name: "Bootcamp Beauty & Personal Care", type: "bootcamp",
   start_date: "2026-09-01", end_date: "2026-09-30", target_gmv: 25_000_000,
 };
-const CREATOR = { id: "CRT-001", name: "glowbyrara", level: 3, niche: "Beauty" };
+const CREATOR = { id: "CRT-001", name: "Rara Glow", username: "glowbyrara", level: 3, niche: "Beauty" };
 
 describe("buildProjectReportData", () => {
   it("shapes the full data_json per §6.8, using rank/cohort straight from the view", async () => {
@@ -48,7 +48,7 @@ describe("buildProjectReportData", () => {
       type: "project", start: "2026-09-01", end: "2026-09-30",
       project_id: 9, project_name: "Bootcamp Beauty & Personal Care", project_type: "bootcamp",
     });
-    expect(result.creator).toEqual({ id: "CRT-001", name: "glowbyrara", level: 3, niche: "Beauty" });
+    expect(result.creator).toEqual({ id: "CRT-001", name: "Rara Glow", username: "glowbyrara", level: 3, niche: "Beauty" });
     expect(result.target).toEqual({ personal_gmv: 833_333, project_gmv: 25_000_000 });
     expect(result.metrics.gmv).toBe(2_310_000);
     expect(result.metrics.aov).toBeCloseTo(2_310_000 / 41);
@@ -89,6 +89,14 @@ describe("buildProjectReportData", () => {
       { session_id: 1, time: "09:54", gmv: 207_066, viewers: 9, likes: 1_134, comments: 40, shares: 0, new_followers: 1 },
     ];
 
+    // Baris file Product yang disimpan sejak migrasi 0062 — sumber "Produk terlaris".
+    const PRODUCTS = [
+      { product_id: "P1", product_name: "Mattelast Lip Cream", gmv: 208_857, items: 7, orders: 6, product_impressions: 900, product_clicks: 84 },
+      { product_id: "P2", product_name: "Colorlast Lip Vinyl", gmv: 49_157, items: 1, orders: 1, product_impressions: 400, product_clicks: 34 },
+      { product_id: "P3", product_name: "Complete Makeup Look Set", gmv: 0, items: 0, orders: 0, product_impressions: 74, product_clicks: 0 },
+      { product_id: "P4", product_name: "Brow Pensil", gmv: 0, items: 0, orders: 0, product_impressions: 20, product_clicks: 1 },
+    ];
+
     const sbWithLive = (session: Record<string, unknown> = SESSION) =>
       mockSupabase({
         special_projects: { data: PROJECT },
@@ -97,6 +105,7 @@ describe("buildProjectReportData", () => {
         project_creator_report_v: { data: null },
         project_live_sessions: { data: [session] },
         project_live_intervals: { data: INTERVALS },
+        project_live_session_products: { data: PRODUCTS },
       });
 
     it("sums session totals and derives ctr/ctor/gpm from them", async () => {
@@ -134,6 +143,20 @@ describe("buildProjectReportData", () => {
     it("reports impressions_live as null (not 0) for sessions uploaded before it was parsed", async () => {
       const { live } = await buildProjectReportData(sbWithLive({ ...SESSION, impressions_live: null }), 9, "CRT-001");
       expect(live!.impressions_live).toBeNull();
+    });
+
+    it("ranks the session's own products and counts the etalase around them", async () => {
+      const { live } = await buildProjectReportData(sbWithLive(), 9, "CRT-001");
+      expect(live!.products).toEqual([
+        { name: "Mattelast Lip Cream", gmv: 208_857, items: 7, clicks: 84 },
+        { name: "Colorlast Lip Vinyl", gmv: 49_157, items: 1, clicks: 34 },
+      ]);
+      expect(live!.products_total).toBe(4);
+      expect(live!.products_sold).toBe(2);
+      // Yang paling sering tampil tapi nol pesanan — bukan sekadar yang pertama.
+      expect(live!.top_unsold).toEqual({ name: "Complete Makeup Look Set", impressions: 74 });
+      expect(live!.items_per_order).toBeCloseTo(11 / 10);
+      expect(live!.session_no).toBe(1);
     });
 
     it("flags a Product vs Trend Stats GMV gap, and stays silent when they agree", async () => {

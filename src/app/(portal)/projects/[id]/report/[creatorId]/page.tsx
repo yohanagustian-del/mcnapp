@@ -37,7 +37,7 @@ export default async function ProjectReportPage({
         ← Kembali ke Project
       </Link>
       <div className="mt-3">
-        <ProjectReportView data={data} insight={insight} status={report.status as "draft" | "final"} />
+        <ProjectReportView data={data} insight={insight} status={report.status as "draft" | "final"} audience="team" />
       </div>
 
       {canFinalize && report.status === "draft" && (
