@@ -1,16 +1,12 @@
 import { requireMember, hasPermission } from "@/lib/rbac";
 import { createClient } from "@/lib/supabase/server";
-import { createAdminClient } from "@/lib/supabase/admin";
 import { PROJECT_TYPES } from "@/lib/m7/project-type";
 import { createProject } from "./actions";
-import { JoinRequestPanel, type JoinRequestRow } from "./join-request-panel";
-import { ExternalApplicantPanel, type ExternalApplicantRow } from "./external-applicant-panel";
 import { ProjectsTable, type ProjectRow } from "./projects-table";
 
 export default async function ProjectsPage() {
   const member = await requireMember();
   const canManage = hasPermission("m7.manage", member.role);
-  const canDecideJoin = hasPermission("m9.project_join_decide", member.role);
 
   const supabase = await createClient();
   const { data: projects } = await supabase
@@ -18,54 +14,6 @@ export default async function ProjectsPage() {
     .select("id, name, type, start_date, end_date, target_gmv, ads_budget_cap, target_creators, status, result_summary")
     .order("start_date", { ascending: false })
     .limit(100);
-
-  // Pending creator join requests across all projects (M9 §2.6): platform surfaces every
-  // request, but the accept/reject decision is a human PM/lead call.
-  let joinRequestRows: JoinRequestRow[] = [];
-  if (canDecideJoin) {
-    // No RLS policy grants team_members read access on project_join_requests (only
-    // is_creator_user() self-read exists) — service-role client is required here.
-    const admin = createAdminClient();
-    // 'diundang' juga ditampilkan (tim bisa memutuskan tanpa menunggu respons
-    // kreator di portal — R11/R14) di samping 'diajukan' (pendaftaran portal).
-    const { data: pendingRequests } = await admin
-      .from("project_join_requests")
-      .select("id, project_id, creator_id, created_at, special_projects(name), creators(name)")
-      .in("status", ["diajukan", "diundang"])
-      .order("created_at", { ascending: true })
-      .limit(100);
-    joinRequestRows = (pendingRequests ?? []).map((r) => ({
-      id: r.id,
-      projectId: r.project_id,
-      projectName: (r.special_projects as unknown as { name: string } | null)?.name ?? `#${r.project_id}`,
-      creatorId: r.creator_id,
-      creatorName: (r.creators as unknown as { name: string } | null)?.name ?? r.creator_id,
-      createdAt: r.created_at,
-    }));
-  }
-
-  // Pendaftar eksternal (link publik /join/{slug}) — sub-tab terpisah dari internal.
-  let externalApplicantRows: ExternalApplicantRow[] = [];
-  if (canDecideJoin) {
-    const admin = createAdminClient();
-    const { data: pendingApplicants } = await admin
-      .from("project_external_applicants")
-      .select("id, project_id, full_name, username, platform, followers, niche, created_at, special_projects(name)")
-      .eq("status", "pending")
-      .order("created_at", { ascending: true })
-      .limit(100);
-    externalApplicantRows = (pendingApplicants ?? []).map((r) => ({
-      id: r.id,
-      projectId: r.project_id,
-      projectName: (r.special_projects as unknown as { name: string } | null)?.name ?? `#${r.project_id}`,
-      fullName: r.full_name,
-      username: r.username,
-      platform: r.platform,
-      followers: r.followers,
-      niche: r.niche,
-      createdAt: r.created_at,
-    }));
-  }
 
   // Jumlah peserta aktual per project (vs target_creators)
   const participantCounts = new Map<number, number>();
@@ -101,22 +49,6 @@ export default async function ProjectsPage() {
         Manajemen project berdurasi: tracking GMV harian vs kurva target ramp-up, profitabilitas real-time
         (alert anti-rugi bila ads &gt; komisi MEA), peserta & man power. Deterministik, 0 token AI.
       </p>
-
-      {canDecideJoin && (
-        <section className="mt-6">
-          <h2 className="text-lg font-medium">Pendaftar — Internal</h2>
-          <p className="text-xs text-slate-500">Kreator terdaftar yang mengajukan/diundang lewat portal.</p>
-          <JoinRequestPanel rows={joinRequestRows} />
-        </section>
-      )}
-
-      {canDecideJoin && (
-        <section className="mt-6">
-          <h2 className="text-lg font-medium">Pendaftar — Eksternal</h2>
-          <p className="text-xs text-slate-500">Daftar lewat link publik /join/{"{slug}"}, belum jadi kreator terdaftar.</p>
-          <ExternalApplicantPanel rows={externalApplicantRows} />
-        </section>
-      )}
 
       {canManage && (
         <form

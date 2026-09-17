@@ -19,6 +19,9 @@ import { ParticipantForm, type CreatorUsernameOption } from "./participant-form"
 import { DailyMetricsTable, type DailyMetricRow } from "./daily-metrics-table";
 import { CreatorPerformanceTable, type CreatorPerformanceRow } from "./creator-performance-table";
 import { CmPerformanceTable, type CmPerformanceRow } from "./cm-performance-table";
+import { JoinRequestPanel, type JoinRequestRow } from "../join-request-panel";
+import { ExternalApplicantPanel, type ExternalApplicantRow } from "../external-applicant-panel";
+import { createAdminClient } from "@/lib/supabase/admin";
 
 const STATUS_LABELS: Record<string, string> = {
   on_track: "On-track", behind: "Behind", ahead: "Ahead",
@@ -39,6 +42,7 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
   const canManage = hasPermission("m7.manage", member.role);
   const canMetrics = hasPermission("m7.metrics", member.role);
   const canInvitePortal = hasPermission("m7.curate", member.role);
+  const canDecideJoin = hasPermission("m9.project_join_decide", member.role);
 
   const supabase = await createClient();
   const { data: project } = await supabase
@@ -57,6 +61,52 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
   // Full URL, not just the slug — a bare "/join/xxx" isn't pasteable anywhere
   // outside this app, and CPMs share this with creators over WA/DM.
   const joinUrl = project.slug ? `${await resolveOrigin()}/join/${project.slug}` : null;
+
+  // Pendaftar (internal & eksternal) ditampilkan di sini, di project-nya sendiri
+  // — bukan di /projects (daftar semua project), supaya PM/lead yang buka project
+  // ini langsung lihat, tidak berisiko terlewat di panel gabungan lintas-project
+  // (keputusan user 2026-09-17).
+  let joinRequestRows: JoinRequestRow[] = [];
+  let externalApplicantRows: ExternalApplicantRow[] = [];
+  if (canDecideJoin) {
+    // No RLS policy grants team_members read access on project_join_requests /
+    // project_external_applicants (only is_creator_user() self-read exists on the
+    // former) — service-role client required, same as the /projects list page.
+    const admin = createAdminClient();
+    const [{ data: pendingRequests }, { data: pendingApplicants }] = await Promise.all([
+      admin.from("project_join_requests")
+        .select("id, creator_id, created_at, creators(name)")
+        .eq("project_id", projectId)
+        .in("status", ["diajukan", "diundang"])
+        .order("created_at", { ascending: true })
+        .limit(100),
+      admin.from("project_external_applicants")
+        .select("id, full_name, username, platform, followers, niche, created_at")
+        .eq("project_id", projectId)
+        .eq("status", "pending")
+        .order("created_at", { ascending: true })
+        .limit(100),
+    ]);
+    joinRequestRows = (pendingRequests ?? []).map((r) => ({
+      id: r.id,
+      projectId,
+      projectName: project.name,
+      creatorId: r.creator_id,
+      creatorName: (r.creators as unknown as { name: string } | null)?.name ?? r.creator_id,
+      createdAt: r.created_at,
+    }));
+    externalApplicantRows = (pendingApplicants ?? []).map((r) => ({
+      id: r.id,
+      projectId,
+      projectName: project.name,
+      fullName: r.full_name,
+      username: r.username,
+      platform: r.platform,
+      followers: r.followers,
+      niche: r.niche,
+      createdAt: r.created_at,
+    }));
+  }
 
   const [{ data: metrics }, { data: participants }, { data: manpower }, { data: alerts }, tolerance, liveMin] =
     await Promise.all([
@@ -307,6 +357,22 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
           )}
         </form>
       )}
+
+      {canDecideJoin && (
+        <div className="mt-3 grid gap-4 sm:grid-cols-2">
+          <div>
+            <h2 className="text-sm font-medium text-slate-700">Pendaftar — Internal</h2>
+            <p className="text-xs text-slate-500">Kreator terdaftar yang mengajukan/diundang lewat portal.</p>
+            <JoinRequestPanel rows={joinRequestRows} />
+          </div>
+          <div>
+            <h2 className="text-sm font-medium text-slate-700">Pendaftar — Eksternal</h2>
+            <p className="text-xs text-slate-500">Daftar lewat link publik /join/{project.slug ?? "{slug}"}, belum jadi kreator terdaftar.</p>
+            <ExternalApplicantPanel rows={externalApplicantRows} />
+          </div>
+        </div>
+      )}
+
       <p className="mt-1 text-sm text-slate-500">
         {project.start_date} → {project.end_date} · Target {rupiah(project.target_gmv)} · Ads cap {rupiah(project.ads_budget_cap)}
         {project.target_creators ? ` · Target ${project.target_creators} creator` : ""}
