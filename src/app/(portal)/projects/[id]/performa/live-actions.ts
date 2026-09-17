@@ -344,6 +344,9 @@ export async function saveLiveSessions(formData: FormData): Promise<SaveLiveSess
           customers: totals.customers,
           views: a.trendResult?.totals.views ?? null,
           viewers_peak: a.trendResult?.totals.viewersPeak ?? null,
+          // First step of the report funnel (tayang → beli); only a total exists
+          // (project_live_intervals has no per-interval impressions column).
+          impressions_live: a.trendResult?.totals.impressions ?? null,
           product_impressions: totals.productImpressions,
           product_clicks: totals.productClicks,
           add_to_cart: totals.addedToCart,

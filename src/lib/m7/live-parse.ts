@@ -119,6 +119,11 @@ const TREND_COLUMNS = {
   orders: "attributed_orders",
   viewers: "viewers",
   views: "views",
+  // "Impressions" (audience reach of the LIVE itself) is a DIFFERENT real column
+  // from "Product Impressions" (product card reach) — both exist in the export.
+  // It is the first step of the report funnel (tayang → beli) and has no
+  // per-interval column in the DB, so only its total is stored, on the session.
+  impressions: "impressions",
   productImpressions: "product_impressions",
   productClicks: "product_clicks",
   newFollowers: "new_followers",
@@ -138,6 +143,8 @@ export interface LiveIntervalRow {
   customers: number;
   viewers: number;
   views: number;
+  /** LIVE audience impressions — no per-interval column in the DB, only the total is stored. */
+  impressions: number;
   productImpressions: number;
   productClicks: number;
   newFollowers: number;
@@ -150,7 +157,7 @@ export interface LiveTrendSheetResult {
   intervals: LiveIntervalRow[];
   missingColumns: string[];
   /** Trend Stats' own GMV total — compared against the Product total for V6 (§10.2), never authoritative on its own. */
-  totals: { gmv: number; viewersPeak: number; views: number };
+  totals: { gmv: number; viewersPeak: number; views: number; impressions: number };
 }
 
 export async function parseLiveTrendFile(file: File): Promise<LiveTrendSheetResult> {
@@ -166,6 +173,7 @@ export async function parseLiveTrendFile(file: File): Promise<LiveTrendSheetResu
     customers: num(r[TREND_COLUMNS.customers]),
     viewers: num(r[TREND_COLUMNS.viewers]),
     views: num(r[TREND_COLUMNS.views]),
+    impressions: num(r[TREND_COLUMNS.impressions]),
     productImpressions: num(r[TREND_COLUMNS.productImpressions]),
     productClicks: num(r[TREND_COLUMNS.productClicks]),
     newFollowers: num(r[TREND_COLUMNS.newFollowers]),
@@ -179,8 +187,9 @@ export async function parseLiveTrendFile(file: File): Promise<LiveTrendSheetResu
       gmv: acc.gmv + r.gmv,
       viewersPeak: Math.max(acc.viewersPeak, r.viewers),
       views: acc.views + r.views,
+      impressions: acc.impressions + r.impressions,
     }),
-    { gmv: 0, viewersPeak: 0, views: 0 }
+    { gmv: 0, viewersPeak: 0, views: 0, impressions: 0 }
   );
 
   return { intervals, missingColumns, totals };
