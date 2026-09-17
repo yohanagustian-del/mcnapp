@@ -79,13 +79,13 @@ describe("parseLiveTrendFile", () => {
       {
         Time: "19:00", "Attributed GMV": 300_000, "Attributed items sold": 5,
         Customers: 4, "Attributed orders": 5, Viewers: 120, Views: 800,
-        "Product Impressions": 200, "Product Clicks": 30, "New followers": 3,
+        Impressions: 2_000, "Product Impressions": 200, "Product Clicks": 30, "New followers": 3,
         Shares: 2, Comments: 10, Likes: 40,
       },
       {
         Time: "19:30", "Attributed GMV": 500_000, "Attributed items sold": 9,
         Customers: 6, "Attributed orders": 8, Viewers: 180, Views: 900,
-        "Product Impressions": 250, "Product Clicks": 35, "New followers": 5,
+        Impressions: 2_400, "Product Impressions": 250, "Product Clicks": 35, "New followers": 5,
         Shares: 4, Comments: 15, Likes: 60,
       },
     ]);
@@ -94,7 +94,7 @@ describe("parseLiveTrendFile", () => {
     expect(result.missingColumns).toEqual([]);
     expect(result.intervals).toHaveLength(2);
     expect(result.intervals[0].time).toBe("19:00");
-    expect(result.totals).toEqual({ gmv: 800_000, viewersPeak: 180, views: 1700 });
+    expect(result.totals).toEqual({ gmv: 800_000, viewersPeak: 180, views: 1700, impressions: 4_400 });
   });
 
   // Exact header set from a real TikTok LIVE Center Trend Stat export (16 Sep
