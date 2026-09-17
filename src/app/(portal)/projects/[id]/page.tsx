@@ -312,26 +312,6 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
         <h1 className="text-2xl font-semibold">{project.name}</h1>
         <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-600">{project.status}</span>
         {project.type && <span className="text-sm text-slate-400">{project.type}</span>}
-        {canMetrics && (
-          <Link href={`/projects/${project.id}/performa`} className="text-sm text-blue-700 hover:underline">
-            Upload Performa (Live) →
-          </Link>
-        )}
-        {canManage && (
-          <Link href={`/projects/${project.id}/shortlist`} className="text-sm text-blue-700 hover:underline">
-            Kebutuhan Kreator →
-          </Link>
-        )}
-        {canManage && (
-          <Link href={`/projects/${project.id}/info`} className="text-sm text-blue-700 hover:underline">
-            Info Acara →
-          </Link>
-        )}
-        {project.open_for_signup && project.slug && (
-          <Link href={`/join/${project.slug}`} className="text-sm text-blue-700 hover:underline">
-            Link Pendaftaran Publik →
-          </Link>
-        )}
       </div>
 
       {canManage && (
@@ -377,6 +357,40 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
         {project.start_date} → {project.end_date} · Target {rupiah(project.target_gmv)} · Ads cap {rupiah(project.ads_budget_cap)}
         {project.target_creators ? ` · Target ${project.target_creators} creator` : ""}
       </p>
+
+      {/* Pintu ke pekerjaan project, sebagai blok tombol tepat di atas tombol
+          status. Warnanya sengaja BEDA dari tombol status di bawahnya: keduanya
+          berdampingan, dan "Tutup Project" mengubah keadaan project (hanya
+          Director/Head yang bisa membukanya lagi, R2) sementara keempat ini
+          cuma berpindah halaman. */}
+      {(canMetrics || canManage || (project.open_for_signup && project.slug)) && (
+        <div className="mt-4 flex flex-wrap gap-2">
+          {canMetrics && (
+            <Link href={`/projects/${project.id}/performa`}
+              className="rounded-md bg-slate-800 px-3 py-1.5 text-sm font-medium text-white hover:bg-slate-700">
+              Upload Performa (Live) →
+            </Link>
+          )}
+          {canManage && (
+            <Link href={`/projects/${project.id}/shortlist`}
+              className="rounded-md bg-slate-800 px-3 py-1.5 text-sm font-medium text-white hover:bg-slate-700">
+              Kebutuhan Kreator →
+            </Link>
+          )}
+          {canManage && (
+            <Link href={`/projects/${project.id}/info`}
+              className="rounded-md bg-slate-800 px-3 py-1.5 text-sm font-medium text-white hover:bg-slate-700">
+              Info Acara →
+            </Link>
+          )}
+          {project.open_for_signup && project.slug && (
+            <Link href={`/join/${project.slug}`}
+              className="rounded-md bg-slate-800 px-3 py-1.5 text-sm font-medium text-white hover:bg-slate-700">
+              Link Pendaftaran Publik →
+            </Link>
+          )}
+        </div>
+      )}
 
       {canManage && project.status !== "dibatalkan" && (
         <form action={setProjectStatus} className="mt-3 flex flex-wrap gap-2">
