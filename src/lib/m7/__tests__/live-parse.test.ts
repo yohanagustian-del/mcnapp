@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import * as XLSX from "xlsx";
-import { parseLiveProductFile, parseLiveTrendFile } from "../live-parse";
+import { detectLiveFileKind, parseLiveProductFile, parseLiveTrendFile } from "../live-parse";
 
 function xlsxFile(rows: Record<string, unknown>[], name = "data.xlsx"): File {
   const ws = XLSX.utils.json_to_sheet(rows);
@@ -119,5 +119,31 @@ describe("parseLiveTrendFile", () => {
       time: "10:06", gmv: 66937, items: 2, customers: 1, orders: 1, viewers: 10, views: 349,
       productImpressions: 537, productClicks: 21, newFollowers: 1, shares: 0, comments: 0, likes: 919,
     });
+  });
+});
+
+// An Account Manager renames these files before upload and routinely drops or
+// garbles the "product"/"trend stats" filename hint (2026-09-17 QA finding) —
+// the filename no longer decides which sheet this is (live-filename.ts); the
+// sheet's own columns do.
+describe("detectLiveFileKind", () => {
+  it("detects the Product sheet by its product_id column, whatever the file is named", () => {
+    const file = xlsxFile([{ "Product ID": "PID-1", "Attributed GMV": 100 }], "tesakun_Sesi_1__17_September_2026.xlsx");
+    return expect(detectLiveFileKind(file)).resolves.toBe("product");
+  });
+
+  it("detects the Trend Stats sheet by its time column, whatever the file is named", () => {
+    const file = xlsxFile([{ Time: "19:00", "Attributed GMV": 100 }], "tesakun_stats_Sesi_1__17_September_2026.xlsx");
+    return expect(detectLiveFileKind(file)).resolves.toBe("trend_stats");
+  });
+
+  it("returns null when neither signature column is present", () => {
+    const file = xlsxFile([{ Foo: "bar" }]);
+    return expect(detectLiveFileKind(file)).resolves.toBeNull();
+  });
+
+  it("returns null for an empty sheet", () => {
+    const file = xlsxFile([]);
+    return expect(detectLiveFileKind(file)).resolves.toBeNull();
   });
 });

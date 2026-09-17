@@ -7,7 +7,6 @@ describe("parseLiveFilename", () => {
       username: "haikal",
       sessionNo: 1,
       date: "2026-09-05",
-      kind: "product",
     });
   });
 
@@ -16,14 +15,13 @@ describe("parseLiveFilename", () => {
       username: "haikal",
       sessionNo: 1,
       date: "2026-09-05",
-      kind: "trend_stats",
     });
   });
 
   it("tolerates capitalization variants (Product/product, Trend_Stat/trend_stats, Sesi/sesi)", () => {
-    expect(parseLiveFilename("rara_Product_sesi_2__12_Oktober_2026.xlsx")?.kind).toBe("product");
-    expect(parseLiveFilename("rara_Trend_Stat_sesi_2__12_Oktober_2026.xlsx")?.kind).toBe("trend_stats");
-    expect(parseLiveFilename("rara_TREND_STATS_SESI_2__12_Oktober_2026.xlsx")?.kind).toBe("trend_stats");
+    expect(parseLiveFilename("rara_Product_sesi_2__12_Oktober_2026.xlsx")?.sessionNo).toBe(2);
+    expect(parseLiveFilename("rara_Trend_Stat_sesi_2__12_Oktober_2026.xlsx")?.sessionNo).toBe(2);
+    expect(parseLiveFilename("rara_TREND_STATS_SESI_2__12_Oktober_2026.xlsx")?.sessionNo).toBe(2);
   });
 
   it("parses double-digit day and session numbers", () => {
@@ -31,7 +29,6 @@ describe("parseLiveFilename", () => {
       username: "glowbyrara",
       sessionNo: 12,
       date: "2026-12-28",
-      kind: "product",
     });
   });
 
@@ -72,13 +69,11 @@ describe("parseLiveFilename", () => {
       username: "haikalpratama136",
       sessionNo: 1,
       date: "2026-09-15",
-      kind: "product",
     });
     expect(parseLiveFilename("haikalpratama136 Trend Stat Sesi 1, 15 September 2026.xlsx")).toEqual({
       username: "haikalpratama136",
       sessionNo: 1,
       date: "2026-09-15",
-      kind: "trend_stats",
     });
   });
 
@@ -87,13 +82,41 @@ describe("parseLiveFilename", () => {
       username: "beayik",
       sessionNo: 1,
       date: "2026-09-15",
-      kind: "product",
     });
     expect(parseLiveFilename("beayik_trend stats Sesi 1, 15 September 2026.xlsx")).toEqual({
       username: "beayik",
       sessionNo: 1,
       date: "2026-09-15",
-      kind: "trend_stats",
     });
+  });
+
+  // An Account Manager renames these files by hand before upload (2026-09-17 QA
+  // finding) — the product/trend-stats word is the first thing that gets dropped
+  // or garbled. Username + "sesi" + number + date must still be enough on their
+  // own; which sheet it actually is gets decided from its columns instead
+  // (detectLiveFileKind, live-parse.ts), not from this word.
+  it("parses filenames with the product/trend-stats word entirely missing", () => {
+    expect(parseLiveFilename("tesakun_Sesi_1__17_September_2026.xlsx")).toEqual({
+      username: "tesakun",
+      sessionNo: 1,
+      date: "2026-09-17",
+    });
+    expect(parseLiveFilename("tesakun Sesi 1, 17 September 2026.xlsx")).toEqual({
+      username: "tesakun",
+      sessionNo: 1,
+      date: "2026-09-17",
+    });
+  });
+
+  it("parses filenames with an unrecognized word in place of product/trend-stats", () => {
+    expect(parseLiveFilename("tesakun_stats_Sesi_1__17_September_2026.xlsx")).toEqual({
+      username: "tesakun",
+      sessionNo: 1,
+      date: "2026-09-17",
+    });
+  });
+
+  it("still rejects a single underscore before the date even with no kind word (ambiguity guard unchanged)", () => {
+    expect(parseLiveFilename("tesakun_Sesi_1_17_September_2026.xlsx")).toBeNull();
   });
 });

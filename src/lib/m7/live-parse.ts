@@ -185,3 +185,24 @@ export async function parseLiveTrendFile(file: File): Promise<LiveTrendSheetResu
 
   return { intervals, missingColumns, totals };
 }
+
+// ---------- Kind detection (Product vs Trend Stats) — from content, not filename ----------
+
+/**
+ * Which sheet an uploaded file is — decided from its own columns, not its
+ * filename (2026-09-17: an Account Manager renaming files before upload is the
+ * first thing to drop or garble a "product"/"trend stats" filename hint —
+ * `live-filename.ts` no longer even tries to read one). Product sheet rows are
+ * per-product (has `product_id`); Trend Stats rows are per-time-interval (has
+ * `time`, no `product_id`) — a column neither sheet's own export tooling can
+ * rename away. Peeks headers only; null when neither signature column is
+ * present (CLAUDE.md #7: report unreadable, never guess).
+ */
+export async function detectLiveFileKind(file: File): Promise<"product" | "trend_stats" | null> {
+  const { rows } = await parseSheet(file, [PRODUCT_COLUMNS.productId, TREND_COLUMNS.time]);
+  if (rows.length === 0) return null;
+  const headers = Object.keys(rows[0]);
+  if (headers.includes(PRODUCT_COLUMNS.productId)) return "product";
+  if (headers.includes(TREND_COLUMNS.time)) return "trend_stats";
+  return null;
+}
