@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import {
   Bar, CartesianGrid, ComposedChart, Line, ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from "recharts";
@@ -25,6 +26,13 @@ const tanggal = (iso: string | null) => {
   const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(iso);
   if (!m) return iso;
   return `${Number(m[3])} ${BULAN[Number(m[2]) - 1] ?? m[2]} ${m[1]}`;
+};
+/** "2026-09-15" → "15 Sep" — label tab, harus muat di layar HP. */
+const tanggalSingkat = (iso: string | null) => {
+  if (!iso) return "—";
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(iso);
+  if (!m) return iso;
+  return `${Number(m[3])} ${(BULAN[Number(m[2]) - 1] ?? m[2]).slice(0, 3)}`;
 };
 /** 120 → "±2 jam", 90 → "±1,5 jam". */
 const durasi = (minutes: number) => {
@@ -70,7 +78,13 @@ export function ProjectReportView({
   status: "draft" | "final";
   audience?: "creator" | "team";
 }) {
-  const live = data.live;
+  // Pemilih hari (permintaan tim 2026-09-17): kreator ingin membaca performanya
+  // PER HARI, bukan hanya angka gabungan seluruh project. `null` = Gabungan.
+  const days = data.live_days ?? [];
+  const [dayIndex, setDayIndex] = useState<number | null>(null);
+  const selectedDay = dayIndex === null ? null : days[dayIndex] ?? null;
+  const live = selectedDay ?? data.live;
+
   const dailyChart = data.daily.map((d) => ({ date: d.date.slice(5), gmv: d.gmv }));
 
   // Funnel tayang → beli: langkah yang datanya belum ada (impresi live pada sesi
@@ -128,26 +142,62 @@ export function ProjectReportView({
       </header>
 
       <div className="rounded-b-2xl border border-t-0 border-[#DCE7E1] bg-white p-6">
+        {/* ===== Pemilih hari ===== */}
+        {days.length > 1 && (
+          <div className="-mt-1 mb-4 flex flex-wrap gap-1.5">
+            <button
+              type="button" onClick={() => setDayIndex(null)}
+              className={`rounded-full px-3 py-1 text-[13px] font-medium ${
+                dayIndex === null ? "bg-[#0F6B44] text-white" : "bg-[#F0F5F2] text-[#1B2A22] hover:bg-[#E6F5EE]"
+              }`}
+            >
+              Gabungan
+            </button>
+            {days.map((d, i) => (
+              <button
+                key={d.first_date ?? i} type="button" onClick={() => setDayIndex(i)}
+                className={`rounded-full px-3 py-1 text-[13px] font-medium ${
+                  dayIndex === i ? "bg-[#0F6B44] text-white" : "bg-[#F0F5F2] text-[#1B2A22] hover:bg-[#E6F5EE]"
+                }`}
+              >
+                {tanggalSingkat(d.first_date)}
+              </button>
+            ))}
+          </div>
+        )}
+
         {/* ===== Hero ===== */}
         <div className="flex flex-wrap items-end justify-between gap-3 border-b border-[#DCE7E1] pb-4">
           <div>
-            <p className="text-sm text-[#5F6F66]">{live ? "GMV sesi live" : "GMV project"}</p>
+            <p className="text-sm text-[#5F6F66]">
+              {selectedDay ? `GMV ${tanggal(selectedDay.first_date)}` : live ? "GMV sesi live" : "GMV project"}
+            </p>
             <p className="text-4xl font-extrabold leading-tight tracking-tight text-[#0F6B44]">
-              {rupiah(data.metrics.gmv)}
+              {rupiah(selectedDay ? selectedDay.gmv : data.metrics.gmv)}
             </p>
             <p className="mt-1 text-sm text-[#5F6F66]">
-              {num(data.metrics.orders)} pesanan · {num(data.metrics.items)} item
+              {num(selectedDay ? selectedDay.orders : data.metrics.orders)} pesanan ·{" "}
+              {num(selectedDay ? selectedDay.items : data.metrics.items)} item
               {live ? ` · ${num(live.customers)} pembeli` : ""}
             </p>
           </div>
-          {data.target.personal_gmv > 0 && (
+          {/* Sehari tidak diukur terhadap target seluruh project — itu akan terbaca
+              seolah kreatornya jauh tertinggal. Yang relevan: porsi hari itu. */}
+          {selectedDay ? (
+            <div className="text-right text-sm text-[#5F6F66]">
+              <span>dari {rupiah(data.metrics.gmv)} sepanjang project</span>
+              <b className="block text-2xl font-extrabold leading-tight text-[#1B2A22]">
+                {data.metrics.gmv > 0 ? pct(selectedDay.gmv / data.metrics.gmv) : "—"}
+              </b>
+            </div>
+          ) : data.target.personal_gmv > 0 ? (
             <div className="text-right text-sm text-[#5F6F66]">
               <span>terhadap target pribadi {rupiah(data.target.personal_gmv)}</span>
               <b className="block text-2xl font-extrabold leading-tight text-[#1B2A22]">
                 {pct(data.achievement.personal_pct)}
               </b>
             </div>
-          )}
+          ) : null}
         </div>
 
         {/* ===== Alur sesi (timeline 30 menit) ===== */}
@@ -253,7 +303,7 @@ export function ProjectReportView({
         )}
 
         {/* ===== Tren harian: hanya berguna kalau project jalan lebih dari satu hari ===== */}
-        {dailyChart.length > 1 && (
+        {dayIndex === null && dailyChart.length > 1 && (
           <>
             <h2 className="mt-6 text-[15px] font-bold">
               Tren GMV harian <span className="ml-1 text-[13px] font-medium text-[#5F6F66]">{data.metrics.active_days} hari aktif</span>
@@ -298,7 +348,7 @@ export function ProjectReportView({
         )}
 
         {/* ===== Posisi di project (PRD §6.8) — bahan rapat tim, BUKAN angle kreator ===== */}
-        {audience === "team" && (
+        {audience === "team" && dayIndex === null && (
           <>
             <h2 className="mt-6 text-[15px] font-bold">
               Posisi di project

@@ -440,6 +440,12 @@ alur sesi per 30 menit, funnel dari tayang sampai beli, angka efisiensi (CTR, CT
 pesanan, GMV per 1.000 views, follower baru, komentar, likes, share), produk terlaris, dan
 catatan performa.
 
+**Report harian.** Kalau sesi kreator lebih dari satu hari, di atas report muncul deretan
+tombol: **Gabungan · 15 Sep · 16 Sep · …**. Kreator bisa menekan satu tanggal untuk membaca
+performa hari itu saja — alur sesi, funnel, efisiensi, produk terlaris, dan catatannya semua
+ikut tanggal yang dipilih. Tombol **Gabungan** kembali ke angka seluruh project. Tidak ada
+yang perlu disetel; tombolnya muncul sendiri begitu ada sesi di hari kedua.
+
 ---
 
 ## 12. Finalkan report

@@ -159,6 +159,60 @@ describe("buildProjectReportData", () => {
       expect(live!.session_no).toBe(1);
     });
 
+    // Permintaan tim 2026-09-17: kreator ingin membaca performa PER HARI, bukan
+    // hanya angka gabungan seluruh project.
+    describe("pecahan per hari (live_days)", () => {
+      const DAY2 = {
+        ...SESSION, id: 2, session_date: "2026-09-18", session_no: 1,
+        gmv: 100_000, gmv_trend: 100_000, orders: 4, items: 5, customers: 4,
+        views: 300, viewers_peak: 5, impressions_live: 900,
+        product_impressions: 400, product_clicks: 20, add_to_cart: 3,
+      };
+      const DAY2_INTERVALS = [
+        { session_id: 2, time: "20:00", gmv: 100_000, viewers: 5, likes: 10, comments: 2, shares: 0, new_followers: 1 },
+      ];
+
+      const sbTwoDays = () =>
+        mockSupabase({
+          special_projects: { data: PROJECT },
+          creators: { data: CREATOR },
+          project_participants: { data: { target_gmv: 500_000 } },
+          project_creator_report_v: { data: null },
+          project_live_sessions: { data: [SESSION, DAY2] },
+          project_live_intervals: { data: [...INTERVALS, ...DAY2_INTERVALS] },
+          project_live_session_products: { data: PRODUCTS.map((p) => ({ ...p, session_id: 1 })) },
+        });
+
+      it("memecah satu report per hari sesi, berurutan", async () => {
+        const { live_days } = await buildProjectReportData(sbTwoDays(), 9, "CRT-001");
+        expect(live_days).toHaveLength(2);
+        expect(live_days!.map((d) => d.first_date)).toEqual(["2026-09-17", "2026-09-18"]);
+        expect(live_days!.every((d) => d.first_date === d.last_date)).toBe(true);
+      });
+
+      it("tiap hari hanya memuat angka hari itu, dan gabungannya tetap totalnya", async () => {
+        const { live, live_days } = await buildProjectReportData(sbTwoDays(), 9, "CRT-001");
+        expect(live_days![0].gmv).toBe(338_887);
+        expect(live_days![1].gmv).toBe(100_000);
+        expect(live!.gmv).toBe(338_887 + 100_000);
+        // Interval hari kedua tidak boleh bocor ke timeline hari pertama.
+        expect(live_days![0].timeline).toHaveLength(INTERVALS.length);
+        expect(live_days![1].timeline).toEqual([{ label: "20:00", gmv: 100_000, viewers: 5 }]);
+      });
+
+      it("memecah produk per hari — hari tanpa baris produk tidak meminjam milik hari lain", async () => {
+        const { live_days } = await buildProjectReportData(sbTwoDays(), 9, "CRT-001");
+        expect(live_days![0].products_total).toBe(4);
+        expect(live_days![1].products_total).toBe(0);
+      });
+
+      it("tidak memecah apa pun untuk project satu hari — `live` sudah harinya", async () => {
+        const { live, live_days } = await buildProjectReportData(sbWithLive(), 9, "CRT-001");
+        expect(live).toBeDefined();
+        expect(live_days).toBeUndefined();
+      });
+    });
+
     it("flags a Product vs Trend Stats GMV gap, and stays silent when they agree", async () => {
       const same = await buildProjectReportData(sbWithLive(), 9, "CRT-001");
       expect(same.live!.gmv_trend_diff).toBe(0);
