@@ -99,6 +99,13 @@ export interface ProjectReportData {
   top_products: { name: string; gmv: number; items: number }[];
   /** Absent on reports generated before live detail existed — renderers must tolerate it. */
   live?: ProjectReportLive;
+  /**
+   * Rincian yang SAMA, dipecah per HARI sesi — supaya kreator bisa membaca
+   * "tanggal 15 saya bagaimana" tanpa harus mengurai angka gabungan sendiri
+   * (permintaan tim 2026-09-17). Hanya ada ketika sesinya lebih dari satu hari;
+   * untuk project satu hari, `live` sudah merupakan harinya.
+   */
+  live_days?: ProjectReportLive[];
 }
 
 /**
@@ -135,7 +142,8 @@ export async function buildProjectReportData(
   if (!creator) throw new Error("Kreator tidak ditemukan");
   if (!participant) throw new Error("Kreator ini bukan peserta project");
 
-  const live = await buildLiveDetail(supabase, projectId, creatorId);
+  const liveDetail = await buildLiveDetail(supabase, projectId, creatorId);
+  const live = liveDetail?.live ?? null;
 
   // R29: peserta gmv=0 (belum pernah punya baris di project_creator_metrics,
   // sehingga TIDAK muncul di project_creator_report_v) tetap dapat report —
@@ -180,6 +188,7 @@ export async function buildProjectReportData(
       name: p.product_name ?? "—", gmv: Number(p.gmv ?? 0), items: Number(p.items ?? 0),
     })),
     ...(live ? { live } : {}),
+    ...(liveDetail && liveDetail.days.length > 1 ? { live_days: liveDetail.days } : {}),
   };
 }
 
@@ -191,12 +200,16 @@ const sum = (rows: Record<string, unknown>[], key: string): number =>
  * session yet (R41: only verified/confirmed_manual sessions exist for a report).
  * Pure reads + sums of stored columns — no re-derivation of anything the upload
  * pipeline already computed, and no LLM anywhere (CLAUDE.md #1/#4).
+ *
+ * Mengembalikan gabungan SEKALIGUS pecahan per hari. Semua baris diambil sekali
+ * lalu dibentuk berkali-kali di memori — memecah per hari lewat query terpisah
+ * akan menjadi N+1 untuk project yang berjalan seminggu.
  */
 async function buildLiveDetail(
   supabase: SupabaseClient,
   projectId: number,
   creatorId: string
-): Promise<ProjectReportLive | null> {
+): Promise<{ live: ProjectReportLive; days: ProjectReportLive[] } | null> {
   const { data: sessionRows } = await supabase
     .from("project_live_sessions")
     .select(
@@ -218,10 +231,11 @@ async function buildLiveDetail(
       .order("session_id").order("time"),
     supabase
       .from("project_live_session_products")
-      .select("product_id, product_name, gmv, items, orders, product_impressions, product_clicks")
+      .select("session_id, product_id, product_name, gmv, items, orders, product_impressions, product_clicks")
       .in("session_id", sessionIds),
     // Pembanding CTR: seluruh sesi live yang dihitung di project ini (R41), bukan
     // hanya peserta ini — dipakai sebagai satu kalimat pembanding di catatan.
+    // Sengaja TIDAK dipecah per hari: pembandingnya adalah project, bukan tanggal.
     supabase
       .from("project_live_sessions")
       .select("creator_id, product_impressions, product_clicks")
@@ -229,7 +243,41 @@ async function buildLiveDetail(
       .in("attribution_status", ["verified", "confirmed_manual"]),
   ]);
   const intervals = intervalRows ?? [];
+  const products = productRows ?? [];
+  const cohort = cohortRows ?? [];
 
+  const dates = [...new Set(sessions.map((s) => s.session_date as string))].sort();
+  const live = shapeLive(sessions, intervals, products, cohort);
+
+  // Satu report per hari sesi, dibentuk dari irisan baris yang sama.
+  const days = dates.map((date) => {
+    const daySessions = sessions.filter((s) => s.session_date === date);
+    const dayIds = new Set(daySessions.map((s) => s.id));
+    return shapeLive(
+      daySessions,
+      intervals.filter((i) => dayIds.has(i.session_id)),
+      products.filter((r) => dayIds.has(r.session_id)),
+      cohort
+    );
+  });
+
+  return { live, days };
+}
+
+type LiveRow = Record<string, unknown>;
+
+/**
+ * Membentuk satu `ProjectReportLive` dari kumpulan baris yang sudah diambil.
+ * Murni, tanpa I/O — inilah yang membuat gabungan dan tiap harinya dihitung
+ * dengan definisi yang PERSIS SAMA (CLAUDE.md #4: satu sumber kebenaran, bukan
+ * dua rumus yang kebetulan mirip).
+ */
+function shapeLive(
+  sessions: LiveRow[],
+  intervals: LiveRow[],
+  productRows: LiveRow[],
+  cohortRows: LiveRow[]
+): ProjectReportLive {
   const gmv = sum(sessions, "gmv");
   const orders = sum(sessions, "orders");
   const views = sum(sessions, "views");
@@ -257,12 +305,12 @@ async function buildLiveDetail(
     string,
     { name: string; gmv: number; items: number; orders: number; impressions: number; clicks: number }
   >();
-  for (const r of productRows ?? []) {
+  for (const r of productRows) {
     const key = String(r.product_id);
     const acc = byProduct.get(key) ?? {
-      name: r.product_name ?? "—", gmv: 0, items: 0, orders: 0, impressions: 0, clicks: 0,
+      name: (r.product_name as string | null) ?? "—", gmv: 0, items: 0, orders: 0, impressions: 0, clicks: 0,
     };
-    acc.name = r.product_name ?? acc.name;
+    acc.name = (r.product_name as string | null) ?? acc.name;
     acc.gmv += Number(r.gmv ?? 0);
     acc.items += Number(r.items ?? 0);
     acc.orders += Number(r.orders ?? 0);
@@ -276,9 +324,9 @@ async function buildLiveDetail(
     .filter((p) => p.orders === 0 && p.impressions > 0)
     .sort((a, b) => b.impressions - a.impressions)[0];
 
-  const cohortImpressions = sum(cohortRows ?? [], "product_impressions");
-  const cohortClicks = sum(cohortRows ?? [], "product_clicks");
-  const cohortCreators = new Set((cohortRows ?? []).map((r) => r.creator_id)).size;
+  const cohortImpressions = sum(cohortRows, "product_impressions");
+  const cohortClicks = sum(cohortRows, "product_clicks");
+  const cohortCreators = new Set(cohortRows.map((r) => r.creator_id)).size;
 
   const live: ProjectReportLive = {
     sessions: sessions.length,
@@ -320,7 +368,9 @@ async function buildLiveDetail(
     cohort_creators: cohortCreators,
     timeline: intervals.map((i) => ({
       // One session reads as a clock; several days need the date to stay readable.
-      label: singleDay ? String(i.time) : `${(sessionDate.get(i.session_id) ?? "").slice(5)} ${i.time}`,
+      label: singleDay
+        ? String(i.time)
+        : `${(sessionDate.get(i.session_id as number) ?? "").slice(5)} ${i.time}`,
       gmv: Number(i.gmv ?? 0),
       viewers: i.viewers === null ? null : Number(i.viewers),
     })),
