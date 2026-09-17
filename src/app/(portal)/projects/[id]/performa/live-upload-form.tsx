@@ -125,6 +125,18 @@ export function LiveUploadForm({
         )}
       </div>
 
+      {/* Pratinjau terlihat seperti hasil akhir — daftar V1–V7 muncul lengkap dan
+          tidak ada apa pun yang bilang belum tersimpan. QA produksi 2026-09-17:
+          tim berhenti di sini, mengira sesinya sudah masuk, lalu bingung kenapa
+          report-nya Rp0. Katakan langsung apa langkah berikutnya. */}
+      {preview && !saveResult && (
+        <p className={`mt-2 text-sm ${savableCount > 0 ? "text-amber-700" : "text-red-700"}`}>
+          {savableCount > 0
+            ? `Pratinjau belum menyimpan apa pun. Klik "Simpan Sesi (${savableCount})" untuk menyimpan.`
+            : "Belum ada sesi yang bisa disimpan — selesaikan dulu temuan merah di bawah."}
+        </p>
+      )}
+
       {previewError && <p className="mt-2 text-sm text-red-700">{previewError}</p>}
 
       {unreadable.length > 0 && (
