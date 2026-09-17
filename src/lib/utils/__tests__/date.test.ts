@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { validateLeakPeriod, validateW1W5Period, weekOfMonth } from "../date";
+import { endOfDayWib, validateLeakPeriod, validateW1W5Period, weekOfMonth } from "../date";
 
 describe("weekOfMonth (skema upload W1-W5)", () => {
   it("maps day-of-month to the correct week window", () => {
@@ -121,5 +121,28 @@ describe("validateLeakPeriod (gerbang longgar khusus /link-leakage)", () => {
     const result = validateLeakPeriod("1 Januari 2026", "2026-01-31");
     expect(result.valid).toBe(false);
     expect(result.reason).toBeTruthy();
+  });
+});
+
+describe("endOfDayWib (date-only deadline → inclusive end-of-day WIB cutoff)", () => {
+  it("anchors to 23:59:59.999 WIB (= 16:59:59.999 UTC same day)", () => {
+    expect(endOfDayWib("2026-09-16")).toBe("2026-09-16T16:59:59.999Z");
+  });
+
+  it("stays open for a same-day comparison well into the UTC afternoon (the bug this fixes)", () => {
+    const deadline = new Date(endOfDayWib("2026-09-16")!);
+    const laterSameDayUtc = new Date("2026-09-16T16:29:00Z"); // 23:29 WIB
+    expect(deadline > laterSameDayUtc).toBe(true);
+  });
+
+  it("closes once WIB has actually crossed into the next day", () => {
+    const deadline = new Date(endOfDayWib("2026-09-16")!);
+    const nextDayWib = new Date("2026-09-16T17:00:01Z"); // 00:00:01 WIB on the 17th
+    expect(deadline > nextDayWib).toBe(false);
+  });
+
+  it("returns null for malformed input", () => {
+    expect(endOfDayWib("16/09/2026")).toBeNull();
+    expect(endOfDayWib("")).toBeNull();
   });
 });

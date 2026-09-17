@@ -3,6 +3,8 @@ import Link from "next/link";
 import { requireMember, hasPermission } from "@/lib/rbac";
 import { createClient } from "@/lib/supabase/server";
 import { getConfig } from "@/lib/config";
+import { resolveOrigin } from "@/lib/auth/origin";
+import { CopyLinkButton } from "@/app/(portal)/products/copy-link-button";
 import { filterLiveActive, trackDaily, type CurveShape, type LiveActivityRow } from "@/lib/m7/tracking";
 import { canManageProjectParticipants } from "@/lib/m7/access";
 import {
@@ -51,6 +53,10 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
   const { data: cancelRequester } = project.cancellation_requested_by
     ? await supabase.from("team_members").select("name").eq("id", project.cancellation_requested_by).maybeSingle()
     : { data: null };
+
+  // Full URL, not just the slug — a bare "/join/xxx" isn't pasteable anywhere
+  // outside this app, and CPMs share this with creators over WA/DM.
+  const joinUrl = project.slug ? `${await resolveOrigin()}/join/${project.slug}` : null;
 
   const [{ data: metrics }, { data: participants }, { data: manpower }, { data: alerts }, tolerance, liveMin] =
     await Promise.all([
@@ -293,8 +299,11 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
           <button type="submit" className="rounded-md border border-slate-300 px-2 py-1 font-medium hover:bg-slate-50">
             Simpan
           </button>
-          {project.slug && (
-            <span className="text-slate-400">/join/{project.slug}</span>
+          {joinUrl && (
+            <span className="flex items-center gap-1">
+              <span className="max-w-[220px] truncate text-slate-400" title={joinUrl}>{joinUrl}</span>
+              <CopyLinkButton url={joinUrl} label="pendaftaran" />
+            </span>
           )}
         </form>
       )}
