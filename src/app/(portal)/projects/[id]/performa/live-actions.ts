@@ -5,7 +5,8 @@ import { revalidatePath } from "next/cache";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { writeAudit } from "@/lib/audit";
 import { getConfig } from "@/lib/config";
-import { requirePermission } from "@/lib/rbac";
+import { hasPermission, requireMember, type TeamMember } from "@/lib/rbac";
+import { canUploadProjectPerformance, isAssignedManpower } from "@/lib/m7/access";
 import { parseLiveFilename, type ParsedLiveFilename } from "@/lib/m7/live-filename";
 import { detectLiveFileKind, parseLiveProductFile, parseLiveTrendFile } from "@/lib/m7/live-parse";
 import { verifyLiveSession, type ExistingSession, type VerifyResult } from "@/lib/m7/live-verify";
@@ -67,6 +68,29 @@ interface SessionGroup {
   date: string;
   product?: FileEntry;
   trend?: FileEntry;
+}
+
+/**
+ * Guard performa project (M7 §2.5): pemegang `m7.metrics` untuk semua project,
+ * ATAU anggota tim yang di-assign sebagai man power in-charge di project ini —
+ * aturannya di lib/m7/access, sama persis dengan guard peserta project.
+ * Ditegakkan DI SERVER, bukan cuma disembunyikan di UI.
+ */
+async function requireProjectPerformanceAccess(
+  admin: ReturnType<typeof createAdminClient>,
+  projectId: number
+): Promise<TeamMember> {
+  const member = await requireMember();
+  const hasMetrics = hasPermission("m7.metrics", member.role);
+  const assigned = hasMetrics
+    ? false // sudah lolos lewat permission global — tidak perlu query tambahan
+    : await isAssignedManpower(admin, projectId, member.id);
+  if (!canUploadProjectPerformance({ hasMetricsPermission: hasMetrics, isAssignedManpower: assigned })) {
+    throw new Error(
+      `Akses ditolak: role ${member.role} tidak punya izin m7.metrics dan belum di-assign sebagai man power project ini`
+    );
+  }
+  return member;
 }
 
 async function hashFile(file: File): Promise<string> {
@@ -272,15 +296,16 @@ async function analyzeGroups(
 
 export async function previewLiveSessions(formData: FormData): Promise<PreviewLiveSessionsResult> {
   try {
-    await requirePermission("m7.metrics");
     const projectId = Number(formData.get("project_id"));
     const creatorId = String(formData.get("creator_id") ?? "").trim();
     if (!projectId || !creatorId) throw new Error("Project & peserta wajib dipilih");
 
+    const admin = createAdminClient();
+    await requireProjectPerformanceAccess(admin, projectId);
+
     const files = formData.getAll("files").filter((f): f is File => f instanceof File && f.size > 0);
     if (files.length === 0) throw new Error("Pilih minimal satu file untuk diunggah");
 
-    const admin = createAdminClient();
     const { groups, unreadable } = await groupUploadedFiles(files);
     const analyzed = await analyzeGroups(admin, projectId, creatorId, groups);
 
@@ -302,10 +327,12 @@ export async function previewLiveSessions(formData: FormData): Promise<PreviewLi
 
 export async function saveLiveSessions(formData: FormData): Promise<SaveLiveSessionsResult> {
   try {
-    const actor = await requirePermission("m7.metrics");
     const projectId = Number(formData.get("project_id"));
     const creatorId = String(formData.get("creator_id") ?? "").trim();
     if (!projectId || !creatorId) throw new Error("Project & peserta wajib dipilih");
+
+    const admin = createAdminClient();
+    const actor = await requireProjectPerformanceAccess(admin, projectId);
 
     const brand = String(formData.get("brand") ?? "").trim() || null;
     const overridesRaw = String(formData.get("overrides") ?? "{}");
@@ -319,7 +346,6 @@ export async function saveLiveSessions(formData: FormData): Promise<SaveLiveSess
     const files = formData.getAll("files").filter((f): f is File => f instanceof File && f.size > 0);
     if (files.length === 0) throw new Error("Pilih minimal satu file untuk diunggah");
 
-    const admin = createAdminClient();
     const { groups, unreadable } = await groupUploadedFiles(files);
     const analyzed = await analyzeGroups(admin, projectId, creatorId, groups);
 
@@ -461,7 +487,6 @@ export async function saveLiveSessions(formData: FormData): Promise<SaveLiveSess
 /** Batalkan sesi (PR-10): void + recompute so the numbers immediately drop out of the roll-up (R41). */
 export async function voidLiveSession(formData: FormData): Promise<{ ok: boolean; error?: string }> {
   try {
-    const actor = await requirePermission("m7.metrics");
     const sessionId = Number(formData.get("session_id"));
     if (!sessionId) throw new Error("Sesi tidak valid");
 
@@ -472,6 +497,9 @@ export async function voidLiveSession(formData: FormData): Promise<{ ok: boolean
       .eq("id", sessionId)
       .single();
     if (fetchError || !session) throw new Error("Sesi tidak ditemukan");
+    // Hak akses dicek SETELAH sesinya diketahui, karena izinnya bisa datang dari
+    // status man power di project sesi itu — bukan dari role global saja.
+    const actor = await requireProjectPerformanceAccess(admin, session.project_id);
 
     const { error } = await admin
       .from("project_live_sessions")
@@ -533,7 +561,6 @@ async function recomputeAffected(
 /** Tolak sanggahan → kembali `verified`, alasan tim dicatat (R41/§10.3). */
 export async function rejectLiveSessionDispute(formData: FormData): Promise<{ ok: boolean; error?: string }> {
   try {
-    const actor = await requirePermission("m7.metrics");
     const sessionId = Number(formData.get("session_id"));
     const reason = String(formData.get("reason") ?? "").trim();
     if (!sessionId) throw new Error("Sesi tidak valid");
@@ -545,6 +572,7 @@ export async function rejectLiveSessionDispute(formData: FormData): Promise<{ ok
       .select("id, project_id, creator_id, session_date, attribution_status")
       .eq("id", sessionId).single();
     if (!session) throw new Error("Sesi tidak ditemukan");
+    const actor = await requireProjectPerformanceAccess(admin, session.project_id);
     if (session.attribution_status !== "disputed") throw new Error("Sesi ini tidak sedang disanggah");
 
     const { error } = await admin
@@ -579,7 +607,6 @@ export async function rejectLiveSessionDispute(formData: FormData): Promise<{ ok
  */
 export async function reassignLiveSession(formData: FormData): Promise<{ ok: boolean; error?: string }> {
   try {
-    const actor = await requirePermission("m7.metrics");
     const sessionId = Number(formData.get("session_id"));
     const targetCreatorId = String(formData.get("target_creator_id") ?? "").trim();
     if (!sessionId || !targetCreatorId) throw new Error("Sesi & peserta tujuan wajib dipilih");
@@ -592,6 +619,7 @@ export async function reassignLiveSession(formData: FormData): Promise<{ ok: boo
       )
       .eq("id", sessionId).single();
     if (!session) throw new Error("Sesi tidak ditemukan");
+    const actor = await requireProjectPerformanceAccess(admin, session.project_id);
     if (session.attribution_status !== "disputed") throw new Error("Sesi ini tidak sedang disanggah");
     if (targetCreatorId === session.creator_id) throw new Error("Peserta tujuan sama dengan peserta saat ini");
 

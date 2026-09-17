@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation";
 import Link from "next/link";
 import { requireMember, hasPermission } from "@/lib/rbac";
+import { canUploadProjectPerformance, isAssignedManpower } from "@/lib/m7/access";
 import { createClient } from "@/lib/supabase/server";
 import { LiveUploadForm, type ParticipantOption } from "./live-upload-form";
 import { LiveSessionHistoryTable, type LiveSessionHistoryRow } from "./live-session-history-table";
@@ -13,9 +14,16 @@ export default async function ProjectPerformaPage({ params }: { params: Promise<
   if (!Number.isInteger(projectId)) notFound();
 
   const member = await requireMember();
-  const canUpload = hasPermission("m7.metrics", member.role);
-
   const supabase = await createClient();
+
+  // Man power in-charge project ini boleh mengunggah performanya walau role
+  // globalnya tidak punya m7.metrics (M7 §2.5 — aturannya di lib/m7/access,
+  // ditegakkan ulang di server action, bukan hanya di sini).
+  const hasMetrics = hasPermission("m7.metrics", member.role);
+  const canUpload = canUploadProjectPerformance({
+    hasMetricsPermission: hasMetrics,
+    isAssignedManpower: hasMetrics ? false : await isAssignedManpower(supabase, projectId, member.id),
+  });
   const { data: project } = await supabase
     .from("special_projects")
     .select("id, name, start_date, end_date")
