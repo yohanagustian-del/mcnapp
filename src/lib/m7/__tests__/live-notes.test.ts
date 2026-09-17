@@ -4,7 +4,7 @@ import type { ProjectReportLive } from "../report-data";
 
 // Sesi live nyata dari QA produksi 2026-09-17 (export LIVE Center, 5 interval).
 const LIVE: ProjectReportLive = {
-  sessions: 1, brands: ["OMG Oh My Glam"],
+  sessions: 1, session_no: 1, brands: ["OMG Oh My Glam"],
   first_date: "2026-09-17", last_date: "2026-09-17",
   start_time: "08:54", end_time: "10:54", duration_min: 120,
   gmv: 338_887, orders: 10, items: 11, customers: 10,
@@ -13,6 +13,10 @@ const LIVE: ProjectReportLive = {
   likes: 2_764, comments: 75, shares: 4, new_followers: 1,
   ctr: 149 / 2_763, ctor: 10 / 149, gpm: (338_887 / 908) * 1000,
   gmv_trend: 338_887, gmv_trend_diff: 0,
+  products: [{ name: "Mattelast Lip Cream", gmv: 208_857, items: 7, clicks: 84 }],
+  products_total: 11, products_sold: 5,
+  top_unsold: { name: "Complete Makeup Look Set", impressions: 74 },
+  items_per_order: 1.1, cohort_ctr: 0.034, cohort_creators: 2,
   timeline: [
     { label: "08:54", gmv: 0, viewers: 7 },
     { label: "09:24", gmv: 131_821, viewers: 6 },
@@ -24,36 +28,43 @@ const LIVE: ProjectReportLive = {
 };
 
 describe("buildLiveNotes (deterministik, 0 token — CLAUDE.md #1)", () => {
-  it("menyebut interval puncak dan berapa interval yang benar-benar menjual", () => {
-    const [peak] = buildLiveNotes(LIVE);
-    expect(peak).toContain("09:54");
-    expect(peak).toContain("Rp207.066");
-    expect(peak).toContain("61,1%"); // 207.066 / 338.887
-    expect(peak).toContain("2"); // 2 dari 5 interval menghasilkan transaksi
+  it("menyebut di interval mana jualannya terjadi, lalu ekor sesi yang kosong", () => {
+    const [alur] = buildLiveNotes(LIVE);
+    expect(alur).toContain("Seluruh GMV Rp338.887");
+    expect(alur).toContain("2 dari 5 interval");
+    expect(alur).toContain("09:24 dan 09:54");
+    expect(alur).toContain("1 jam terakhir (10:24–10:54) nol transaksi");
+    expect(alur).toContain("penonton turun dari 9 ke 2");
   });
 
-  it("menandai ekor sesi tanpa transaksi beserta turunnya penonton", () => {
-    const tail = buildLiveNotes(LIVE).find((n) => n.includes("ditutup"));
-    expect(tail).toBeDefined();
-    expect(tail).toContain("2 interval terakhir");
-    expect(tail).toContain("10:24");
-    expect(tail).toContain("dari puncak 9 ke 2");
+  it("memakai kalimat puncak kalau transaksinya tersebar di banyak interval", () => {
+    const timeline = LIVE.timeline.map((t, i) => ({ ...t, gmv: i === 2 ? 207_066 : 32_954 }));
+    const [alur] = buildLiveNotes({ ...LIVE, timeline });
+    expect(alur).toContain("Penjualan terbesar ada di interval 09:54");
+    expect(alur).toContain("5 dari 5 interval");
   });
 
-  it("merangkai impresi → klik → pesanan apa adanya", () => {
-    const funnel = buildLiveNotes(LIVE).find((n) => n.includes("Rantai konversi"));
-    expect(funnel).toContain("2.763 impresi produk");
-    expect(funnel).toContain("149 klik");
-    expect(funnel).toContain("10 pesanan");
-    expect(funnel).toContain("CTR 5,4%");
-    expect(funnel).toContain("CTOR 6,7%");
+  it("merangkai CTR/CTOR beserta pembanding peserta lain dan produk yang belum laku", () => {
+    const efisiensi = buildLiveNotes(LIVE).find((n) => n.startsWith("CTR produk"))!;
+    expect(efisiensi).toContain("CTR produk 5,4%");
+    expect(efisiensi).toContain("149 klik dari 2.763 impresi produk");
+    expect(efisiensi).toContain("CTOR 6,7% ke 10 pesanan");
+    expect(efisiensi).toContain("rata-rata seluruh peserta live project ini 3,4%");
+    expect(efisiensi).toContain("Nilai per pesanan Rp33.889");
+    expect(efisiensi).toContain("1,1 item per pesanan");
+    expect(efisiensi).toContain('"Complete Makeup Look Set" (74 impresi)');
   });
 
-  it("melaporkan interaksi penonton", () => {
-    const interaksi = buildLiveNotes(LIVE).find((n) => n.startsWith("Interaksi"));
+  it("tidak menyebut pembanding kohort kalau peserta live-nya cuma dia sendiri", () => {
+    const efisiensi = buildLiveNotes({ ...LIVE, cohort_creators: 1 }).find((n) => n.startsWith("CTR produk"))!;
+    expect(efisiensi).not.toContain("rata-rata seluruh peserta");
+  });
+
+  it("melaporkan interaksi penonton sebagai modal sesi berikutnya", () => {
+    const interaksi = buildLiveNotes(LIVE).find((n) => n.includes("likes"))!;
     expect(interaksi).toContain("2.764 likes");
-    expect(interaksi).toContain("75 komentar");
-    expect(interaksi).toContain("908 views");
+    expect(interaksi).toContain("75 komentar dari 908 views");
+    expect(interaksi).toContain("8,3 komentar per 100 views");
     expect(interaksi).toContain("1 follower baru");
   });
 
@@ -61,6 +72,7 @@ describe("buildLiveNotes (deterministik, 0 token — CLAUDE.md #1)", () => {
     const kosong = buildLiveNotes({
       ...LIVE, gmv: 0, orders: 0, likes: 0, comments: 0, new_followers: 0,
       product_impressions: 0, product_clicks: 0, add_to_cart: 0, ctr: null, ctor: null,
+      products: [], products_total: 0, products_sold: 0, top_unsold: null, items_per_order: null,
       timeline: [{ label: "20:00", gmv: 0, viewers: 3 }],
     });
     expect(kosong).toEqual([]);
@@ -75,6 +87,6 @@ describe("buildLiveNotes (deterministik, 0 token — CLAUDE.md #1)", () => {
         { label: "09:54", gmv: 207_066, viewers: 9 },
       ],
     });
-    expect(notes.some((n) => n.includes("ditutup"))).toBe(false);
+    expect(notes[0]).not.toContain("nol transaksi");
   });
 });

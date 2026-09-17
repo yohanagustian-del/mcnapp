@@ -199,6 +199,10 @@ async function analyzeGroups(
       const { count } = await admin
         .from("project_live_sessions")
         .select("id", { count: "exact", head: true })
+        // Voided sessions don't hold a file hostage — "batalkan lalu upload
+        // ulang" is the team's only correction path (§10.3), and the unique
+        // indexes carry the same predicate since migration 0062.
+        .neq("attribution_status", "voided")
         .or(`file_hash_product.eq.${h},file_hash_trend.eq.${h}`);
       if ((count ?? 0) > 0) { fileHashExists = true; break; }
     }
@@ -367,6 +371,25 @@ export async function saveLiveSessions(formData: FormData): Promise<SaveLiveSess
       if (error) {
         skipped.push({ key: a.group.key, reason: `Gagal menyimpan: ${error.message}` });
         continue;
+      }
+
+      // Per-product rows (§9): the same file whose SUM became the session totals
+      // above — kept so the report can tell the creator WHAT sold, not only how
+      // much. Rows without a product id can't be keyed, so they're dropped here
+      // (their numbers are already inside the session totals).
+      const productRows = a.productResult!.rows.filter((r) => r.productId);
+      if (productRows.length > 0) {
+        const { error: productError } = await admin.from("project_live_session_products").insert(
+          productRows.map((r) => ({
+            session_id: inserted.id, product_id: r.productId, product_name: r.productName,
+            gmv: r.gmv, items: r.items, orders: r.orders, customers: r.customers,
+            product_impressions: r.productImpressions, product_clicks: r.productClicks,
+            added_to_cart: r.addedToCart,
+          }))
+        );
+        if (productError) {
+          skipped.push({ key: a.group.key, reason: `Sesi tersimpan tapi rincian produk gagal: ${productError.message}` });
+        }
       }
 
       if (a.trendResult && a.trendResult.intervals.length > 0) {

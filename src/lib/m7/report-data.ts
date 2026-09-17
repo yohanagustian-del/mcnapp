@@ -24,6 +24,8 @@ import { buildLiveNotes } from "./live-notes";
  */
 export interface ProjectReportLive {
   sessions: number;
+  /** Nomor sesi, hanya ketika report ini memang satu sesi (judul "— Sesi 1"). */
+  session_no: number | null;
   brands: string[];
   first_date: string | null;
   last_date: string | null;
@@ -54,6 +56,22 @@ export interface ProjectReportLive {
   gmv_trend_diff: number | null;
   timeline: { label: string; gmv: number; viewers: number | null }[];
   /**
+   * Apa yang laku, bukan cuma berapa — inti angle report KREATOR. Diambil dari
+   * baris file Product yang disimpan `project_live_session_products` (migrasi
+   * 0062); kosong untuk sesi yang di-upload sebelum tabel itu ada.
+   */
+  products: { name: string; gmv: number; items: number; clicks: number }[];
+  /** Jumlah produk di etalase sesi (semua baris file Product) & yang benar-benar terjual. */
+  products_total: number;
+  products_sold: number;
+  /** Produk dengan impresi terbanyak yang belum menghasilkan pesanan sama sekali. */
+  top_unsold: { name: string; impressions: number } | null;
+  /** Rata-rata item per pesanan — pembeda "jualan satuan" vs "jualan paket". */
+  items_per_order: number | null;
+  /** CTR produk seluruh peserta live project ini, sebagai pembanding yang adil. */
+  cohort_ctr: number | null;
+  cohort_creators: number;
+  /**
    * Catatan performa deterministik (live-notes.ts) — bukan narasi LLM, jadi
    * selalu ada walau ANTHROPIC_API_KEY tidak di-set dan boleh tampil di draft.
    */
@@ -69,7 +87,7 @@ export interface ProjectReportData {
     project_name: string;
     project_type: string;
   };
-  creator: { id: string; name: string; level: number | null; niche: string | null };
+  creator: { id: string; name: string; username: string | null; level: number | null; niche: string | null };
   target: { personal_gmv: number; project_gmv: number };
   metrics: {
     gmv: number; live_gmv: number; video_gmv: number; orders: number; items: number;
@@ -96,7 +114,7 @@ export async function buildProjectReportData(
   const [{ data: project }, { data: creator }, { data: participant }, { data: reportRow }, { data: dailyRows }, { data: productRows }] =
     await Promise.all([
       supabase.from("special_projects").select("id, name, type, start_date, end_date, target_gmv").eq("id", projectId).single(),
-      supabase.from("creators").select("id, name, level, niche").eq("id", creatorId).single(),
+      supabase.from("creators").select("id, name, username, level, niche").eq("id", creatorId).single(),
       supabase.from("project_participants").select("target_gmv").eq("project_id", projectId).eq("creator_id", creatorId).single(),
       supabase
         .from("project_creator_report_v")
@@ -137,7 +155,7 @@ export async function buildProjectReportData(
       type: "project", start: project.start_date, end: project.end_date,
       project_id: project.id, project_name: project.name, project_type: project.type,
     },
-    creator: { id: creator.id, name: creator.name, level: creator.level, niche: creator.niche },
+    creator: { id: creator.id, name: creator.name, username: creator.username ?? null, level: creator.level, niche: creator.niche },
     target: { personal_gmv: personalTarget, project_gmv: Number(project.target_gmv ?? 0) },
     metrics: {
       gmv, live_gmv: Number(r.live_gmv ?? 0), video_gmv: Number(r.video_gmv ?? 0),
@@ -191,11 +209,25 @@ async function buildLiveDetail(
   const sessions = sessionRows ?? [];
   if (sessions.length === 0) return null;
 
-  const { data: intervalRows } = await supabase
-    .from("project_live_intervals")
-    .select("session_id, time, gmv, viewers, likes, comments, shares, new_followers")
-    .in("session_id", sessions.map((s) => s.id))
-    .order("session_id").order("time");
+  const sessionIds = sessions.map((s) => s.id);
+  const [{ data: intervalRows }, { data: productRows }, { data: cohortRows }] = await Promise.all([
+    supabase
+      .from("project_live_intervals")
+      .select("session_id, time, gmv, viewers, likes, comments, shares, new_followers")
+      .in("session_id", sessionIds)
+      .order("session_id").order("time"),
+    supabase
+      .from("project_live_session_products")
+      .select("product_id, product_name, gmv, items, orders, product_impressions, product_clicks")
+      .in("session_id", sessionIds),
+    // Pembanding CTR: seluruh sesi live yang dihitung di project ini (R41), bukan
+    // hanya peserta ini — dipakai sebagai satu kalimat pembanding di catatan.
+    supabase
+      .from("project_live_sessions")
+      .select("creator_id, product_impressions, product_clicks")
+      .eq("project_id", projectId)
+      .in("attribution_status", ["verified", "confirmed_manual"]),
+  ]);
   const intervals = intervalRows ?? [];
 
   const gmv = sum(sessions, "gmv");
@@ -219,8 +251,38 @@ async function buildLiveDetail(
 
   const gmvTrend = sessions.some((s) => s.gmv_trend !== null) ? sum(sessions, "gmv_trend") : null;
 
+  // Satu produk bisa muncul di beberapa sesi — digabung per product_id dulu,
+  // supaya "produk terlaris" berarti sepanjang report, bukan per sesi.
+  const byProduct = new Map<
+    string,
+    { name: string; gmv: number; items: number; orders: number; impressions: number; clicks: number }
+  >();
+  for (const r of productRows ?? []) {
+    const key = String(r.product_id);
+    const acc = byProduct.get(key) ?? {
+      name: r.product_name ?? "—", gmv: 0, items: 0, orders: 0, impressions: 0, clicks: 0,
+    };
+    acc.name = r.product_name ?? acc.name;
+    acc.gmv += Number(r.gmv ?? 0);
+    acc.items += Number(r.items ?? 0);
+    acc.orders += Number(r.orders ?? 0);
+    acc.impressions += Number(r.product_impressions ?? 0);
+    acc.clicks += Number(r.product_clicks ?? 0);
+    byProduct.set(key, acc);
+  }
+  const allProducts = [...byProduct.values()];
+  const soldProducts = allProducts.filter((p) => p.items > 0 || p.gmv > 0);
+  const unsold = allProducts
+    .filter((p) => p.orders === 0 && p.impressions > 0)
+    .sort((a, b) => b.impressions - a.impressions)[0];
+
+  const cohortImpressions = sum(cohortRows ?? [], "product_impressions");
+  const cohortClicks = sum(cohortRows ?? [], "product_clicks");
+  const cohortCreators = new Set((cohortRows ?? []).map((r) => r.creator_id)).size;
+
   const live: ProjectReportLive = {
     sessions: sessions.length,
+    session_no: sessions.length === 1 ? Number(sessions[0].session_no) : null,
     brands: [...new Set(sessions.map((s) => s.brand).filter((b): b is string => Boolean(b)))],
     first_date: dates[0] ?? null,
     last_date: dates[dates.length - 1] ?? null,
@@ -246,6 +308,16 @@ async function buildLiveDetail(
     gpm: views > 0 ? (gmv / views) * 1000 : null,
     gmv_trend: gmvTrend,
     gmv_trend_diff: gmvTrend === null ? null : gmvTrend - gmv,
+    products: soldProducts
+      .sort((a, b) => b.gmv - a.gmv)
+      .slice(0, 5)
+      .map((p) => ({ name: p.name, gmv: p.gmv, items: p.items, clicks: p.clicks })),
+    products_total: allProducts.length,
+    products_sold: soldProducts.length,
+    top_unsold: unsold ? { name: unsold.name, impressions: unsold.impressions } : null,
+    items_per_order: orders > 0 ? sum(sessions, "items") / orders : null,
+    cohort_ctr: cohortImpressions > 0 ? cohortClicks / cohortImpressions : null,
+    cohort_creators: cohortCreators,
     timeline: intervals.map((i) => ({
       // One session reads as a clock; several days need the date to stay readable.
       label: singleDay ? String(i.time) : `${(sessionDate.get(i.session_id) ?? "").slice(5)} ${i.time}`,
