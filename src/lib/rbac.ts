@@ -99,7 +99,8 @@ export const NAV_ITEMS: NavItem[] = [
   // M10: Campaign & Ads Support portal — Management + Campaign Ops (lead) + ads_support (execute).
   { href: "/workspace/ads", label: "Ads Support (M10)", roles: [...MANAGEMENT_ROLES, ...ADS_ROLES], group: "Project & Campaign" },
   // M8 §2F: metrik approach external — External ✔, BizDev view, Management ✔.
-  { href: "/workspace/external", label: "External Workspace", roles: [...MANAGEMENT_ROLES, "bizdev_lead", "bizdev", "campaign_external"], group: "Project & Campaign" },
+  // Acquisition Lead ditambahkan agar bisa memantau pipeline scouting untuk kandidat binding (§2D.2).
+  { href: "/workspace/external", label: "External Workspace", roles: [...MANAGEMENT_ROLES, "bizdev_lead", "bizdev", "campaign_external", "acquisition_lead"], group: "Project & Campaign" },
 
   { href: "/workspace/acquisition", label: "Acquisition Workspace", roles: [...MANAGEMENT_ROLES, ...ACQUISITION_ROLES], group: "Akuisisi" },
 
