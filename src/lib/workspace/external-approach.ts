@@ -103,6 +103,8 @@ export interface ExternalApproachRow {
   id: number;
   creator_name: string;
   creator_id: string | null;
+  /** Nama pengisi data (team_members.name via approached_by), auto — bukan field form. */
+  approached_by_name: string | null;
   brand: string | null;
   niche: string | null;
   platform: string | null;

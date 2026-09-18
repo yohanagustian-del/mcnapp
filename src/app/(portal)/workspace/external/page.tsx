@@ -2,7 +2,7 @@ import Link from "next/link";
 import { requireMember, hasPermission } from "@/lib/rbac";
 import { createClient } from "@/lib/supabase/server";
 import type { ExternalApproachRow } from "@/lib/workspace/external-approach";
-import { ApproachCreateForm } from "./approach-create-form";
+import { ApproachCreateModal } from "./approach-create-modal";
 import { ApproachTable } from "./approach-table";
 import { ApproachScorecards } from "./approach-scorecards";
 
@@ -16,12 +16,15 @@ export default async function ExternalWorkspacePage() {
   const { data: approaches } = await supabase
     .from("external_approaches")
     .select(
-      "id, creator_name, creator_id, brand, niche, platform, followers, wa_contact, gmv, channel, approach_date, reachout_date, respon_date, follow_up_1_date, follow_up_2_date, follow_up_3_date, using_tap_date, prove_link, notes"
+      "id, creator_name, creator_id, brand, niche, platform, followers, wa_contact, gmv, channel, approach_date, reachout_date, respon_date, follow_up_1_date, follow_up_2_date, follow_up_3_date, using_tap_date, prove_link, notes, team_members(name)"
     )
     .order("id", { ascending: false })
     .limit(1000);
 
-  const rows = (approaches ?? []) as ExternalApproachRow[];
+  const rows: ExternalApproachRow[] = (approaches ?? []).map((a) => {
+    const { team_members, ...rest } = a as typeof a & { team_members: { name?: string } | null };
+    return { ...rest, approached_by_name: team_members?.name ?? null };
+  });
 
   return (
     <div className="space-y-8">
@@ -37,8 +40,10 @@ export default async function ExternalWorkspacePage() {
 
       {canRecord && (
         <section>
-          <h2 className="text-lg font-medium">Catat Approach</h2>
-          <ApproachCreateForm />
+          <h2 className="text-lg font-medium">Input Data</h2>
+          <div className="mt-3">
+            <ApproachCreateModal />
+          </div>
         </section>
       )}
 
