@@ -40,6 +40,7 @@ const COLUMNS: ColumnDef[] = [
   { key: "using_tap_date", label: "Using TAP", defaultVisible: true, get: (r) => r.using_tap_date },
   { key: "prove_link", label: "Prove", defaultVisible: false, get: (r) => r.prove_link, render: (r) => (r.prove_link ? <a href={r.prove_link} target="_blank" rel="noreferrer" className="underline">Link</a> : "—") },
   { key: "notes", label: "Notes", defaultVisible: false, get: (r) => r.notes },
+  { key: "approached_by_name", label: "Diinput oleh", defaultVisible: true, get: (r) => r.approached_by_name },
 ];
 
 const PAGE_SIZES = [10, 20, 50, 100] as const;
