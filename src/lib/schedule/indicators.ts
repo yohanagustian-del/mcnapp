@@ -14,6 +14,7 @@ export interface SlotFlags {
   isTentative: boolean;
   isOff: boolean;
   isDone: boolean;
+  isCancelled: boolean;
 }
 
 function isPending(slot: LiveScheduleSlot): boolean {
@@ -30,6 +31,7 @@ export function slotFlags(slot: LiveScheduleSlot, todayIso: string): SlotFlags {
     isTentative: slot.status === "tentative",
     isOff: slot.status === "off",
     isDone: slot.status === "done",
+    isCancelled: slot.status === "cancelled",
   };
 }
 

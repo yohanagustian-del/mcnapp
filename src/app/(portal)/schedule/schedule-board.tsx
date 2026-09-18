@@ -64,7 +64,11 @@ function SlotBlock({ slot, todayIso }: { slot: LiveScheduleSlot; todayIso: strin
       <div className="flex items-center justify-between gap-1">
         <span className="truncate font-medium text-slate-800">{label}</span>
         {flags.isDone && <span className="text-green-600">✓</span>}
+        {flags.isCancelled && <span className="text-red-600">✗</span>}
       </div>
+      {flags.isCancelled && slot.cancel_reason && (
+        <div className="text-red-600">Tidak jadi: {slot.cancel_reason}</div>
+      )}
       {time && <div className="text-slate-500">{time}</div>}
       <div className="mt-0.5 flex flex-wrap gap-1">
         {flags.pkMissing && (

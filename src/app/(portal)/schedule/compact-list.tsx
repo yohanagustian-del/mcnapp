@@ -228,6 +228,11 @@ export function CompactScheduleList({
                     <td className="px-3 py-2">
                       <div className="flex flex-wrap gap-1">
                         {flags.isDone && <span className="text-green-600">✓ done</span>}
+                        {flags.isCancelled && (
+                          <span className="text-red-600" title={r.slot.cancel_reason ?? ""}>
+                            ✗ tidak jadi
+                          </span>
+                        )}
                         {flags.isTentative && (
                           <span className="rounded border border-dashed border-amber-400 px-1 text-[10px] text-amber-700">
                             Tentatif

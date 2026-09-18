@@ -1,7 +1,7 @@
 // M13 live-schedule domain types. Row shapes are hand-declared (no generated supabase
 // types in this repo) to match the `live_schedule_slots` select (snake_case columns).
 
-export type SlotStatus = "scheduled" | "tentative" | "off" | "done";
+export type SlotStatus = "scheduled" | "tentative" | "off" | "done" | "cancelled";
 export type DealsBy = "bd" | "cm" | "creator";
 export type AdsPayer = "brand" | "mea" | "invoicing_mea" | "organik";
 
@@ -14,6 +14,8 @@ export interface LiveScheduleSlot {
   end_time: string | null;
   status: SlotStatus;
   off_reason: string | null;
+  /** Alasan bebas saat status='cancelled' (diisi di verifikasi). Beda dari off_reason (direncanakan sejak awal). */
+  cancel_reason: string | null;
   brand_name: string | null;
   deal_id: string | null;
   /**

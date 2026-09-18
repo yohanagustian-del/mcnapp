@@ -344,7 +344,7 @@ export async function updateSlotAction(formData: FormData): Promise<ScheduleActi
       .maybeSingle();
     if (befErr) throw new Error(`Gagal membaca slot: ${befErr.message}`);
     if (!before) throw new Error("Slot tidak ditemukan.");
-    if (before.status === "done") {
+    if (before.status === "done" || before.status === "cancelled") {
       throw new Error("Slot sudah diverifikasi — tidak dapat diubah.");
     }
 
@@ -414,7 +414,7 @@ export async function deleteSlotAction(formData: FormData): Promise<ScheduleActi
       .maybeSingle();
     if (befErr) throw new Error(`Gagal membaca slot: ${befErr.message}`);
     if (!before) throw new Error("Slot tidak ditemukan.");
-    if (before.status === "done") {
+    if (before.status === "done" || before.status === "cancelled") {
       throw new Error("Slot sudah diverifikasi — tidak dapat dihapus.");
     }
     await assertCreatorInScope(admin, member, before.creator_id);
@@ -507,6 +507,71 @@ export async function verifySlotAction(formData: FormData): Promise<ScheduleActi
     await writeAudit({
       actorId: member.id,
       action: "schedule.verify_slot",
+      entityType: "live_schedule_slots",
+      entityId: slotId,
+      before,
+      after,
+      type: "auto",
+    });
+
+    revalidateSchedule();
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "Terjadi kesalahan tidak terduga." };
+  }
+}
+
+/**
+ * Verify a past-or-today slot as NOT having gone live (found out at verification time,
+ * as opposed to a slot planned 'off' from the start). Same gate as verifySlotAction
+ * (schedule.verify, scheduled|tentative only, date <= today) but records a reason
+ * instead of actual times and sets status='cancelled' (locked from edit/delete, same
+ * as 'done').
+ */
+export async function cancelVerifiedSlotAction(formData: FormData): Promise<ScheduleActionResult> {
+  try {
+    const member = await requirePermission("schedule.verify");
+    const slotId = str(formData, "slot_id");
+    if (!slotId) throw new Error("ID slot wajib diisi.");
+
+    const cancelReason = str(formData, "cancel_reason");
+    if (!cancelReason) throw new Error("Alasan tidak jadi live wajib diisi.");
+
+    const admin = createAdminClient();
+    const { data: before, error: befErr } = await admin
+      .from("live_schedule_slots")
+      .select("*")
+      .eq("id", Number(slotId))
+      .maybeSingle();
+    if (befErr) throw new Error(`Gagal membaca slot: ${befErr.message}`);
+    if (!before) throw new Error("Slot tidak ditemukan.");
+    if (before.status !== "scheduled" && before.status !== "tentative") {
+      throw new Error("Hanya slot berstatus scheduled/tentative yang dapat diverifikasi.");
+    }
+    const todayIso = new Date().toISOString().slice(0, 10);
+    if (before.schedule_date > todayIso) {
+      throw new Error("Slot masa depan belum dapat diverifikasi.");
+    }
+    await assertCreatorInScope(admin, member, before.creator_id);
+
+    const { data: after, error } = await admin
+      .from("live_schedule_slots")
+      .update({
+        status: "cancelled",
+        cancel_reason: cancelReason,
+        verified_by: member.id,
+        verified_at: new Date().toISOString(),
+        updated_by: member.id,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", Number(slotId))
+      .select("*")
+      .single();
+    if (error) throw new Error(`Gagal memverifikasi slot: ${error.message}`);
+
+    await writeAudit({
+      actorId: member.id,
+      action: "schedule.cancel_verified_slot",
       entityType: "live_schedule_slots",
       entityId: slotId,
       before,

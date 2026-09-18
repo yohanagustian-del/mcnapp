@@ -1,7 +1,8 @@
 // Pure copy-week transform. Given the source week's slots, produce insert payloads for
 // the target week: same creator, same weekday offset, same times & deal/product fields,
-// but reset to a fresh unverified 'scheduled' state. OFF slots are skipped. The server
-// action (copyWeekAction) supplies created_by and does the actual insert. No supabase.
+// but reset to a fresh unverified 'scheduled' state. OFF and cancelled slots are skipped
+// (nothing to repeat). The server action (copyWeekAction) supplies created_by and does
+// the actual insert. No supabase.
 
 import type { LiveScheduleSlot, SlotInsert } from "./types";
 
@@ -35,7 +36,7 @@ export function buildCopiedSlots(
   const out: SlotInsert[] = [];
 
   for (const slot of sourceSlots) {
-    if (slot.status === "off") continue;
+    if (slot.status === "off" || slot.status === "cancelled") continue;
     const offsetDays = Math.round((parseIso(slot.schedule_date) - srcStart) / DAY_MS);
     if (offsetDays < 0 || offsetDays > 6) continue;
 

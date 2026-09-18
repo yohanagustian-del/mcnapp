@@ -11,6 +11,7 @@ function slot(partial: Partial<LiveScheduleSlot>): LiveScheduleSlot {
     end_time: "12:00",
     status: "scheduled",
     off_reason: null,
+    cancel_reason: null,
     brand_name: null,
     deal_id: null,
     shop_key: null,
