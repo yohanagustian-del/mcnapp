@@ -2,6 +2,43 @@
 
 Status per sesi 2026-07-09 (sesi 5, backlog-sweep + audit deploy). Baca ini + `CLAUDE.md` sebelum lanjut.
 
+## ⚡ SESI 2026-09-21 — Report Live Stream dari Jadwal Live + Report Kreator (M2) v2 — KODE SELESAI, MIGRASI BELUM DI-APPLY
+
+**Rencana yang disetujui user: `docs/PLAN_LIVE_REPORT_M2_V2.md`** (keputusan interview final di bagian bawahnya — jangan re-interview). Tutorial tim: `docs/TUTORIAL_JADWAL_LIVE_REPORT.md`.
+
+**Status verifikasi sesi ini**: `npx tsc --noEmit` 0 error · `npx vitest run` 996 lulus / 5 skip (dari 942 sebelum sesi ini) · `npx next build` sukses.
+
+### ⚠️ SATU-SATUNYA YANG TERSISA: apply migrasi `0066_live_report_schedule_and_report_v2.sql`
+**Belum di-apply ke remote mana pun.** Sampai di-apply, di produksi:
+- halaman `/schedule/live/[slotId]` gagal menyimpan sesi (kolom `schedule_slot_id` belum ada), dan
+- `generateReport` M2 mengembalikan pesan “Konfigurasi report belum ada di app_config … Migrasi 0066 belum di-apply?” (sengaja: tidak diam-diam memakai angka bawaan kode).
+
+Cara apply (keputusan user #4): **`apply_migration` saja, JANGAN `supabase db push`** (ledger drift — lihat sesi 2026-09-12 di bawah). Urutan: staging `fomlangoiiywhexwoqom` → verifikasi SQL → production `bqknstylbpwsnlgnzayw`. Verifikasi setelah apply:
+```sql
+select count(*) from project_live_sessions where schedule_slot_id is not null;
+select key from app_config where key in ('m2.report_rules','m2.live_benchmarks');
+select column_name from information_schema.columns
+ where table_name='creator_top_products' and column_name in ('live_gmv','ctr','shop_name');
+```
+Kolom baru `creator_top_products` baru TERISI pada upload mingguan berikutnya; report v2 tetap jalan untuk batch lama (bagian produk live/video menampilkan “belum tersedia untuk periode ini”, bukan nol).
+
+### A. Report live stream dari Jadwal Live (M13 ↔ M7)
+- **Satu tabel dua pemilik** (sekarang juga tertulis di CLAUDE.md #4): `project_live_sessions.project_id` XOR `schedule_slot_id`. Parser, V1–V7, penyimpanan, shaper, dan catatan deterministik dipakai apa adanya lewat `lib/m7/live-ingest.ts` + `report-data.shapeLive` (diekspor sesi ini karena M2 memakainya untuk membedah satu sesi).
+- Halaman baru: `schedule/live/[slotId]/page.tsx` (info slot, form upload, daftar sesi, Generate Report), `slot-live-upload-form.tsx`, `slot-session-panel.tsx`, `report/page.tsx` + `report/slot-finalize-form.tsx`.
+- Kalender `/schedule`: badge `📊 n sesi · Report draft/final` + link “Data & report live →” per slot (aturan kelayakan slot = `lib/schedule/live-report.ts`, dipakai server & klien). Link yang sama ada di form Edit Slot.
+- Guard: lihat = `schedule.view` (+ scope CPM di halaman), unggah/batal = `schedule.edit` + `assertCreatorInScope`, generate/finalisasi = `reports.generate`/`reports.finalize`. Semua mutasi → `audit_logs` (`schedule.live_session_upload|_void|report_generate|report_finalize`).
+
+### B. Report Kreator (M2) v2 — 100% rule-based, 0 token
+- `lib/report/types.ts` (kontrak `schema_version: 2` + `ReportEdits` + `applyReportEdits`), `live-analysis.ts` (statistik sesi: CVR/ERR/GPM/CTR/CTOR, bucket jam mulai, ranking), `rules.ts` (badge produk, insight box, rekomendasi, ringkasan, benchmark niche), `build.ts` (perakit + pengambil data).
+- **Bug audit yang diperbaiki**: (#1) report bulanan dulu hanya menghitung SATU minggu — sekarang `latestPerPeriod()` + `sumPeriodSummaries()` menjumlah semua minggu (baris terbaru per `period_start`); (#2) benchmark peer dulu selalu null karena dibaca dari `platform_metrics_raw` yang 0 baris — sekarang dari `creator_period_summary`; (#3) “Sumber GMV” yang selalu “—” diganti pecahan Live/Video/Direct; (#4) `/portal/reports` kini bisa dibuka (halaman `[id]` baru); (#5) dimensi produk live/video/CTR/CTOR tidak lagi dibuang saat ingest.
+- `reports/actions.ts`: `generateReport` TANPA LLM (`token_used = 0`, `insight_draft` = ringkasan rule-based) + `saveReportEdits` / `resetReportSection` (izin `reports.finalize`, hanya saat draft, audit `report.edit`). Gate `m2.delta_threshold` & ratchet token dibiarkan di kode untuk report lama.
+- `components/creator-report-view.tsx` (tab Ringkasan · Short Video · Live Performance · Analisa Live Terbaik · Produk Optimal, bar benchmark berjarum, donut kategori, mode Edit Report inline). `reports/[id]/page.tsx` jadi dispatcher: v2 → komponen baru, report lama → `legacy-report-view.tsx` (dipertahankan, jangan dikembangkan), project/slot → dialihkan ke halamannya.
+- **Seksi live M2 hanya membaca sesi milik Jadwal Live** (`schedule_slot_id is not null`) — sesi Special Project sengaja tidak ikut.
+- Kejujuran data: durasi per video & AWD tidak ada di export platform → disebut di “Catatan data”, tidak diperkirakan. Cakupan sesi (<90% GMV live platform) muncul sebagai insight, bukan didiamkan.
+
+### Belum diverifikasi di sesi ini (butuh akun/UI sungguhan, bukan hanya tes)
+QA manual di staging sesuai `docs/PLAN_LIVE_REPORT_M2_V2.md` bagian “Verifikasi end-to-end”: unggah sample Product+Trend ke sebuah slot → V1–V7 hijau → Simpan → Generate → Finalkan → buka sebagai kreator di `/portal/reports/[id]`; lalu unggah file yang SAMA ke sebuah project dan pastikan V4 menolak sambil menyebut slot pemegangnya. Juga: generate monthly untuk kreator dengan ≥2 minggu data dan pastikan GMV = jumlah minggu.
+
 ## ⚡ SESI 2026-09-12 — PX-M1 Creator Capability Registry (Product Exchange) + ⚠ peringatan drift ledger migrasi
 
 **⚠️ WAJIB BACA SEBELUM MENJALANKAN `supabase db push` DI REPO INI.** Ledger migrasi remote (`list_migrations`)

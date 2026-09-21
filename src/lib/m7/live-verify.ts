@@ -32,8 +32,15 @@ export interface LiveVerifyInput {
   /** Username parsed from the uploaded filename, lowercase. */
   filenameUsername: string;
   sessionDate: string; // ISO yyyy-mm-dd
+  /**
+   * Rentang tanggal yang diizinkan untuk sesi (V2). Untuk project = periode
+   * project; untuk slot Jadwal Live = tanggal slot ±1 hari (live yang mulai
+   * menjelang tengah malam diekspor TikTok dengan tanggal hari berikutnya).
+   */
   projectStartDate: string;
   projectEndDate: string;
+  /** Nama rentang di pesan V2 — default "periode project"; slot jadwal memakai "tanggal jadwal (±1 hari)". */
+  periodLabel?: string;
   sessionNo: number;
   /** This creator's other sessions in this project (the one being replaced, if any, excluded by the caller). */
   existingSessions: ExistingSession[];
@@ -47,7 +54,13 @@ export interface LiveVerifyInput {
    * diupload" and the team has no way to tell that cancelling that session is
    * exactly what unlocks the re-upload (temuan QA 2026-09-17).
    */
-  fileHashConflict?: { projectId: number; sessionDate: string; sessionNo: number } | null;
+  fileHashConflict?: {
+    projectId: number | null;
+    /** Sesi milik slot Jadwal Live (migrasi 0066) — bukan project. */
+    slotId?: number | null;
+    sessionDate: string;
+    sessionNo: number;
+  } | null;
   hasProductFile: boolean;
   hasTrendFile: boolean;
   gmvProduct: number | null;
@@ -90,13 +103,15 @@ export function verifyLiveSession(input: LiveVerifyInput): VerifyResult[] {
         }
   );
 
-  // V2: session date within project period (R6).
+  // V2: session date within the allowed range (R6 — project period, or the
+  // schedule slot's date window when the session belongs to a live-schedule slot).
+  const periodLabel = input.periodLabel ?? "periode project";
   results.push(
     input.sessionDate >= input.projectStartDate && input.sessionDate <= input.projectEndDate
-      ? { level: "ok", code: "V2", message: "Tanggal sesi dalam periode project." }
+      ? { level: "ok", code: "V2", message: `Tanggal sesi dalam ${periodLabel}.` }
       : {
           level: "block", code: "V2",
-          message: `Tanggal sesi (${input.sessionDate}) di luar periode project (${input.projectStartDate}–${input.projectEndDate}).`,
+          message: `Tanggal sesi (${input.sessionDate}) di luar ${periodLabel} (${input.projectStartDate}–${input.projectEndDate}).`,
         }
   );
 
@@ -122,7 +137,13 @@ export function verifyLiveSession(input: LiveVerifyInput): VerifyResult[] {
       ? {
           level: "block", code: "V4",
           message: conflict
-            ? `File ini sudah dipakai sesi aktif: project #${conflict.projectId}, ${conflict.sessionDate} sesi ${conflict.sessionNo}. ` +
+            ? `File ini sudah dipakai sesi aktif: ${
+                conflict.projectId !== null && conflict.projectId !== undefined
+                  ? `project #${conflict.projectId}`
+                  : conflict.slotId
+                    ? `Jadwal Live slot #${conflict.slotId}`
+                    : "sesi lain"
+              }, ${conflict.sessionDate} sesi ${conflict.sessionNo}. ` +
               `Batalkan sesi itu dulu kalau memang mau upload ulang file yang sama.`
             : "File ini sudah dipakai sesi aktif yang lain (project mana pun). Batalkan sesi itu dulu kalau memang mau upload ulang file yang sama.",
         }

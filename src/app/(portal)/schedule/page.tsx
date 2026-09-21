@@ -2,6 +2,7 @@ import { requireMember, hasPermission } from "@/lib/rbac";
 import { createClient } from "@/lib/supabase/server";
 import { getWeekStart, getWeekDays, formatDayLabel, prevWeek, nextWeek } from "@/lib/schedule/week";
 import { buildWeekMatrix } from "@/lib/schedule/matrix";
+import { summarizeSlotLive, type SlotLiveSummary } from "@/lib/schedule/live-report";
 import type { LiveScheduleSlot } from "@/lib/schedule/types";
 import { ScheduleBoard, type BoardWeekMatrix } from "./schedule-board";
 import { loadPicTapScheduleAlert } from "@/lib/schedule/pic-tap-alerts";
@@ -193,6 +194,28 @@ export default async function SchedulePage({
     ? await slotsQuery
     : { data: [] as LiveScheduleSlot[] };
 
+  // ===== Data & report live per slot (migrasi 0066) =====
+  // Badge "📊 2 sesi · Report final" di kalender. Diambil sekali untuk seluruh
+  // slot minggu ini (bukan per sel), lalu diringkas dengan aturan yang sama yang
+  // dipakai halaman slot — lib/schedule/live-report, bukan rumus kedua.
+  const weekSlotIds = ((weekSlots ?? []) as LiveScheduleSlot[]).map((s) => s.id);
+  let liveSummaries: SlotLiveSummary[] = [];
+  if (weekSlotIds.length > 0) {
+    const [{ data: liveSessionRows }, { data: slotReportRows }] = await Promise.all([
+      supabase
+        .from("project_live_sessions")
+        .select("schedule_slot_id, gmv, attribution_status")
+        .in("schedule_slot_id", weekSlotIds),
+      supabase
+        .from("creator_reports")
+        .select("schedule_slot_id, status")
+        .in("schedule_slot_id", weekSlotIds),
+    ]);
+    liveSummaries = [
+      ...summarizeSlotLive(liveSessionRows ?? [], slotReportRows ?? []).values(),
+    ];
+  }
+
   const matrixCreators = ((rosterCreators ?? []) as CreatorRow[]).map((c) => ({
     id: c.id,
     name: c.name,
@@ -298,6 +321,7 @@ export default async function SchedulePage({
             initialShops={shopOptions}
             todayIso={today}
             canEdit={canEdit}
+            liveSummaries={liveSummaries}
           />
         </section>
 

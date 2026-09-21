@@ -1,5 +1,8 @@
 "use client";
 
+import Link from "next/link";
+import { slotUploadEligibility } from "@/lib/schedule/live-report";
+
 import { useEffect, useRef, useState, useTransition } from "react";
 import type { LiveScheduleSlot, SlotStatus } from "@/lib/schedule/types";
 import { SHOP_PICKER_LIMIT } from "@/lib/deals/shop-search";
@@ -319,9 +322,18 @@ export function SlotForm({
         <h3 className="text-sm font-semibold text-slate-800">
           {isEdit ? "Edit Slot" : "Slot Baru"} — {creatorName} · {date}
         </h3>
-        <button type="button" onClick={onCancel} className="text-xs text-slate-400 hover:text-slate-600">
-          Tutup
-        </button>
+        <div className="flex items-center gap-3">
+          {/* Jalan masuk ke data & report live slot ini (migrasi 0066) — opsional,
+              hanya muncul untuk slot yang live-nya memang sudah/sedang berjalan. */}
+          {slot && slotUploadEligibility(slot, new Date().toISOString().slice(0, 10)).ok && (
+            <Link href={`/schedule/live/${slot.id}`} className="text-xs text-blue-700 hover:underline">
+              Data &amp; report live →
+            </Link>
+          )}
+          <button type="button" onClick={onCancel} className="text-xs text-slate-400 hover:text-slate-600">
+            Tutup
+          </button>
+        </div>
       </div>
 
       {locked && (

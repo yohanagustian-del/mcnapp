@@ -200,9 +200,24 @@ export interface TopProductRow {
   productId: string;
   productInfo: string | null;
   shopId: string;
+  shopName: string | null;
+  level1Category: string | null;
   level2Category: string | null;
   gmv: number;
   orders: number;
+  /**
+   * Dimensi produk untuk report M2 v2 (migrasi 0066): pecahan live/video,
+   * item, direct GMV, dan CTR/CTOR berbobot GMV. Semua berasal dari baris
+   * file MCN yang sama — sebelumnya dibuang saat ingest.
+   */
+  liveGmv: number;
+  videoGmv: number;
+  itemsSold: number;
+  liveOrders: number;
+  videoOrders: number;
+  directGmv: number;
+  ctr: number | null;
+  ctor: number | null;
 }
 
 /**
@@ -218,9 +233,20 @@ export function buildTopProducts(rows: McnRow[], topN: number): TopProductRow[] 
     productId: string;
     productInfo: string | null;
     shopId: string;
+    shopName: string | null;
+    level1Category: string | null;
     level2Category: string | null;
     gmv: number;
     orders: number;
+    liveGmv: number;
+    videoGmv: number;
+    itemsSold: number;
+    liveOrders: number;
+    videoOrders: number;
+    directGmv: number;
+    ctrWeighted: number; // sum(ctr * gmv) — bobot yang sama dengan buildPeriodSummary
+    ctorWeighted: number;
+    weightedGmv: number; // gmv baris yang punya ctr/ctor (penyebut rata-rata berbobot)
   }
   const byKey = new Map<string, Acc>();
 
@@ -234,15 +260,42 @@ export function buildTopProducts(rows: McnRow[], topN: number): TopProductRow[] 
       productId: r.productId,
       productInfo: r.productInfo,
       shopId: r.shopId,
+      shopName: r.shopName,
+      level1Category: r.level1Category,
       level2Category: r.level2Category,
       gmv: 0,
       orders: 0,
+      liveGmv: 0,
+      videoGmv: 0,
+      itemsSold: 0,
+      liveOrders: 0,
+      videoOrders: 0,
+      directGmv: 0,
+      ctrWeighted: 0,
+      ctorWeighted: 0,
+      weightedGmv: 0,
     };
     if (r.periodStart && (!acc.periodStart || r.periodStart < acc.periodStart)) acc.periodStart = r.periodStart;
     if (r.periodEnd && r.periodEnd > acc.periodEnd) acc.periodEnd = r.periodEnd;
     if (!acc.productInfo && r.productInfo) acc.productInfo = r.productInfo;
+    if (!acc.shopName && r.shopName) acc.shopName = r.shopName;
+    if (!acc.level1Category && r.level1Category) acc.level1Category = r.level1Category;
     acc.gmv += r.affiliateGmv;
     acc.orders += r.orders;
+    acc.liveGmv += r.affiliateLiveGmv;
+    acc.videoGmv += r.affiliateVideoGmv;
+    acc.itemsSold += r.itemsSold;
+    acc.liveOrders += r.liveOrders;
+    acc.videoOrders += r.videoOrders;
+    acc.directGmv += r.directGmv;
+    if (r.ctr !== null || r.ctor !== null) {
+      // Baris ber-GMV nol tetap dihitung dengan bobot minimal supaya produk yang
+      // hanya diklik (belum laku) tidak kehilangan CTR-nya sama sekali.
+      const w = r.affiliateGmv > 0 ? r.affiliateGmv : 1;
+      if (r.ctr !== null) acc.ctrWeighted += r.ctr * w;
+      if (r.ctor !== null) acc.ctorWeighted += r.ctor * w;
+      acc.weightedGmv += w;
+    }
     byKey.set(key, acc);
   }
 
@@ -265,9 +318,19 @@ export function buildTopProducts(rows: McnRow[], topN: number): TopProductRow[] 
         productId: acc.productId,
         productInfo: acc.productInfo,
         shopId: acc.shopId,
+        shopName: acc.shopName,
+        level1Category: acc.level1Category,
         level2Category: acc.level2Category,
         gmv: acc.gmv,
         orders: acc.orders,
+        liveGmv: acc.liveGmv,
+        videoGmv: acc.videoGmv,
+        itemsSold: acc.itemsSold,
+        liveOrders: acc.liveOrders,
+        videoOrders: acc.videoOrders,
+        directGmv: acc.directGmv,
+        ctr: acc.weightedGmv > 0 ? acc.ctrWeighted / acc.weightedGmv : null,
+        ctor: acc.weightedGmv > 0 ? acc.ctorWeighted / acc.weightedGmv : null,
       });
     });
   }

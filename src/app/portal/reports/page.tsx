@@ -1,9 +1,18 @@
+import Link from "next/link";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { requireCreator } from "@/lib/m9/creator-auth";
 import { weekStart, hasReportCredit, nextCreditDate } from "@/lib/m9/portal";
 import { generateSelfReport } from "../actions";
 
-/** §2.3 — CPM Final reports (surface, 0 token) + self-service credit (1/week, expires). */
+/** Label jenis report untuk kreator — bukan istilah internal. */
+const PERIOD_LABELS: Record<string, string> = {
+  weekly: "Report mingguan",
+  monthly: "Report bulanan",
+  project: "Report Special Project",
+  live_session: "Report live stream",
+};
+
+/** §2.3 — CPM Final reports (bisa DIBUKA, 0 token) + self-service credit (1/week, expires). */
 export default async function ReportsPage() {
   const { creatorId } = await requireCreator();
   const admin = createAdminClient();
@@ -45,7 +54,10 @@ export default async function ReportsPage() {
           <ul className="space-y-2">
             {(reports ?? []).map((r) => (
               <li key={r.id} className="rounded border border-slate-200 bg-white p-3 text-sm">
-                {r.period_type} · {r.period_start} · <span className="text-green-600">Final</span>
+                <Link href={`/portal/reports/${r.id}`} className="font-medium text-blue-700 hover:underline">
+                  {PERIOD_LABELS[r.period_type as string] ?? r.period_type} · {r.period_start}
+                </Link>{" "}
+                · <span className="text-green-600">Final</span>
               </li>
             ))}
           </ul>

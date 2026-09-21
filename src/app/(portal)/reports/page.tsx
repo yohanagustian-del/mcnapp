@@ -4,6 +4,25 @@ import { requireMember, hasPermission } from "@/lib/rbac";
 import { createClient } from "@/lib/supabase/server";
 import { GenerateReportForm } from "./generate-report-form";
 
+/** Label jenis report dalam Bahasa Indonesia (UI label ID, kode EN — CLAUDE.md). */
+const PERIOD_LABELS: Record<string, string> = {
+  weekly: "Mingguan",
+  monthly: "Bulanan",
+  project: "Special Project",
+  live_session: "Live stream (jadwal)",
+};
+
+/**
+ * Report project & report slot Jadwal Live punya halamannya sendiri (bentuk
+ * data_json-nya ProjectReportData, bukan report periode kreator) — tautkan
+ * langsung ke sana, bukan lewat redirect.
+ */
+function reportHref(r: { id: number; period_type: string; creator_id: string; project_id: number | null; schedule_slot_id: number | null }): string {
+  if (r.period_type === "project" && r.project_id) return `/projects/${r.project_id}/report/${r.creator_id}`;
+  if (r.period_type === "live_session" && r.schedule_slot_id) return `/schedule/live/${r.schedule_slot_id}/report`;
+  return `/reports/${r.id}`;
+}
+
 export default async function ReportsPage() {
   const member = await requireMember();
   if (!hasPermission("reports.generate", member.role)) redirect("/dashboard");
@@ -18,7 +37,7 @@ export default async function ReportsPage() {
     creatorsQuery,
     supabase
       .from("creator_reports")
-      .select("id, creator_id, period_type, period_start, status, token_used, generated_at, creators(name)")
+      .select("id, creator_id, period_type, period_start, status, token_used, generated_at, project_id, schedule_slot_id, creators(name)")
       .order("generated_at", { ascending: false })
       .limit(50),
     supabase.from("token_baseline").select("report_type, best_token, updated_at"),
@@ -28,8 +47,9 @@ export default async function ReportsPage() {
     <div>
       <h1 className="text-2xl font-semibold">Report Kreator (M2)</h1>
       <p className="mt-1 text-sm text-slate-500">
-        Pipeline hybrid: agregasi deterministik → gate skip-LLM → insight naratif (1 call, token
-        tercatat). Draft direview lalu difinalisasi (human-in-the-loop).
+        Report v2: seluruh angka, insight, dan rekomendasi dihasilkan dari aturan deterministik —
+        <strong> 0 token AI</strong>. Tim bisa menyunting teksnya (&ldquo;Edit Report&rdquo;) sebelum
+        difinalisasi (human-in-the-loop).
       </p>
 
       <div className="mt-6">
@@ -38,7 +58,7 @@ export default async function ReportsPage() {
 
       {(baselines ?? []).length > 0 && (
         <p className="mt-4 text-xs text-slate-500">
-          Token baseline (ratchet):{" "}
+          Token baseline (ratchet, hanya berlaku untuk report lama yang masih memakai LLM):{" "}
           {(baselines ?? []).map((b) => `${b.report_type} = ${b.best_token} token`).join(" · ")}
         </p>
       )}
@@ -60,12 +80,12 @@ export default async function ReportsPage() {
             {(reports ?? []).map((r) => (
               <tr key={r.id}>
                 <td className="px-4 py-2">
-                  <Link href={`/reports/${r.id}`} className="font-medium text-slate-900 underline">#{r.id}</Link>
+                  <Link href={reportHref(r)} className="font-medium text-slate-900 underline">#{r.id}</Link>
                 </td>
                 <td className="px-4 py-2">
                   {(r.creators as unknown as { name: string } | null)?.name ?? r.creator_id}
                 </td>
-                <td className="px-4 py-2">{r.period_type}</td>
+                <td className="px-4 py-2">{PERIOD_LABELS[r.period_type] ?? r.period_type}</td>
                 <td className="px-4 py-2">{r.period_start}</td>
                 <td className="px-4 py-2">
                   <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${r.status === "final" ? "bg-green-100 text-green-800" : "bg-amber-100 text-amber-800"}`}>

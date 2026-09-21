@@ -7,6 +7,7 @@ import { writeAudit } from "@/lib/audit";
 import { genId } from "@/lib/utils/id";
 import { buildCopiedSlots } from "@/lib/schedule/copy-week";
 import { searchShopSummary } from "@/lib/deals/shop-search";
+import { assertCreatorInScope } from "@/lib/schedule/scope";
 import type {
   AdsPayer,
   DealsBy,
@@ -159,28 +160,6 @@ function parseSlotFields(fd: FormData): SlotFields {
     product_connected_tap: bool(fd, "product_connected_tap"),
     fokus_produk: str(fd, "fokus_produk"),
   };
-}
-
-/**
- * Scope guard: a `cpm` may only touch slots of creators they own
- * (creators.owner_cpm_id = member.id). Every other permitted role has full scope.
- * Throws (Bahasa Indonesia) on violation. Reused by create/update/delete/verify.
- */
-async function assertCreatorInScope(
-  admin: ReturnType<typeof createAdminClient>,
-  member: TeamMember,
-  creatorId: string
-): Promise<void> {
-  const { data, error } = await admin
-    .from("creators")
-    .select("id, live_roster, owner_cpm_id")
-    .eq("id", creatorId)
-    .maybeSingle();
-  if (error) throw new Error(`Gagal memeriksa kreator: ${error.message}`);
-  if (!data) throw new Error("Kreator tidak ditemukan.");
-  if (member.role === "cpm" && data.owner_cpm_id !== member.id) {
-    throw new Error("Akses ditolak: CPM hanya boleh mengubah jadwal kreator yang dipegangnya.");
-  }
 }
 
 /**

@@ -20,7 +20,7 @@
  * supaya tidak membohongi pembacanya. 0 token (CLAUDE.md #1).
  */
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { buildProjectReportData } from "./report-data";
+import { buildProjectReportData, buildSlotLiveReportData } from "./report-data";
 
 export async function refreshCreatorReportData(
   supabase: SupabaseClient,
@@ -62,6 +62,42 @@ export async function refreshCreatorReportDataSafe(
 ): Promise<number> {
   try {
     return await refreshCreatorReportData(supabase, projectId, creatorId);
+  } catch {
+    return 0;
+  }
+}
+
+/**
+ * Padanan untuk report live stream slot Jadwal Live (migrasi 0066): angka
+ * report yang sudah terbit untuk slot itu ditulis ulang setelah sesi diupload
+ * atau dibatalkan. Aturannya sama persis dengan versi project di atas —
+ * angka mengikuti data, narasi tetap milik tim, tidak pernah membuat report baru.
+ */
+export async function refreshSlotReportData(supabase: SupabaseClient, slotId: number): Promise<number> {
+  const { data: rows } = await supabase
+    .from("creator_reports")
+    .select("id")
+    .eq("schedule_slot_id", slotId)
+    .in("status", ["draft", "final"]);
+  const reports = rows ?? [];
+  if (reports.length === 0) return 0;
+
+  const dataJson = await buildSlotLiveReportData(supabase, slotId);
+  const generatedAt = new Date().toISOString();
+  let refreshed = 0;
+  for (const r of reports) {
+    const { error } = await supabase
+      .from("creator_reports")
+      .update({ data_json: dataJson, generated_at: generatedAt })
+      .eq("id", r.id);
+    if (!error) refreshed++;
+  }
+  return refreshed;
+}
+
+export async function refreshSlotReportDataSafe(supabase: SupabaseClient, slotId: number): Promise<number> {
+  try {
+    return await refreshSlotReportData(supabase, slotId);
   } catch {
     return 0;
   }
