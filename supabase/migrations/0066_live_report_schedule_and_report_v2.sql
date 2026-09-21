@@ -89,7 +89,7 @@ create index idx_creator_reports_creator_period on creator_reports (creator_id, 
 -- saat status = final. Bentuk: lib/report/types.ts `ReportEdits`.
 alter table creator_reports add column edits_json jsonb;
 comment on column creator_reports.edits_json is
-  'Override teks report oleh tim (izin reports.finalize) per bagian: {summary, insights: {key: {title, text}}, recommendations: {key: [..]}}. Null = seluruhnya otomatis (rule-based). Hanya bisa diubah saat draft.';
+  'Override teks report oleh tim (izin reports.finalize) per bagian: {summary: text, insights: {<key>: {title, text}}, recommendations: {<key>: text}} — kunci = key stabil dari lib/report/rules.ts. Null/kosong = seluruhnya otomatis (rule-based). Hanya bisa diubah saat draft.';
 
 comment on column creator_reports.schedule_slot_id is
   'Terisi untuk report live stream dari Jadwal Live (period_type = live_session). RLS reports_creator_selfonly (0011) sudah mencakup: kreator hanya melihat report final miliknya.';

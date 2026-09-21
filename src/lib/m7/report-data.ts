@@ -302,8 +302,12 @@ type LiveRow = Record<string, unknown>;
  * Murni, tanpa I/O — inilah yang membuat gabungan dan tiap harinya dihitung
  * dengan definisi yang PERSIS SAMA (CLAUDE.md #4: satu sumber kebenaran, bukan
  * dua rumus yang kebetulan mirip).
+ *
+ * Diekspor karena Report Kreator (M2) v2 memakainya untuk membedah satu sesi
+ * (lib/report/build.ts) — termasuk catatan deterministik `buildLiveNotes` yang
+ * ikut terbentuk di sini. Tanpa itu, M2 akan menulis rumus keduanya sendiri.
  */
-function shapeLive(
+export function shapeLive(
   sessions: LiveRow[],
   intervals: LiveRow[],
   productRows: LiveRow[],

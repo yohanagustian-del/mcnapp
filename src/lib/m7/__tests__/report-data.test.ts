@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { buildProjectReportData } from "../report-data";
+import { buildProjectReportData, buildSlotLiveReportData } from "../report-data";
 
 type MockResult = { data?: unknown };
 
@@ -248,5 +248,71 @@ describe("buildProjectReportData", () => {
       project_participants: { data: null },
     });
     await expect(buildProjectReportData(sb, 9, "CRT-001")).rejects.toThrow(/bukan peserta/);
+  });
+});
+
+/**
+ * Report live stream satu slot Jadwal Live (migrasi 0066). Bentuknya
+ * `ProjectReportData` yang SAMA — yang diuji di sini justru itu: tidak ada tipe
+ * atau rumus kedua, hanya konteks pemilik yang berbeda.
+ */
+describe("buildSlotLiveReportData", () => {
+  const SLOT = {
+    id: 77, creator_id: "CRT-001", schedule_date: "2026-09-17",
+    start_time: "09:00:00", end_time: "11:00:00",
+    actual_start: "08:54:00", actual_end: "10:54:00",
+    brand_name: "OMG Oh My Glam", status: "done",
+  };
+  const SESSION = {
+    id: 1, session_date: "2026-09-17", session_no: 1, brand: "OMG Oh My Glam",
+    start_time: "08:54:00", end_time: "10:54:00", duration_min: 120,
+    gmv: 338_887, gmv_trend: 338_887, orders: 10, items: 11, customers: 10,
+    views: 908, viewers_peak: 9, impressions_live: 15_051,
+    product_impressions: 2_763, product_clicks: 149, add_to_cart: 7,
+  };
+
+  const sb = (sessions: Record<string, unknown>[]) =>
+    mockSupabase({
+      live_schedule_slots: { data: SLOT },
+      creators: { data: CREATOR },
+      project_live_sessions: { data: sessions },
+      project_live_intervals: { data: [{ session_id: 1, time: "09:24", gmv: 131_821, viewers: 6, likes: 1, comments: 0, shares: 0, new_followers: 0 }] },
+      project_live_session_products: { data: [{ product_id: "P1", product_name: "Mattelast Lip Cream", gmv: 208_857, items: 7, orders: 6, product_impressions: 900, product_clicks: 84 }] },
+    });
+
+  it("memakai kontrak ProjectReportData dengan period.type live_slot dan identitas slot", async () => {
+    const result = await buildSlotLiveReportData(sb([SESSION]), 77);
+    expect(result.period.type).toBe("live_slot");
+    expect(result.period.project_id).toBeNull();
+    expect(result.period.project_name).toBe("OMG Oh My Glam");
+    expect(result.slot).toEqual({
+      id: 77, schedule_date: "2026-09-17", brand_name: "OMG Oh My Glam",
+      planned_start: "09:00", planned_end: "11:00",
+      actual_start: "08:54", actual_end: "10:54", status: "done",
+    });
+    expect(result.creator.id).toBe("CRT-001");
+  });
+
+  it("angka diambil dari sesi slot, dan kolom khas project diisi netral", async () => {
+    const result = await buildSlotLiveReportData(sb([SESSION]), 77);
+    expect(result.metrics.gmv).toBe(338_887);
+    expect(result.metrics.live_gmv).toBe(338_887);
+    expect(result.metrics.video_gmv).toBe(0);
+    expect(result.metrics.live_share).toBe(1);
+    expect(result.live?.sessions).toBe(1);
+    // Slot berdiri sendiri: tidak ada target pribadi, peringkat, maupun kohort.
+    expect(result.target).toEqual({ personal_gmv: 0, project_gmv: 0 });
+    expect(result.achievement.rank).toBe(1);
+    expect(result.achievement.of).toBe(1);
+    expect(result.cohort_avg).toEqual({ gmv: 0, live_share: 0, active_days: 0 });
+    expect(result.live?.cohort_ctr).toBeNull();
+  });
+
+  it("slot tanpa sesi yang dihitung: report tetap terbentuk dengan angka nol, tanpa blok live", async () => {
+    const result = await buildSlotLiveReportData(sb([]), 77);
+    expect(result.live).toBeUndefined();
+    expect(result.metrics.gmv).toBe(0);
+    expect(result.period.start).toBe("2026-09-17");
+    expect(result.daily).toEqual([]);
   });
 });

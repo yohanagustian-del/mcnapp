@@ -1,7 +1,9 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import { creatorDayEmpty, slotFlags } from "@/lib/schedule/indicators";
+import { slotLiveBadgeLabel, slotUploadEligibility, type SlotLiveSummary } from "@/lib/schedule/live-report";
 import { formatDayLabel } from "@/lib/schedule/week";
 import type { LiveScheduleSlot } from "@/lib/schedule/types";
 import { SlotForm, type ShopDealOption, type RosterCreatorOption } from "./slot-form";
@@ -43,7 +45,15 @@ export interface BoardWeekMatrix {
   rows: { creator: BoardCreator; cells: LiveScheduleSlot[][] }[];
 }
 
-function SlotBlock({ slot, todayIso }: { slot: LiveScheduleSlot; todayIso: string }) {
+function SlotBlock({
+  slot, todayIso, liveSummary,
+}: {
+  slot: LiveScheduleSlot;
+  todayIso: string;
+  /** Ringkasan data & report live slot ini (migrasi 0066); undefined = belum ada apa-apa. */
+  liveSummary: SlotLiveSummary | undefined;
+}) {
+  const liveBadge = slotLiveBadgeLabel(liveSummary);
   const flags = slotFlags(slot, todayIso);
   const label = flags.isOff
     ? `OFF${slot.off_reason ? ` — ${slot.off_reason}` : ""}`
@@ -85,6 +95,9 @@ function SlotBlock({ slot, todayIso }: { slot: LiveScheduleSlot; todayIso: strin
         {flags.needsVerification && (
           <span className="rounded bg-red-100 px-1 text-[10px] text-red-700">Belum verifikasi</span>
         )}
+        {liveBadge && (
+          <span className="rounded bg-emerald-100 px-1 text-[10px] text-emerald-700">📊 {liveBadge}</span>
+        )}
       </div>
     </div>
   );
@@ -96,16 +109,23 @@ export function ScheduleBoard({
   initialShops,
   todayIso,
   canEdit,
+  liveSummaries = [],
 }: {
   matrix: BoardWeekMatrix;
   creators: RosterCreatorOption[];
   initialShops: ShopDealOption[];
   todayIso: string;
   canEdit: boolean;
+  /** Data & report live per slot minggu ini (migrasi 0066) — array, bukan Map, supaya bisa dikirim server → klien. */
+  liveSummaries?: SlotLiveSummary[];
 }) {
   const [selected, setSelected] = useState<Selected | null>(null);
   const [page, setPage] = useState(1);
   const { matches, isActive: filterActive } = useCreatorFilter();
+  const liveBySlot = useMemo(
+    () => new Map(liveSummaries.map((s) => [s.slotId, s])),
+    [liveSummaries]
+  );
 
   const filteredRows = useMemo(
     () => matrix.rows.filter((row) => matches(row.creator.name, row.creator.owner_cpm_id, row.creator.jenis_creator)),
@@ -203,16 +223,31 @@ export function ScheduleBoard({
                   return (
                     <td key={d} className={`min-w-[160px] px-2 py-2 align-top ${d === todayIso ? "bg-indigo-50/40" : ""}`}>
                       <div className="space-y-1">
-                        {cell.map((slot) => (
-                          <button
-                            key={slot.id}
-                            type="button"
-                            className="block w-full text-left"
-                            onClick={() => canEdit && setSelected({ slot, creatorId: row.creator.id, date: d })}
-                          >
-                            <SlotBlock slot={slot} todayIso={todayIso} />
-                          </button>
-                        ))}
+                        {cell.map((slot) => {
+                          // Link "Data & report live" hanya untuk slot yang memang
+                          // bisa punya data (bukan OFF/batal, tanggal sudah lewat) —
+                          // aturannya satu dengan server (lib/schedule/live-report).
+                          const canOpenLive = slotUploadEligibility(slot, todayIso).ok;
+                          return (
+                            <div key={slot.id}>
+                              <button
+                                type="button"
+                                className="block w-full text-left"
+                                onClick={() => canEdit && setSelected({ slot, creatorId: row.creator.id, date: d })}
+                              >
+                                <SlotBlock slot={slot} todayIso={todayIso} liveSummary={liveBySlot.get(slot.id)} />
+                              </button>
+                              {canOpenLive && (
+                                <Link
+                                  href={`/schedule/live/${slot.id}`}
+                                  className="mt-0.5 block text-[10px] text-blue-700 hover:underline"
+                                >
+                                  Data &amp; report live →
+                                </Link>
+                              )}
+                            </div>
+                          );
+                        })}
                         {emptyTomorrow && (
                           <p className="rounded-md bg-red-50 px-1.5 py-1 text-[10px] text-red-600">
                             Besok belum ada jadwal

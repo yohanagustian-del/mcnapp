@@ -33,6 +33,17 @@ Platform internal MCN MEA (agency creator TikTok/Shopee). Menggabungkan tools te
 ### 4. Satu sumber kebenaran (jangan duplikasi logic)
 - Report → M2. Link status & lead → M4. Proyeksi GMV → `projectGmv()` shared (M5+M6).
 - M8 workspace & M3 OKR MENG-AGREGASI/BACA sumber ini, TIDAK menghitung ulang.
+- **Sesi live = SATU tabel dua pemilik** (`project_live_sessions`, migrasi 0066): pemiliknya
+  `project_id` (Special Project M7) ATAU `schedule_slot_id` (slot Jadwal Live M13) — tepat satu
+  terisi (`ck_live_session_owner`). Parser, verifikasi V1–V7, penyimpanan, shaper report
+  (`lib/m7/live-ingest.ts`, `live-verify.ts`, `report-data.shapeLive`), dan catatan deterministik
+  (`live-notes.ts`) DIPAKAI APA ADANYA untuk kedua pemilik; yang berbeda hanya konteks pemilik
+  (parameter `LiveSessionOwner`), bukan salinan kode. Jangan pernah bikin tabel/parser/report
+  kedua untuk sesi live.
+- **Report Kreator (M2) v2 = 0 LLM.** Angka dari `lib/report/build.ts`, SEMUA kalimat (ringkasan,
+  insight box, badge produk, rekomendasi) dari `lib/report/rules.ts` + ambang `app_config`
+  (`m2.report_rules`, `m2.live_benchmarks`). `token_used` selalu 0. Tim hanya boleh menyunting
+  TEKS (`creator_reports.edits_json`); angka tidak pernah bisa disunting.
 
 ### 5. M4 data = AGREGAT per produk (BUKAN per-transaksi) — penting
 - Data platform TikTok = agregat per (product_id, shop_id, period). Tidak ada txn_ref/per-row transaksi.
@@ -42,6 +53,10 @@ Platform internal MCN MEA (agency creator TikTok/Shopee). Menggabungkan tools te
 - File 1 creator: tanpa kolom creator (creator dari konteks upload). File multi-creator: ada kolom creator_name → resolve ke creator_id saat ingest.
 - `deal_end` TIDAK ada di master shop platform → diisi dari BizDev/kontrak. Alert kadaluarsa hanya untuk shop yang punya deal_end.
 - %live tersedia langsung: affiliate_live_gmv vs affiliate_video_gmv.
+- Sejak 0066 `creator_top_products` ikut menyimpan dimensi per produk yang selama ini dibuang saat
+  ingest (live/video GMV & order, items_sold, direct_gmv, CTR/CTOR berbobot GMV, shop_name,
+  level1_category) — itulah yang membuat report "produk terbaik untuk LIVE vs VIDEO" mungkin.
+  Baris batch LAMA tetap nol/null: report HARUS bilang datanya belum ada, bukan menampilkan nol.
 
 ### 6. Deal Registration Form (M8/BizDev) — cegah data kotor
 - Master deal internal lama = berantakan (alasan platform ini dibuat). Deal BARU wajib lewat FORM tervalidasi, bukan free-text sheet.
