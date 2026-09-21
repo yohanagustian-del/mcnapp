@@ -109,13 +109,20 @@ export function ProjectReportView({
       : data.top_products.map((p) => ({ name: p.name, gmv: p.gmv, items: p.items, clicks: null }));
   const maxProductGmv = Math.max(...products.map((p) => p.gmv), 1);
 
+  const isSlot = data.period.type === "live_slot";
   const judul =
-    `MCN MEA · Special Project · ${data.period.project_name}` +
+    (isSlot
+      ? `MCN MEA · Live Stream Report · ${data.period.project_name}`
+      : `MCN MEA · Special Project · ${data.period.project_name}`) +
     (live?.session_no !== null && live?.session_no !== undefined ? ` — Sesi ${live.session_no}` : "");
   const handle = data.creator.username ? `@${data.creator.username}` : data.creator.name;
 
   const meta = live
     ? [
+        // Jadwal yang direncanakan vs yang terjadi — hanya untuk report slot.
+        isSlot && data.slot?.planned_start && data.slot?.planned_end
+          ? `Jadwal ${data.slot.planned_start}–${data.slot.planned_end}`
+          : null,
         live.brands.length > 0 ? `Brand ${live.brands.join(", ")}` : null,
         live.first_date === live.last_date
           ? tanggal(live.first_date)
@@ -124,7 +131,9 @@ export function ProjectReportView({
         live.duration_min > 0 ? durasi(live.duration_min) : null,
         live.sessions > 1 ? `${live.sessions} sesi live` : null,
       ].filter(Boolean).join(" · ")
-    : `${tanggal(data.period.start)} – ${tanggal(data.period.end)}`;
+    : isSlot
+      ? `${tanggal(data.slot?.schedule_date ?? data.period.start)} · belum ada data sesi yang dihitung`
+      : `${tanggal(data.period.start)} – ${tanggal(data.period.end)}`;
 
   return (
     <div className="mx-auto max-w-3xl">
@@ -348,7 +357,7 @@ export function ProjectReportView({
         )}
 
         {/* ===== Posisi di project (PRD §6.8) — bahan rapat tim, BUKAN angle kreator ===== */}
-        {audience === "team" && dayIndex === null && (
+        {audience === "team" && dayIndex === null && !isSlot && (
           <>
             <h2 className="mt-6 text-[15px] font-bold">
               Posisi di project
@@ -370,7 +379,9 @@ export function ProjectReportView({
               angka file Product sebagai sumber GMV; timeline memakai Trend Stats.
             </p>
           )}
-          <p className="mt-1">Data: upload tim MCN MEA · #meabikinumkmjadiraja</p>
+          <p className="mt-1">
+            Data: {isSlot ? "export TikTok LIVE Center (Product + Trend Stats) yang diunggah tim MCN MEA dari Jadwal Live" : "upload tim MCN MEA"} · #meabikinumkmjadiraja
+          </p>
         </div>
       </div>
     </div>

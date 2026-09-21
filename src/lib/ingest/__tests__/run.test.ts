@@ -63,8 +63,10 @@ const subcat: SubcatSegmentRow[] = [
 const top: TopProductRow[] = [
   {
     creatorId: "CRT-001", periodStart: "2026-06-28", periodEnd: "2026-07-04",
-    rank: 1, productId: "P1", productInfo: "Produk A", shopId: "S1",
-    level2Category: "Drinks", gmv: 1_000_000, orders: 8,
+    rank: 1, productId: "P1", productInfo: "Produk A", shopId: "S1", shopName: "Toko A",
+    level1Category: "F&B", level2Category: "Drinks", gmv: 1_000_000, orders: 8,
+    liveGmv: 600_000, videoGmv: 400_000, itemsSold: 10, liveOrders: 5, videoOrders: 3,
+    directGmv: 0, ctr: 0.05, ctor: 0.02,
   },
 ];
 

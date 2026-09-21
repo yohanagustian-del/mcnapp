@@ -86,6 +86,24 @@ describe("verifyLiveSession", () => {
     expect(codeOf(results, "V4").message).toContain("Batalkan sesi itu dulu");
   });
 
+  it("V4 menyebut slot Jadwal Live saat file dipegang sesi milik jadwal (0066)", () => {
+    const results = verifyLiveSession({
+      ...baseInput,
+      fileHashExists: true,
+      fileHashConflict: { projectId: null, slotId: 42, sessionDate: "2026-09-17", sessionNo: 1 },
+    });
+    expect(codeOf(results, "V4").message).toContain("Jadwal Live slot #42");
+  });
+
+  it("V2 memakai label rentang pemilik (slot jadwal ±1 hari)", () => {
+    const results = verifyLiveSession({
+      ...baseInput, sessionDate: "2026-09-08",
+      projectStartDate: "2026-09-04", projectEndDate: "2026-09-06", periodLabel: "tanggal jadwal (±1 hari)",
+    });
+    expect(codeOf(results, "V2").level).toBe("block");
+    expect(codeOf(results, "V2").message).toContain("tanggal jadwal (±1 hari)");
+  });
+
   it("V4 tetap memblokir walau sesi pemegangnya tidak diketahui", () => {
     const results = verifyLiveSession({ ...baseInput, fileHashExists: true });
     expect(codeOf(results, "V4").level).toBe("block");

@@ -80,12 +80,29 @@ export interface ProjectReportLive {
 
 export interface ProjectReportData {
   period: {
-    type: "project";
+    /**
+     * `project` = report peserta Special Project. `live_slot` = report live
+     * stream satu slot Jadwal Live (migrasi 0066) — bentuk datanya SAMA supaya
+     * satu komponen (ProjectReportView) merender keduanya; `project_id` null
+     * dan `project_name` berisi brand/judul slot.
+     */
+    type: "project" | "live_slot";
     start: string;
     end: string;
-    project_id: number;
+    project_id: number | null;
     project_name: string;
     project_type: string;
+  };
+  /** Hanya untuk `period.type = live_slot`: identitas slot jadwal yang direport. */
+  slot?: {
+    id: number;
+    schedule_date: string;
+    brand_name: string | null;
+    planned_start: string | null;
+    planned_end: string | null;
+    actual_start: string | null;
+    actual_end: string | null;
+    status: string;
   };
   creator: { id: string; name: string; username: string | null; level: number | null; niche: string | null };
   target: { personal_gmv: number; project_gmv: number };
@@ -142,7 +159,7 @@ export async function buildProjectReportData(
   if (!creator) throw new Error("Kreator tidak ditemukan");
   if (!participant) throw new Error("Kreator ini bukan peserta project");
 
-  const liveDetail = await buildLiveDetail(supabase, projectId, creatorId);
+  const liveDetail = await buildLiveDetail(supabase, { projectId, creatorId });
   const live = liveDetail?.live ?? null;
 
   // R29: peserta gmv=0 (belum pernah punya baris di project_creator_metrics,
@@ -205,19 +222,30 @@ const sum = (rows: Record<string, unknown>[], key: string): number =>
  * lalu dibentuk berkali-kali di memori — memecah per hari lewat query terpisah
  * akan menjadi N+1 untuk project yang berjalan seminggu.
  */
+/**
+ * Lingkup sesi yang dibaca: peserta di satu project (kohort = project itu),
+ * atau satu slot Jadwal Live (tanpa kohort — slot berdiri sendiri).
+ */
+export type LiveDetailScope =
+  | { projectId: number; creatorId: string }
+  | { slotId: number };
+
+const SESSION_COLUMNS =
+  "id, session_date, session_no, brand, start_time, end_time, duration_min, gmv, gmv_trend, orders, items, customers, views, viewers_peak, impressions_live, product_impressions, product_clicks, add_to_cart";
+
 async function buildLiveDetail(
   supabase: SupabaseClient,
-  projectId: number,
-  creatorId: string
+  scope: LiveDetailScope
 ): Promise<{ live: ProjectReportLive; days: ProjectReportLive[] } | null> {
-  const { data: sessionRows } = await supabase
+  let sessionQuery = supabase
     .from("project_live_sessions")
-    .select(
-      "id, session_date, session_no, brand, start_time, end_time, duration_min, gmv, gmv_trend, orders, items, customers, views, viewers_peak, impressions_live, product_impressions, product_clicks, add_to_cart"
-    )
-    .eq("project_id", projectId).eq("creator_id", creatorId)
-    .in("attribution_status", ["verified", "confirmed_manual"])
-    .order("session_date").order("session_no");
+    .select(SESSION_COLUMNS)
+    .in("attribution_status", ["verified", "confirmed_manual"]);
+  sessionQuery =
+    "slotId" in scope
+      ? sessionQuery.eq("schedule_slot_id", scope.slotId)
+      : sessionQuery.eq("project_id", scope.projectId).eq("creator_id", scope.creatorId);
+  const { data: sessionRows } = await sessionQuery.order("session_date").order("session_no");
 
   const sessions = sessionRows ?? [];
   if (sessions.length === 0) return null;
@@ -236,15 +264,18 @@ async function buildLiveDetail(
     // Pembanding CTR: seluruh sesi live yang dihitung di project ini (R41), bukan
     // hanya peserta ini — dipakai sebagai satu kalimat pembanding di catatan.
     // Sengaja TIDAK dipecah per hari: pembandingnya adalah project, bukan tanggal.
-    supabase
-      .from("project_live_sessions")
-      .select("creator_id, product_impressions, product_clicks")
-      .eq("project_id", projectId)
-      .in("attribution_status", ["verified", "confirmed_manual"]),
+    // Slot jadwal tidak punya kohort: satu slot = satu kreator.
+    "slotId" in scope
+      ? Promise.resolve({ data: [] as LiveRow[] })
+      : supabase
+          .from("project_live_sessions")
+          .select("creator_id, product_impressions, product_clicks")
+          .eq("project_id", scope.projectId)
+          .in("attribution_status", ["verified", "confirmed_manual"]),
   ]);
   const intervals = intervalRows ?? [];
   const products = productRows ?? [];
-  const cohort = cohortRows ?? [];
+  const cohort = (cohortRows ?? []) as LiveRow[];
 
   const dates = [...new Set(sessions.map((s) => s.session_date as string))].sort();
   const live = shapeLive(sessions, intervals, products, cohort);
@@ -378,4 +409,74 @@ function shapeLive(
   };
 
   return { ...live, notes: buildLiveNotes(live) };
+}
+
+/**
+ * Report live stream SATU slot Jadwal Live (migrasi 0066). Bentuk keluarannya
+ * `ProjectReportData` yang sama dengan report peserta project — bukan tipe
+ * baru — supaya halaman tim, portal kreator, dan catatan deterministik
+ * (live-notes) dipakai apa adanya (CLAUDE.md #4). Tidak ada target pribadi,
+ * peringkat, maupun kohort pada slot: kolom-kolom itu diisi netral (0 / 1 dari 1)
+ * dan komponen tampilan menyembunyikannya untuk `period.type = live_slot`.
+ *
+ * Throws bila slot/kreator tidak ada; mengembalikan `live` undefined (angka nol)
+ * bila slot belum punya sesi yang dihitung — pemanggil yang memutuskan apakah
+ * report tanpa sesi layak dibuat.
+ */
+export async function buildSlotLiveReportData(
+  supabase: SupabaseClient,
+  slotId: number
+): Promise<ProjectReportData> {
+  const { data: slot } = await supabase
+    .from("live_schedule_slots")
+    .select("id, creator_id, schedule_date, start_time, end_time, actual_start, actual_end, brand_name, status")
+    .eq("id", slotId)
+    .maybeSingle();
+  if (!slot) throw new Error("Slot jadwal tidak ditemukan");
+
+  const { data: creator } = await supabase
+    .from("creators").select("id, name, username, level, niche").eq("id", slot.creator_id).single();
+  if (!creator) throw new Error("Kreator tidak ditemukan");
+
+  const liveDetail = await buildLiveDetail(supabase, { slotId });
+  const live = liveDetail?.live ?? null;
+
+  const gmv = live?.gmv ?? 0;
+  const orders = live?.orders ?? 0;
+  const dates = liveDetail ? liveDetail.days.map((d) => d.first_date).filter((d): d is string => Boolean(d)) : [];
+  const brand = (slot.brand_name as string | null)?.trim() || null;
+
+  return {
+    period: {
+      type: "live_slot",
+      start: live?.first_date ?? slot.schedule_date,
+      end: live?.last_date ?? slot.schedule_date,
+      project_id: null,
+      project_name: brand ?? "Live Stream",
+      project_type: "live_slot",
+    },
+    slot: {
+      id: slot.id as number,
+      schedule_date: slot.schedule_date as string,
+      brand_name: brand,
+      planned_start: (slot.start_time as string | null)?.slice(0, 5) ?? null,
+      planned_end: (slot.end_time as string | null)?.slice(0, 5) ?? null,
+      actual_start: (slot.actual_start as string | null)?.slice(0, 5) ?? null,
+      actual_end: (slot.actual_end as string | null)?.slice(0, 5) ?? null,
+      status: slot.status as string,
+    },
+    creator: { id: creator.id, name: creator.name, username: creator.username ?? null, level: creator.level, niche: creator.niche },
+    target: { personal_gmv: 0, project_gmv: 0 },
+    metrics: {
+      gmv, live_gmv: gmv, video_gmv: 0,
+      orders, items: live?.items ?? 0, aov: orders > 0 ? gmv / orders : 0,
+      live_share: gmv > 0 ? 1 : 0, active_days: dates.length,
+    },
+    achievement: { personal_pct: 0, share_of_project: gmv > 0 ? 1 : 0, rank: 1, of: 1 },
+    cohort_avg: { gmv: 0, live_share: 0, active_days: 0 },
+    daily: (liveDetail?.days ?? []).map((d) => ({ date: d.first_date ?? slot.schedule_date, gmv: d.gmv })),
+    top_products: (live?.products ?? []).slice(0, 3).map((p) => ({ name: p.name, gmv: p.gmv, items: p.items })),
+    ...(live ? { live } : {}),
+    ...(liveDetail && liveDetail.days.length > 1 ? { live_days: liveDetail.days } : {}),
+  };
 }
