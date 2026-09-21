@@ -3,6 +3,19 @@
 Untuk tim CM / Creator Support / BizDev. Fitur ini **opsional per slot**: slot jadwal
 boleh selamanya tanpa data live. Buat report hanya untuk live yang memang mau dievaluasi.
 
+## 0. Belum punya file asli? Pakai file contoh
+
+Selama export TikTok sungguhan belum tersedia, file contoh bisa dibuat sendiri:
+
+```bash
+npx tsx scripts/gen-sample-live-files.ts ./sample-live {username} {YYYY-MM-DD}
+```
+
+Menghasilkan 4 file (2 sesi × Product + Trend Stats) dengan header, nilai, dan nama
+file persis seperti export aslinya — langsung bisa di-drop ke form upload. Isinya
+data karangan yang deterministik, jadi aman dipakai di staging. Skrip itu mencetak
+juga apa yang **seharusnya** terlihat setelah upload, supaya hasilnya bisa dicocokkan.
+
 ## 1. Siapkan file dari TikTok LIVE Center
 
 Per sesi live ada dua file `.xlsx`:
