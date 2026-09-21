@@ -545,9 +545,20 @@ export async function writeAggregates(
     product_id: p.productId,
     product_info: p.productInfo,
     shop_id: p.shopId,
+    shop_name: p.shopName,
+    level1_category: p.level1Category,
     level2_category: p.level2Category,
     gmv: p.gmv,
     orders: p.orders,
+    // Dimensi produk report M2 v2 (migrasi 0066).
+    live_gmv: p.liveGmv,
+    video_gmv: p.videoGmv,
+    items_sold: p.itemsSold,
+    live_orders: p.liveOrders,
+    video_orders: p.videoOrders,
+    direct_gmv: p.directGmv,
+    ctr: p.ctr,
+    ctor: p.ctor,
   }));
   for (let i = 0; i < topRows.length; i += 500) {
     const { error } = await admin.from("creator_top_products").insert(topRows.slice(i, i + 500));

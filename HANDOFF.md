@@ -2,6 +2,14 @@
 
 Status per sesi 2026-07-09 (sesi 5, backlog-sweep + audit deploy). Baca ini + `CLAUDE.md` sebelum lanjut.
 
+## ⚡ SESI 2026-09-21 — WIP: Report Live Stream dari Jadwal Live + Report Kreator (M2) v2 — BELUM SELESAI
+
+**Rencana yang disetujui user ada di `docs/PLAN_LIVE_REPORT_M2_V2.md`** — baca itu dulu; bagian "Langkah eksekusi tersisa" adalah daftar kerja. Keputusan interview (final, jangan re-interview) tercatat di sana: izin upload = semua `schedule.edit`; portal kreator menampilkan report final utuh; seksi live M2 hanya sesi milik Jadwal Live; report M2 v2 **100% rule-based tanpa LLM + tombol Edit Report** (`creator_reports.edits_json`); migrasi 0066 di-apply via `apply_migration` staging → production (BELUM DILAKUKAN).
+
+**Sudah ada di commit ini (typecheck 0 error, 952 tes lulus)**: migrasi `0066_live_report_schedule_and_report_v2.sql` (belum di-apply ke remote mana pun), `lib/ingest/aggregate.ts`+`run.ts` (kolom produk live/video/CTR/CTOR), `lib/m7/live-ingest.ts` (inti upload sesi bersama project|slot), `live-verify.ts` (periodLabel, konflik V4 ke slot), `performa/live-actions.ts` (pakai inti bersama), `lib/m7/report-data.ts` (`buildSlotLiveReportData`, `period.type live_slot`), `report-refresh.ts` (slot), `components/project-report-view.tsx` (mode slot), `lib/schedule/live-report.ts` + `scope.ts`, `schedule/live/[slotId]/actions.ts` (preview/save/void/generate/finalize).
+
+**Belum ada**: halaman `schedule/live/[slotId]/page.tsx` + panel klien upload, `.../report/page.tsx`, badge di kalender (`schedule-board.tsx`/`page.tsx`), portal `/portal/reports/[id]`, seluruh bagian B (report M2 v2: `lib/report/{types,live-analysis,rules,build}.ts`, `components/creator-report-view.tsx`, `reports/actions.ts` tanpa LLM + `saveReportEdits`, dispatch `reports/[id]/page.tsx`), dokumentasi tim, apply migrasi. Lanjutkan sesuai nomor langkah di file rencana.
+
 ## ⚡ SESI 2026-09-12 — PX-M1 Creator Capability Registry (Product Exchange) + ⚠ peringatan drift ledger migrasi
 
 **⚠️ WAJIB BACA SEBELUM MENJALANKAN `supabase db push` DI REPO INI.** Ledger migrasi remote (`list_migrations`)

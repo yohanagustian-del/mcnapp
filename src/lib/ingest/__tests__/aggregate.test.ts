@@ -193,6 +193,31 @@ describe("buildTopProducts", () => {
     expect(top.at(-1)?.productId).toBe("P19");
   });
 
+  it("carries the live/video split, items, and GMV-weighted CTR/CTOR per product (0066)", () => {
+    const rows = [
+      row({ productId: "P1", affiliateGmv: 1_000_000, affiliateLiveGmv: 1_000_000, liveOrders: 4, orders: 4, itemsSold: 5, ctr: 0.10, ctor: 0.02, directGmv: 200_000 }),
+      row({ productId: "P1", periodStart: "2026-06-29", periodEnd: "2026-06-29", affiliateGmv: 3_000_000, affiliateVideoGmv: 3_000_000, videoOrders: 6, orders: 6, itemsSold: 7, ctr: 0.02, ctor: 0.06 }),
+    ];
+    const [top] = buildTopProducts(rows, 20);
+    expect(top.liveGmv).toBe(1_000_000);
+    expect(top.videoGmv).toBe(3_000_000);
+    expect(top.itemsSold).toBe(12);
+    expect(top.liveOrders).toBe(4);
+    expect(top.videoOrders).toBe(6);
+    expect(top.directGmv).toBe(200_000);
+    expect(top.shopName).toBe("Toko A");
+    expect(top.level1Category).toBe("Cat1");
+    // (0.10*1jt + 0.02*3jt) / 4jt = 0.04 ; (0.02*1jt + 0.06*3jt) / 4jt = 0.05
+    expect(top.ctr).toBeCloseTo(0.04);
+    expect(top.ctor).toBeCloseTo(0.05);
+  });
+
+  it("leaves ctr/ctor null when no row carries them", () => {
+    const [top] = buildTopProducts([row({ productId: "P1", affiliateGmv: 1_000 })], 20);
+    expect(top.ctr).toBeNull();
+    expect(top.ctor).toBeNull();
+  });
+
   it("keeps top-N independent per creator", () => {
     const rows = [
       row({ creatorName: "CRT-A", productId: "P1", affiliateGmv: 1_000_000 }),
