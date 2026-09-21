@@ -2,14 +2,30 @@
 
 Status per sesi 2026-07-09 (sesi 5, backlog-sweep + audit deploy). Baca ini + `CLAUDE.md` sebelum lanjut.
 
-## ⚡ SESI 2026-09-21 — Report Live Stream dari Jadwal Live + Report Kreator (M2) v2 — KODE SELESAI, MIGRASI BELUM DI-APPLY
+## ⚡ SESI 2026-09-21 (lanjutan) — QA otomatis alur sesi live + generator file contoh
+
+Migrasi 0066 **sudah di-apply ke staging & production** (lihat catatan di bawah, bagian ini menggantikan status "belum di-apply" di sana), PR #54 sudah merged, production ter-deploy.
+
+**Masalah yang ditutup**: seluruh alur upload sesi live rilis ke produksi tanpa pernah diuji ujung-ke-ujung — tes lama hanya menguji potongan (parser, verifikasi, shaper) dengan baris ad-hoc, dan `docs/data-samples/` kosong sehingga QA manual pun tidak bisa dimulai.
+
+- **`src/lib/m7/live-sample.ts`** (BARU, murni): pembangun sheet Product & Trend Stats .xlsx dengan header + nama file PERSIS seperti export TikTok LIVE Center. GMV Trend dibagi rata dengan sisa ke interval terakhir supaya totalnya sama persis dengan Product (kalau tidak, V6 memunculkan peringatan palsu di setiap uji). Satu sumber bentuk file — dipakai tes DAN skrip.
+- **`scripts/gen-sample-live-files.ts`** (BARU): `npx tsx scripts/gen-sample-live-files.ts [outDir] [username] [tanggal]` → 4 file (2 sesi × Product+Trend) siap di-drop ke form upload, plus cetakan "apa yang seharusnya terlihat". Ini yang membuka QA manual tanpa menunggu export sungguhan.
+- **`src/lib/m7/__tests__/helpers/fake-supabase.ts`** (BARU): Supabase in-memory yang hanya mendukung operasi yang dipakai jalur ini dan SENGAJA melempar untuk operator yang belum didukung — supaya query bentuk baru gagal berisik, bukan diam-diam mengembalikan nol baris (yang pada V4 terbaca seperti "tidak ada konflik" dan meloloskan bug).
+- **`src/lib/m7/__tests__/live-e2e.test.ts`** (13 tes): rantai penuh nama file → deteksi jenis dari ISI file → parse → V1–V7 → simpan → report slot. Termasuk penolakan yang wajib: V1 username salah, V2 tanggal 2 hari dari slot (dan +1 hari yang DITERIMA), V4 file sama diunggah ke project → pesan menyebut slot pemegangnya, V6 warn tanpa/dengan konfirmasi tim, Trend tanpa Product, nama file tak terbaca, plus batch 2 sesi sehari (bentuk yang dihasilkan skrip) termasuk V3 saat jamnya bertumpuk.
+- **`src/lib/report/__tests__/report-v2-e2e.test.ts`** (11 tes): report M2 v2 dari agregat mingguan + sesi live yang BENAR-BENAR diunggah lewat jalur di atas. Menjaga dua keputusan yang paling mudah rusak diam-diam: bulanan menjumlah seluruh minggu (bug audit #1, termasuk kasus re-upload → pakai baris terbaru), dan seksi live HANYA membaca sesi milik Jadwal Live (sesi Special Project diuji TIDAK ikut). Juga benchmark peer dari `creator_period_summary` (bug #2), badge produk, `split_unavailable` untuk batch lama, dan cakupan sesi yang jujur.
+
+**Verifikasi**: `npx tsc --noEmit` 0 error · `npx vitest run` **1023 lulus / 5 skip** (dari 999) · `npx next build` sukses.
+
+**Masih belum dilakukan**: QA manual di UI sungguhan (tombol, izin per role, RLS) — tes di atas tidak menyentuh itu. Jalankan skrip generator lalu ikuti `docs/TUTORIAL_JADWAL_LIVE_REPORT.md` di staging.
+
+## ⚡ SESI 2026-09-21 — Report Live Stream dari Jadwal Live + Report Kreator (M2) v2 — RILIS (migrasi sudah di-apply, PR #54 merged)
 
 **Rencana yang disetujui user: `docs/PLAN_LIVE_REPORT_M2_V2.md`** (keputusan interview final di bagian bawahnya — jangan re-interview). Tutorial tim: `docs/TUTORIAL_JADWAL_LIVE_REPORT.md`.
 
 **Status verifikasi sesi ini**: `npx tsc --noEmit` 0 error · `npx vitest run` 996 lulus / 5 skip (dari 942 sebelum sesi ini) · `npx next build` sukses.
 
-### ⚠️ SATU-SATUNYA YANG TERSISA: apply migrasi `0066_live_report_schedule_and_report_v2.sql`
-**Belum di-apply ke remote mana pun.** Sampai di-apply, di produksi:
+### Migrasi `0066_live_report_schedule_and_report_v2.sql` — SUDAH DI-APPLY
+Staging `fomlangoiiywhexwoqom` (sekaligus menyusul 0064 & 0065 yang ternyata tertinggal di sana) dan production `bqknstylbpwsnlgnzayw`, keduanya lewat `apply_migration` dan diverifikasi lewat SQL; advisor keamanan production tidak menemukan temuan baru. Catatan historis — sebelum di-apply, di produksi:
 - halaman `/schedule/live/[slotId]` gagal menyimpan sesi (kolom `schedule_slot_id` belum ada), dan
 - `generateReport` M2 mengembalikan pesan “Konfigurasi report belum ada di app_config … Migrasi 0066 belum di-apply?” (sengaja: tidak diam-diam memakai angka bawaan kode).
 

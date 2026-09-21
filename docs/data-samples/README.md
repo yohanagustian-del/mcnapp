@@ -94,3 +94,19 @@ di file itu dan `__tests__/live-filename.test.ts` untuk detail regex-nya.
 file per-SESI single-creator (Fase 1A), bukan file agregat harian
 multi-creator/multi-shop yang dibutuhkan Fase 1B (lihat struktur "Multi-creator
 report" di atas untuk perbandingan bentuknya).
+
+---
+
+## Sesi live TikTok LIVE Center (Product + Trend Stats)
+
+Export sungguhan **belum ada di repo ini**. Sampai ada, file contoh yang bentuknya
+identik (header, nilai, dan nama file) dibuat dengan:
+
+```bash
+npx tsx scripts/gen-sample-live-files.ts ./sample-live {username} {YYYY-MM-DD}
+```
+
+Bentuk sheet-nya hidup di satu tempat — `src/lib/m7/live-sample.ts` — dan dipakai
+bersama oleh skrip itu dan tes end-to-end (`src/lib/m7/__tests__/live-e2e.test.ts`).
+Kalau export asli akhirnya datang dan headernya berbeda, sunting modul itu saja;
+tesnya akan langsung menunjukkan apa yang ikut berubah.
