@@ -106,6 +106,8 @@ export interface SubcatSegmentGmvRow {
   price_segment: PriceSegment | null;
   gmv: number | null;
   live_gmv: number | null;
+  /** Dipakai Product Match (categoryProfile) untuk AOV = gmv/orders; opsional untuk pemakai lama. */
+  orders?: number | null;
 }
 
 /**
