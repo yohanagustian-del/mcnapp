@@ -30,6 +30,7 @@ import { CmWeeklyGrowthTable, type CmWeeklyGrowthRow } from "./cm-weekly-growth-
 import { CreatorGrowthPanel, type CreatorGrowthRow } from "./creator-growth-panel";
 import { LeakTable, type LeakTableRow } from "./leak-table";
 import { CampaignRequestsTable, type CampaignRequestRow } from "./campaign-requests-table";
+import { CmProductMatchPanel } from "./cm-product-match-panel";
 
 export const dynamic = "force-dynamic";
 
@@ -599,6 +600,19 @@ export default async function CmWorkspacePage({
         ) : (
           <CmWeeklyGrowthTable rows={cmWeeklyGrowthRows} />
         )}
+      </section>
+
+      {/* ===== Produk Cocok per Kreator — Creator Product Match (satu engine, CLAUDE.md #4) ===== */}
+      <section>
+        <h2 className="text-lg font-medium">Produk Cocok per Kreator</h2>
+        <p className="mt-1 text-xs text-slate-500">
+          Pilih kreator (scope Anda) untuk melihat produk Deal TAP & PX Exchange yang cocok dengan
+          kategori & segmen harga historisnya — engine yang sama dengan Creator Product Match &
+          halaman detail kreator. Rule-based, 0 token AI.
+        </p>
+        <div className="mt-4">
+          <CmProductMatchPanel creators={creators.map((c) => ({ id: c.id, name: c.name }))} />
+        </div>
       </section>
 
       {/* ===== Link Leakage Kreator (per minggu) — rollup dari engine M4 / artifak ===== */}
