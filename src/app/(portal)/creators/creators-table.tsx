@@ -5,6 +5,7 @@ import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react
 import { useCreatorFilter } from "@/components/creator-filter";
 import { MAX_BULK_DELETE } from "@/lib/creators/delete";
 import { creatorClassLabel } from "@/lib/creators/creator-class";
+import { estimateLabel, levelMismatch } from "@/lib/creators/affiliate-level";
 import { updateRateCard } from "./actions";
 import { CreatorEditButton, type EditCmOption } from "./creator-edit-button";
 import { CreatorDeleteDialog, type DeleteTarget } from "./creator-delete-dialog";
@@ -44,6 +45,13 @@ export interface CreatorTableRow {
   /** team_members.id anggota grup akuisisi yang membawa masuk kreator ini. */
   acquisitor_id: string | null;
   acquisitorName: string | null;
+  /**
+   * Estimasi level dari GMV bulan berjalan (creators/affiliate-level.ts) — BATAS
+   * ATAS, karena syarat hari aktif tidak ada di data platform ter-agregat. Level
+   * TERSIMPAN (`level` di atas) tetap satu-satunya sumber kebenaran; ini murni
+   * untuk badge peringatan saat data platform terlihat lebih tinggi.
+   */
+  level_estimate: number;
 }
 
 function formatRp(v: number | null | undefined): string {
@@ -297,7 +305,32 @@ const COLUMNS: TableColumn[] = [
   { label: "CM", compact: true, value: (c) => c.cmName, cell: (c) => c.cmName ?? "—" },
   // Akuisitor = anggota tim grup "acquisition" yang membawa kreator ini masuk.
   { label: "Akuisitor", compact: true, value: (c) => c.acquisitorName, cell: (c) => c.acquisitorName ?? "—" },
-  { label: "Level", compact: true, value: (c) => c.level, cell: (c) => (c.level ? `L${c.level}` : "—") },
+  {
+    label: "Level",
+    compact: true,
+    value: (c) => c.level,
+    cell: (c) => {
+      const mismatch = levelMismatch(c.level, c.level_estimate);
+      return (
+        <span>
+          {c.level ? `L${c.level}` : "—"}
+          {mismatch.mismatched && (
+            <span
+              title={`GMV bulan ini setara ≥ ${estimateLabel(c.level_estimate)} — level tersimpan (import) lebih rendah`}
+              className="ml-1 rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium text-amber-700"
+            >
+              GMV ≥ {estimateLabel(c.level_estimate)}
+            </span>
+          )}
+        </span>
+      );
+    },
+  },
+  {
+    label: "Level (est. GMV)",
+    value: (c) => c.level_estimate,
+    cell: (c) => estimateLabel(c.level_estimate),
+  },
   // Tanggal ISO ("2026-01-31") urut leksikografis = urut kronologis.
   { label: "Join", value: (c) => c.join_date, cell: (c) => c.join_date ?? "—" },
   {
