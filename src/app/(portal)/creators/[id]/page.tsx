@@ -1,13 +1,15 @@
 import { notFound } from "next/navigation";
 import { requireMember } from "@/lib/rbac";
 import { createClient } from "@/lib/supabase/server";
-import { creatorSegmentMap, matchProductsForCreator, type CreatorSegmentRow, type ProductRow } from "@/lib/m10/match";
+import { creatorSegmentMap, type CreatorSegmentRow } from "@/lib/m10/match";
 import type { PriceSegment } from "@/lib/projection/gmv";
 import {
   availableMonths,
   buildMonthlyGrowth,
   type WeeklyGrowthInputRow,
 } from "@/lib/m8/weekly-growth";
+import { buildCreatorProductMatch } from "@/lib/product-match/data";
+import { ProductMatchView } from "@/components/product-match-view";
 import { WeeklyGmvChart } from "./weekly-gmv-chart";
 
 export const dynamic = "force-dynamic";
@@ -119,25 +121,8 @@ export default async function CreatorDetailPage({
     }
   }
 
-  // ---- top-10 recommended TAP products ----
-  const { data: productRows } = await supabase
-    .from("products_tap")
-    .select("product_id, product_name, shop_id, shop_name, level2_category, price_segment, price, commission_pct")
-    .eq("active", true)
-    .limit(2000);
-
-  const products: ProductRow[] = (productRows ?? []).map((p) => ({
-    productId: p.product_id,
-    productName: p.product_name,
-    shopId: p.shop_id,
-    shopName: p.shop_name,
-    level2Category: p.level2_category,
-    priceSegment: p.price_segment as PriceSegment | null,
-    price: p.price,
-    commissionPct: p.commission_pct,
-  }));
-
-  const recommendations = matchProductsForCreator(matrix, products, 10);
+  // ---- Creator Product Match (satu engine, CLAUDE.md §A) ----
+  const productMatch = await buildCreatorProductMatch(id);
 
   return (
     <div className="space-y-6">
@@ -285,50 +270,13 @@ export default async function CreatorDetailPage({
       <section className="rounded-lg border border-slate-200 bg-white p-4">
         <h2 className="text-lg font-medium">Rekomendasi Produk TAP</h2>
         <p className="mt-1 text-xs text-slate-500">
-          Top-10 produk TAP paling cocok dengan kemampuan jual creator (skor = share GMV creator di
-          sel kategori×segmen produk; fallback segmen bertetangga bila sel persis kosong). 0 token AI.
+          AOV creator per kategori (Level 2) → segmen harga → produk Deal TAP dan PX Exchange di
+          kategori & segmen yang sama, urut order tertinggi. Engine yang sama dengan Creator Product
+          Match. 0 token AI.
         </p>
-        {recommendations.length === 0 ? (
-          <p className="mt-4 text-sm text-slate-500">
-            Belum ada rekomendasi — perlu data segmen creator dan/atau katalog Produk TAP (/products).
-          </p>
-        ) : (
-          <div className="mt-4 overflow-x-auto">
-            <table className="min-w-full text-sm">
-              <thead className="bg-slate-50 text-left text-xs uppercase text-slate-500">
-                <tr>
-                  <th className="px-3 py-2">Produk</th>
-                  <th className="px-3 py-2">Shop</th>
-                  <th className="px-3 py-2">Kategori</th>
-                  <th className="px-3 py-2">Segmen</th>
-                  <th className="px-3 py-2">Komisi</th>
-                  <th className="px-3 py-2">Skor</th>
-                  <th className="px-3 py-2">Alasan</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100">
-                {recommendations.map((r) => (
-                  <tr key={r.product.productId}>
-                    <td className="px-3 py-2 font-medium">
-                      {r.product.productName ?? "—"}
-                      <span className="ml-1 font-mono text-[10px] text-slate-400">{r.product.productId}</span>
-                    </td>
-                    <td className="px-3 py-2">{r.product.shopName ?? r.product.shopId}</td>
-                    <td className="px-3 py-2">{r.product.level2Category ?? "—"}</td>
-                    <td className="px-3 py-2">{SEGMENT_LABEL[r.matchedSegment]}</td>
-                    <td className="px-3 py-2">
-                      {r.product.commissionPct != null ? `${Number(r.product.commissionPct).toFixed(1)}%` : "—"}
-                    </td>
-                    <td className="px-3 py-2">{(r.score * 100).toFixed(1)}%</td>
-                    <td className="px-3 py-2 text-xs">
-                      {r.reason === "exact_cell" ? "Sel persis" : "Segmen bertetangga"}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
+        <div className="mt-4">
+          <ProductMatchView result={productMatch} />
+        </div>
       </section>
     </div>
   );
