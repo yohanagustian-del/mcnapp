@@ -29,6 +29,7 @@ export const NAV_ICON_PATHS: Record<string, string> = {
   "/bd-projects": "M4 5h6v6H4zM14 5h6v6h-6zM4 15h6v4H4zM14 15h6v4h-6zM10 8h4M10 17h4",
   "/workspace/bizdev": "M3 20h18M6 20V9M11 20V4M16 20v-8M21 20v-5",
   "/predictor": "M3 17l6-6 4 4 8-8M15 7h6v6",
+  "/leads": "M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2M12 11a4 4 0 100-8 4 4 0 000 8zM22 21v-2a4 4 0 00-3-3.87",
   "/matching":
     "M8 7a3 3 0 100-6 3 3 0 000 6zM8 23a3 3 0 100-6 3 3 0 000 6zM19 15a3 3 0 100-6 3 3 0 000 6zM11 5.5h3a2 2 0 012 2V9M11 18.5h3a2 2 0 002-2V15",
   "/products": "M20 7l-8-4-8 4v10l8 4 8-4zM4 7l8 4 8-4M12 11v10",

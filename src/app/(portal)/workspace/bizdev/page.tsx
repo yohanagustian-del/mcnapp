@@ -33,8 +33,17 @@ export default async function BizdevWorkspacePage() {
   const canPipeline = hasPermission("m8.pipeline", member.role);
   const canReport = hasPermission("m8.brand_report", member.role);
   const canViewSchedule = hasPermission("schedule.view", member.role);
+  const canViewLeads = hasPermission("leads.view", member.role);
 
   const supabase = await createClient();
+
+  // ===== Ringkasan Brand Lead Bank =====
+  const { count: leadsBaru } = canViewLeads
+    ? await supabase.from("brand_leads").select("id", { count: "exact", head: true }).eq("status", "baru")
+    : { count: null };
+  const { count: leadsNego } = canViewLeads
+    ? await supabase.from("brand_leads").select("id", { count: "exact", head: true }).eq("status", "nego")
+    : { count: null };
 
   // ===== M13 Jadwal Live (deal BD) — minggu berjalan, deals_by='bd' atau deal_id terisi =====
   const todayIso = new Date().toISOString().slice(0, 10);
@@ -159,6 +168,16 @@ export default async function BizdevWorkspacePage() {
           brand. Deterministik — LLM hanya opsional untuk ringkasan report brand (pola M2).
         </p>
       </div>
+
+      {canViewLeads && (
+        <Link
+          href="/leads"
+          className="block w-fit rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm hover:bg-slate-50"
+        >
+          <span className="font-medium text-slate-800">Brand Lead Bank:</span>{" "}
+          {leadsBaru ?? 0} baru / {leadsNego ?? 0} nego <span className="text-blue-600">→</span>
+        </Link>
+      )}
 
       <ProjectRequirementsPanel requirements={projectReqs} focus="ads" />
 
