@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from "react";
 import type { UploadLeakArtifactResult } from "@/lib/ingest/leak-run";
-import { uploadLeakArtifactAction } from "./leak-actions";
+import { uploadLeakArtifactAction } from "./leak-artifact-actions";
 
 const XLSX_ACCEPT =
   ".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";

@@ -8,6 +8,7 @@ import { listLeakExports } from "@/lib/m4/leak-export";
 import { uploadCooperatingShops } from "./actions";
 import { DownloadCsvButton } from "./download-csv-button";
 import { LeakAnalysisForm } from "./leak-analysis-form";
+import { LeakArtifactForm } from "./leak-artifact-form";
 import { CreatorStatusTable, type CreatorStatusRow } from "./creator-status-table";
 import { BdLeadsTable, type BdLeadRow } from "./bd-leads-table";
 import { OpenAlertsTable, type OpenAlertRow } from "./open-alerts-table";
@@ -88,6 +89,7 @@ export default async function LinkLeakagePage({
 }) {
   const member = await requireMember();
   const canUpload = hasPermission("m4.upload", member.role);
+  const canUploadLeak = hasPermission("leak.upload_artifact", member.role);
 
   const { creator_id: creatorIdFilter, week: weekFilter } = await searchParams;
 
@@ -287,6 +289,26 @@ export default async function LinkLeakagePage({
             </table>
           </div>
         </>
+      )}
+
+      {canUploadLeak && (
+        <details className="mt-8 rounded-lg border border-slate-200 bg-white p-4">
+          <summary className="cursor-pointer text-lg font-medium">
+            Data historis (artifak lama) — fallback
+          </summary>
+          <p className="mt-2 text-sm text-slate-500">
+            Tidak dipakai untuk upload mingguan lagi: analisa kebocoran kini dihitung platform dari
+            file MCN+TAP (lewat <Link href="/ingest" className="text-blue-700 underline">Upload
+            Mingguan</Link> atau form &quot;Jalankan Analisa Kebocoran&quot; di atas). Jalur ini
+            DIBIARKAN untuk memasukkan hasil artifak Excel lama (2 file, format v1/v2) — mis.
+            minggu-minggu historis yang file platform mentahnya sudah tidak ada. Platform hanya
+            menyimpan ROLLUP per kreator per minggu; status link & rasio bocor dihitung ulang
+            deterministik dengan ambang app_config yang sama.
+          </p>
+          <div className="mt-3 max-w-2xl">
+            <LeakArtifactForm />
+          </div>
+        </details>
       )}
 
       <h2 className="mt-8 text-lg font-medium">Status Creator{latestWeek ? ` — minggu ${latestWeek}` : ""}</h2>
