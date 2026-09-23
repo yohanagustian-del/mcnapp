@@ -31,8 +31,16 @@ Platform internal MCN MEA (agency creator TikTok/Shopee). Menggabungkan tools te
 - `creators.commission_share` → sync dari platform. Read-only. Turun = alert.
 
 ### 4. Satu sumber kebenaran (jangan duplikasi logic)
-- Report → M2. Link status & lead → M4. Proyeksi GMV → `projectGmv()` shared (M5+M6).
+- Report → M2. Link status & lead → M4.
 - M8 workspace & M3 OKR MENG-AGREGASI/BACA sumber ini, TIDAK menghitung ulang.
+- **Creator Product Match = SATU engine** (`lib/product-match/engine.ts` + `data.ts`, sejak
+  2026-09-23): AOV kreator per kategori Level 2 → segmen harga → produk Deal TAP ∪ PX Exchange di
+  kategori & segmen yang sama, urut order. Dipakai APA ADANYA oleh `/matching` (Creator Product
+  Match), `/creators/[id]` ("Rekomendasi Produk TAP"), CM Workspace ("Produk Cocok per Kreator"),
+  dan portal kreator (`/portal/produk`, `<ProductMatchView>` — `components/product-match-view.tsx`).
+  M5 lama (`lib/m5/match.ts`, scoring `brand_deals`) dan skor M10 (`matchProductsForCreator`/
+  `matchCreatorsForProduct`) DIPENSIUNKAN — jangan pernah dihidupkan lagi atau dibuat versi kedua.
+  "Deal Brand" = nama lain kartu Produk TAP/SAP; engine ini SATU-SATUNYA jalur rekomendasi produk.
 - **Sesi live = SATU tabel dua pemilik** (`project_live_sessions`, migrasi 0066): pemiliknya
   `project_id` (Special Project M7) ATAU `schedule_slot_id` (slot Jadwal Live M13) — tepat satu
   terisi (`ck_live_session_owner`). Parser, verifikasi V1–V7, penyimpanan, shaper report
@@ -80,9 +88,39 @@ Platform internal MCN MEA (agency creator TikTok/Shopee). Menggabungkan tools te
 - Countdown negatif = deal lewat exp_date → active_flag=false.
 - creator_name (multi-file) → resolve ke creators.id; belum ada → buat prospek + flag.
 
-### 8. projectGmv() = SATU implementasi, dipakai M5 & M6
-- Signature: `projectGmv(creatorId, subCategory, priceSegment, window=28d) → {min, max}`
-- Selalu return range + disclaimer. Jangan bikin dua versi.
+### 8. Proyeksi GMV & prediksi deal — dua implementasi TERPISAH (sejak 2026-09-23)
+- `lib/projection/gmv.ts`/`project-gmv.ts` (`priceSegmentOf`, `loadProjectionConfig`, `windowStart`,
+  `fetchWindowHistory`) = primitif window & segmen harga bersama, dipakai Creator Product Match
+  (`lib/product-match/data.ts`) DAN M6 pool model (`predictor/pool-actions.ts`) — SATU query window,
+  jangan bikin query kedua ke `creator_subcat_segment_gmv`.
+- `projectGmv()` (per-kreator, `{min,max}` + disclaimer, dulu "SATU implementasi dipakai M5 & M6")
+  SUDAH DIHAPUS — M5 lama yang memakainya dipensiunkan (lihat #4), dan M6 baru tidak memakai
+  komisi/proyeksi per-kreator seperti itu. `projectGmvRange`/`levelFactorOf`/`liveShareOf`/
+  `slotKey`/`subcatKey`/`aggregateFromSubcatSegmentRows`/`PROJECTION_DISCLAIMER` di `gmv.ts`
+  DIPERTAHANKAN (murni, teruji) untuk fitur skenario-komisi di masa depan bila diminta — jangan
+  hidupkan balik memakai nama/signature lama tanpa membaca komentar file itu dulu.
+- **M6 (BD Value Predictor) = model pool**, `lib/m6/predictor.ts` (`compute()`), konstanta dari
+  `app_config m6.pool_model`. TANPA skenario komisi, TANPA pitch brand (keputusan user
+  2026-09-23) — output hanya daftar kreator potensial + potensi GMV (likely/konservatif/optimis)
+  + confidence. `compute()` dijalankan di KLIEN dari data pool yang dikirim server
+  (`predictor/pool-actions.ts` → `loadPoolForCategory`), bukan query server tiap slider.
+
+### 9. Brand Lead Bank & katalog PX Exchange (sejak 2026-09-23)
+- **Brand Lead Bank** (`brand_leads`/`brand_lead_contacts`, migrasi 0067/0068, `/leads`) = lead
+  BRAND ber-kontak dari BizDev (matchmaking/event/iklan/dll), BEDA dari `bd_leads` (lead SHOP
+  otomatis M4 dari data leak/manual CM — jangan dicampur). Semua BD lihat semua lead; edit
+  digerbang per-baris (pembuat ATAU bizdev_lead/management) di server action, bukan cuma daftar
+  role. Kedua tabel WAJIB restrictive deny `is_creator_user()` (pola sama `products_tap`) —
+  kalau menambah tabel baru yang tidak untuk kreator, JANGAN lupa policy ini (0067 sempat
+  melewatkannya, ditambal 0068).
+- **Katalog PX Exchange** (`px_catalog_items`/`px_catalog_pushes`, migrasi 0067) diisi lewat bridge
+  masuk `POST /api/bridge/px-catalog` (`docs/BRIDGE_PX_CATALOG_CONTRACT.md`, arah CDPS→MCN,
+  kebalikan dari `docs/BRIDGE_PRODUCT_EXCHANGE_CONTRACT.md` yang MCN→CDPS) — snapshot PENUH tiap
+  push, baris yang hilang dari snapshot terbaru di-`active=false`, BUKAN dihapus. Sumber `px` di
+  Creator Product Match (#4): tanpa harga/komisi/GMV (CDPS tidak mengirimkannya), label tampil
+  "Seller manage by MEA". Endpoint ini bearer-only (`BRIDGE_PX_SECRET`, secret yang sama dengan
+  Flow C) — jangan pernah menaruhnya di balik gate sesi Supabase (`middleware.ts` mengizinkan
+  `/api/bridge` lewat).
 
 ## Konvensi kode
 - DB: snake_case. Kode: camelCase. Komponen: PascalCase.
