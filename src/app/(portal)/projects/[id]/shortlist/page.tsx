@@ -48,7 +48,7 @@ export default async function ProjectShortlistPage({ params }: { params: Promise
             <option value="tiktok">Platform: TikTok</option>
             <option value="shopee">Platform: Shopee</option>
           </select>
-          <input name="min_level" type="number" min="1" max="6" defaultValue={requirements?.min_level ?? ""}
+          <input name="min_level" type="number" min="0" max="8" defaultValue={requirements?.min_level ?? ""}
             placeholder="Min level (1-6)"
             className="rounded-md border border-slate-300 px-3 py-2 text-sm" />
           <input name="follower_tiers" defaultValue={(requirements?.follower_tiers ?? []).join(", ")}

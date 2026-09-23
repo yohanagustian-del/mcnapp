@@ -293,12 +293,12 @@ export function resolveCommissionShare(
   };
 }
 
-/** "Lv 3" / "3" → 1..8; selain itu null. */
-function parseLevel(raw: string): number | null {
+/** "Lv 3" / "3" / "L0" → 0..8 (TikTok Affiliate Level dimulai L0, migrasi 0067); selain itu null. */
+export function parseLevel(raw: string): number | null {
   const m = raw.match(/(\d+)/);
   if (!m) return null;
   const n = Number(m[1]);
-  return n >= 1 && n <= 8 ? n : null;
+  return n >= 0 && n <= 8 ? n : null;
 }
 
 export type ImportRowStatus = "insert" | "update" | "error";
