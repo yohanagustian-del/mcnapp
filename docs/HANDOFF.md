@@ -1,10 +1,27 @@
 # HANDOFF — MCN MEA AI Platform
 
 > Catatan serah-terima antar sesi. Baca ini + `CLAUDE.md` + `docs/BUILD_PLAN.md` sebelum lanjut.
-> Update terakhir: 2026-09-16 (PX-M3-A). Isi di bawah sampai baris "Update terakhir: 2026-07-03"
-> adalah historis — repo sudah jauh lebih maju dari situ (lihat `supabase/migrations/0008..0051`,
-> termasuk PX-M1 `bridge.px_creator_capability`) tapi dokumen ini tidak diperbarui setiap sesi;
-> jangan asumsikan "Sisa pekerjaan" di bawah masih akurat tanpa cek kode.
+> Update terakhir: 2026-09-23 (Creator Product Match/BD Value Predictor v2/Brand Lead Bank/PX
+> catalog, migrasi 0067-0068). Isi di bawah sampai baris "Update terakhir: 2026-07-03" adalah
+> historis — dokumen ini tidak diperbarui SETIAP sesi (lihat juga root `HANDOFF.md`, yang sampai
+> 2026-09-21 sempat lebih baru dari file ini); jangan asumsikan "Sisa pekerjaan" di bawah masih
+> akurat tanpa cek kode maupun root `HANDOFF.md`.
+
+## 2026-09-23 — Creator Product Match, BD Value Predictor v2, Brand Lead Bank, PX catalog
+
+Ringkasan penuh (14 PR #56-#68, migrasi 0067/0068, apa yang belum dikerjakan) ada di root
+`HANDOFF.md` — entri di sana JAUH lebih detail, jangan diduplikasi di sini. Poin yang paling
+relevan buat siapa pun yang mulai dari FILE INI (bukan root):
+- Engine rekomendasi produk sekarang SATU (`lib/product-match/`), dipakai `/matching`,
+  `/creators/[id]`, CM Workspace, `/portal/produk`. M5 lama (`lib/m5/match.ts`) & skor M10
+  (`matchProductsForCreator`/`matchCreatorsForProduct`) SUDAH TIDAK ADA.
+- `/predictor` (M6, model pool `lib/m6/predictor.ts`) sudah di-un-hide dari nav.
+- `/leads` (Brand Lead Bank) baru — beda dari `bd_leads` (lead shop M4).
+- Bridge PX Exchange sekarang DUA ARAH: MCN→CDPS (Flow C, PX-M3-A, sudah lama ada) DAN CDPS→MCN
+  (`POST /api/bridge/px-catalog`, baru sesi ini, `docs/BRIDGE_PX_CATALOG_CONTRACT.md`). Sisi CDPS
+  untuk arah baru ini BELUM dibangun.
+- CLAUDE.md #4/#8/#9 ditulis ulang mengikuti keadaan baru ini — baca itu, bukan bagian PX-M1 di
+  bawah, untuk aturan Product Match/proyeksi GMV yang berlaku sekarang.
 
 ## 2026-09-16 — PX-M3-A: coverage push ke CDPS (Flow C)
 

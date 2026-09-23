@@ -1,9 +1,17 @@
 /**
- * Shared GMV projection engine — ONE implementation used by M5 (Matching) and
- * M6 (Deal Value Predictor). PRD Module 05 §2.3 / Module 06 §2.2: basis = the
- * creator's historical GMV over a rolling window (default 28 days) on the same
- * (Level 2 sub-category, price segment), adjusted by a level factor, always
- * returned as a range (min–max) with a disclaimer — never a single number.
+ * GMV/price-segment primitives shared across the platform — `priceSegmentOf`,
+ * `PriceBounds`/`PriceSegment`, `aggregateHistory`, `SubcatSegmentGmvRow` are
+ * live (Creator Product Match, M6 pool model, ingest). The commission-range
+ * formula this file was originally built around (`projectGmvRange`,
+ * `projectGmv()` in project-gmv.ts, PRD Module 05 §2.3 / Module 06 §2.2 — one
+ * range-with-disclaimer implementation for M5+M6) has NO live caller since
+ * 2026-09-23: M5's old brand_deals scoring was retired in favor of Creator
+ * Product Match (no commission range in its output), and M6 was rebuilt as a
+ * pool model (lib/m6/predictor.ts) that doesn't use per-creator commission
+ * ranges either. `projectGmvRange`/`levelFactorOf`/`liveShareOf`/`slotKey`/
+ * `subcatKey`/`aggregateFromSubcatSegmentRows`/`PROJECTION_DISCLAIMER` are kept
+ * as tested, self-contained pure functions for a possible future commission-
+ * range feature — see CLAUDE.md #8.
  *
  * Deterministic only: aggregation + formula. NO LLM anywhere in this module.
  * All tunables (window, spread, level factors, segment bounds) come from
@@ -113,12 +121,18 @@ export interface SubcatSegmentGmvRow {
 /**
  * Builds the SAME HistoryAggregate shape as aggregateHistory(), but from
  * pre-aggregated creator_subcat_segment_gmv rows instead of raw per-product
- * transactions_all rows — so projectGmv()/matching/predictor can share one
- * lookup shape (bySlot/bySubcat/totals) regardless of source table
- * (CLAUDE.md #8: one implementation, no duplicate projection logic).
+ * transactions_all rows, so any (subcat, segment) lookup can share one
+ * shape (bySlot/bySubcat/totals) regardless of source table.
  * Rows with a null price_segment (items_sold=0 at ingest) still count toward
  * bySubcat & totals but not toward any bySlot entry — same rule as
  * aggregateHistory's items_sold=0 guard.
+ *
+ * No live caller as of 2026-09-23 (M5's old per-creator commission-range flow
+ * that used this — projectGmv(), retired together with lib/m5/match.ts — has
+ * no replacement; Creator Product Match and the M6 pool model each aggregate
+ * creator_subcat_segment_gmv their own way). Kept + still unit-tested because
+ * it is a small, self-contained, pure primitive that a future commission-range
+ * feature could reuse as-is — see CLAUDE.md #8 for the current state of this file.
  */
 export function aggregateFromSubcatSegmentRows(rows: SubcatSegmentGmvRow[]): HistoryAggregate {
   const bySlot = new Map<string, number>();

@@ -79,3 +79,21 @@ Keputusan Yohan 16 Sep 2026 (sudah dikunci, jangan dibuka ulang):
 - [x] **B4 — sentimen feedback rule-based** (rating + NPS + leksikon `app_config`), nol LLM.
 - [x] **B5 — tidak ada input GMV manual**, semua lewat upload; `upsertCreatorMetric` dicabut, `upsertDailyMetric` tinggal kolom biaya.
 - [ ] Sisa dependensi (data, bukan keputusan): sampel export harian product MCN/TAP + Shopee — memblokir Fase 1B saja.
+
+## Fase 6 — Creator Product Match, BD Value Predictor v2, Brand Lead Bank, PX catalog
+Rencana lengkap: upload sesi 2026-09-23 `PLAN_MCN_PRODUCT_MATCH_PREDICTOR_LEADBANK_PX.md` (tidak
+disimpan sebagai file di repo — ringkasan keputusan & status ada di `HANDOFF.md`/`docs/HANDOFF.md`
+sesi yang sama). Migrasi `0067`–`0068`. Status: SELESAI (14 tiket/PR, #56–#68).
+
+- [x] §A Creator Product Match — satu engine (`lib/product-match/`), gantikan M5 lama & skor M10,
+  dipakai `/matching`, `/creators/[id]`, CM Workspace, `/portal/produk`.
+- [x] §B BD Value Predictor v2 — model pool (`lib/m6/predictor.ts`), `/predictor` di-un-hide.
+- [x] §C Katalog PX Exchange via bridge CDPS→MCN (`POST /api/bridge/px-catalog`,
+  `docs/BRIDGE_PX_CATALOG_CONTRACT.md`). Sisi CDPS (job push) BELUM dibangun — tiket terpisah di
+  `MEAgrup/AgencyAPP`.
+- [x] §D Brand Lead Bank (`/leads`, migrasi 0067/0068).
+- [x] §E Level kreator vs tabel TikTok Affiliate (L0-L8) — badge estimasi di roster, level tersimpan
+  tetap read-only dari import.
+- [x] §F Konsolidasi `/ingest` — lane artifak pindah ke `/link-leakage`.
+- [x] CLAUDE.md #4/#8/#9 diperbarui; `projectGmv()` (per-kreator) dihapus (M5 lama sudah tidak ada
+  pemakainya).

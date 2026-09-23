@@ -2,6 +2,72 @@
 
 Status per sesi 2026-07-09 (sesi 5, backlog-sweep + audit deploy). Baca ini + `CLAUDE.md` sebelum lanjut.
 
+## ⚡ SESI 2026-09-23 — Creator Product Match, BD Value Predictor v2, Brand Lead Bank, PX catalog (mode full-auto)
+
+Rencana disetujui user sesi ini (dijalankan mode full-auto: 1 tiket = 1 PR, CI hijau → merge →
+lanjut tiket berikutnya, tanpa jeda konfirmasi per-PR). 14 PR (#56–#68), semua merged ke `main`.
+Detail lengkap per bagian ada di `docs/BUILD_PLAN.md` Fase 6 dan `CLAUDE.md` #4/#8/#9 — ringkasan
+di sini fokus ke apa yang PALING mudah lupa/berbahaya kalau dibuka sesi lain.
+
+**Migrasi**: `0067_product_match_px_leads_level.sql` (px_catalog_items, px_catalog_pushes,
+brand_leads, brand_lead_contacts, `creators.level` 0-8, seed `app_config` product_match.top_n /
+m6.pool_model / creators.affiliate_levels / projection.level_factors tambahan 0-7-8) dan
+`0068_brand_leads_creator_deny.sql` (restrictive deny `is_creator_user()` untuk brand_leads/
+brand_lead_contacts — tertinggal di 0067). Keduanya SUDAH APPLY ke staging (`fomlangoiiywhexwoqom`)
+& production (`bqknstylbpwsnlgnzayw`) via `apply_migration`, diverifikasi SQL + `get_advisors`.
+
+**A. Creator Product Match** (`lib/product-match/engine.ts` + `data.ts`, PR #57): satu engine
+dipakai APA ADANYA oleh `/matching` (#61, ganti nama dari "Matching (M5)"), `/creators/[id]` (#62),
+CM Workspace "Produk Cocok per Kreator" (#63), dan portal kreator `/portal/produk` (#64) lewat
+komponen bersama `components/product-match-view.tsx`. M5 lama (`lib/m5/match.ts`, brand_deals
+scoring) dan `matchProductsForCreator`/`matchCreatorsForProduct` (lib/m10/match.ts) DIHAPUS —
+`creatorSegmentMap` di m10 dipertahankan (dipakai matriks kategori×segmen di `/creators/[id]`).
+
+**B. BD Value Predictor v2** (`lib/m6/predictor.ts`, PR #58 + UI #65): model pool, bukan proyeksi
+per-kreator. `/predictor` di-**un-hide** dari nav (disembunyikan sejak 2026-07-08). TANPA skenario
+komisi & pitch brand (keputusan user). `compute()` jalan di klien dari data pool yang dikirim
+`predictor/pool-actions.ts`.
+
+**C. Katalog PX Exchange** (PR #61 bagian 1 + #67 kontrak): bridge MASUK `POST
+/api/bridge/px-catalog` (kebalikan arah dari Flow C PX-M3-A yang MCN→CDPS) —
+`docs/BRIDGE_PX_CATALOG_CONTRACT.md`, fixture `docs/fixtures/px_catalog_v1.json` **BELUM disalin**
+ke `MEAgrup/AgencyAPP` (kerjakan di sesi CDPS). Snapshot PENUH tiap push (bukan delta). Sisi CDPS
+(job push dari `px_catalog_item_v` setelah `evaluate/tick`) BELUM dibangun — sampai itu ada, seksi
+PX di Product Match menampilkan "Belum ada produk PX dari CDPS".
+
+**D. Brand Lead Bank** (`/leads`, PR #60 lib + #66 UI): lead BRAND ber-kontak, beda dari `bd_leads`
+(lead SHOP otomatis M4). Konversi ke deal SENGAJA TIDAK diotomasi penuh (lihat PR #66) — BD bikin
+deal manual lewat `/deals/baru` lalu tempel ID deal-nya di form "Tandai sudah jadi Deal"
+(`markLeadConverted`, memverifikasi ID itu ada di `brand_deals`). Alasan: menghindari menyentuh
+`deals/actions.ts` yang sudah tervalidasi ketat & production-critical.
+
+**E. Level kreator vs TikTok Affiliate L0-L8** (`lib/creators/affiliate-level.ts`, PR #59 lib +
+#67 UI): estimasi dari GMV MTD SAJA (syarat hari aktif tidak ada di data platform ter-agregat) →
+batas atas, ditampilkan sebagai badge peringatan di roster `/creators` saat level tersimpan lebih
+rendah dari estimasi. `creators.level` TETAP read-only, hanya dari import — tidak ada jalur baru
+yang menulisnya.
+
+**F. Konsolidasi `/ingest`** (PR #68): lane "Upload Hasil Agency Leaked (Artifak)" pindah jadi
+`<details>` terlipat di `/link-leakage` (`leak-artifact-actions.ts` + `leak-artifact-form.tsx`,
+pindah dari `ingest/` — kalau mencari file itu di path lama, sudah tidak ada).
+
+**Verifikasi tiap PR**: `npx tsc --noEmit` 0 error, `npx vitest run` naik dari baseline 1023 →
+1076 lulus / 5 skip (net: banyak test baru untuk engine baru, dikurangi test kode lama yang
+dihapus bersama M5/M10 lama), `npx next build` sukses. CI repo ini = Vercel deployment check
+(dua env: production + staging), bukan GitHub Actions.
+
+**Belum dikerjakan / catatan untuk sesi berikutnya**:
+1. Sisi CDPS untuk bridge PX catalog (job push dari `px_catalog_item_v`) — tiket terpisah di
+   `MEAgrup/AgencyAPP`, kontrak & fixture sudah siap disalin byte-identik.
+2. `lib/projection/gmv.ts`: `projectGmvRange`/`levelFactorOf`/`liveShareOf`/`slotKey`/`subcatKey`/
+   `aggregateFromSubcatSegmentRows`/`PROJECTION_DISCLAIMER`/`aggregateHistory` (sebagian) masih ada
+   tapi SEBAGIAN sudah tanpa pemakai nyata (`projectGmv()` sendiri sudah dihapus) — dibiarkan
+   sebagai primitif teruji untuk kemungkinan fitur skenario-komisi, bukan lupa dibersihkan. Kalau
+   ada sesi yang butuh purge dead-code menyeluruh di file itu, cek dulu satu-satu (`aggregateHistory`
+   MASIH dipakai jalur lain, jangan ikut terhapus).
+3. QA manual di UI sungguhan (login per role, klik tombol) belum dilakukan — verifikasi sesi ini
+   murni tsc/vitest/build otomatis.
+
 ## ⚡ SESI 2026-09-21 (lanjutan) — QA otomatis alur sesi live + generator file contoh
 
 Migrasi 0066 **sudah di-apply ke staging & production** (lihat catatan di bawah, bagian ini menggantikan status "belum di-apply" di sana), PR #54 sudah merged, production ter-deploy.
