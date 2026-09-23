@@ -1,6 +1,8 @@
 import { requireMember, hasPermission, ACQUISITION_ROLES } from "@/lib/rbac";
 import { createClient } from "@/lib/supabase/server";
 import { fetchAll } from "@/lib/supabase/fetch-all";
+import { getConfig } from "@/lib/config";
+import { gmvLevelEstimate, type AffiliateLevelRule } from "@/lib/creators/affiliate-level";
 import { loadCreatorsWithoutCm } from "@/lib/creators/without-cm";
 import { loadCmRequests } from "@/lib/creators/cm-requests";
 import { CsvUploadForm } from "@/components/csv-upload-form";
@@ -52,6 +54,46 @@ export default async function CreatorsPage() {
     (q) => q.order("created_at", { ascending: false })
   );
 
+  // Estimasi level dari GMV bulan berjalan (creators/affiliate-level.ts) — badge
+  // peringatan roster, TIDAK PERNAH menulis ulang creators.level (read-only,
+  // CLAUDE.md #3). Hari aktif tidak ada di data platform ter-agregat, jadi
+  // estimasinya batas atas dari GMV MTD saja.
+  const monthStartIso = (() => {
+    const d = new Date();
+    d.setDate(1);
+    return d.toISOString().slice(0, 10);
+  })();
+  interface PeriodMtdRow {
+    creator_id: string;
+    period_start: string;
+    affiliate_gmv: number | null;
+    created_at: string;
+  }
+  const creatorIds = creators.map((c) => c.id);
+  const mtdRows = creatorIds.length
+    ? await fetchAll<PeriodMtdRow>(
+        supabase,
+        "creator_period_summary",
+        "creator_id, period_start, affiliate_gmv, created_at",
+        (q) => q.in("creator_id", creatorIds).gte("period_start", monthStartIso)
+      )
+    : [];
+  // Dedup batch re-upload: per (creator, period_start), baris created_at terbaru menang.
+  const latestByKey = new Map<string, { gmv: number; createdAt: string }>();
+  for (const r of mtdRows) {
+    const key = `${r.creator_id}|${r.period_start}`;
+    const cur = latestByKey.get(key);
+    if (!cur || r.created_at > cur.createdAt) {
+      latestByKey.set(key, { gmv: Number(r.affiliate_gmv ?? 0), createdAt: r.created_at });
+    }
+  }
+  const gmvMtdByCreator = new Map<string, number>();
+  for (const [key, v] of latestByKey) {
+    const creatorId = key.slice(0, key.indexOf("|"));
+    gmvMtdByCreator.set(creatorId, (gmvMtdByCreator.get(creatorId) ?? 0) + v.gmv);
+  }
+  const affiliateLevels = await getConfig<AffiliateLevelRule[]>("creators.affiliate_levels");
+
   const rows: CreatorTableRow[] = creators.map((c) => ({
     id: c.id,
     name: c.name,
@@ -83,6 +125,7 @@ export default async function CreatorsPage() {
     cmName: c.team_members?.name ?? null,
     acquisitor_id: c.acquisitor_id,
     acquisitorName: c.acquisitor?.name ?? null,
+    level_estimate: gmvLevelEstimate(gmvMtdByCreator.get(c.id) ?? 0, affiliateLevels),
   }));
 
   // Kreator tanpa CM (mis. dibuat otomatis dari upload data platform mingguan).
