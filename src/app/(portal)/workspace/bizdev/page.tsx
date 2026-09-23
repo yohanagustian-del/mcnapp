@@ -286,7 +286,7 @@ export default async function BizdevWorkspacePage() {
           </div>
           <p className="mt-2 text-xs text-slate-500">
             Nilai deal bisa dinilai dengan <Link href="/predictor" className="underline">Prediksi Deal (M6)</Link>;
-            pemilihan creator dibantu <Link href="/matching" className="underline">Matching (M5)</Link>.
+            pemilihan creator dibantu <Link href="/matching" className="underline">Creator Product Match</Link>.
           </p>
         </div>
       </section>

@@ -22,10 +22,10 @@ export default async function MatchingPage() {
 
   return (
     <div>
-      <h1 className="text-2xl font-semibold">Matching Kreator–Campaign (M5)</h1>
+      <h1 className="text-2xl font-semibold">Creator Product Match</h1>
       <p className="mt-1 text-sm text-slate-500">
-        Saran campaign untuk creator yang di-handle CPM: sub-kategori (Level 2) & segmen harga yang sama,
-        di-ranking rule-based + potensi komisi (range) dari mesin proyeksi bersama M5/M6. 0 token AI.
+        Profil kreator per kategori (Level 2) dari AOV histori → segmen harga → produk Deal TAP dan PX
+        Exchange di kategori & segmen yang sama, urut order tertinggi. Rule-based, 0 token AI.
       </p>
 
       {canRun ? (
@@ -34,7 +34,7 @@ export default async function MatchingPage() {
         </div>
       ) : (
         <p className="mt-6 rounded-lg border border-slate-200 bg-white p-4 text-sm text-slate-500">
-          Role Anda tidak punya izin menjalankan matching (CPM/CM Lead/Management).
+          Role Anda tidak punya izin menjalankan Product Match (CPM/CM Lead/Management/BizDev).
         </p>
       )}
 
