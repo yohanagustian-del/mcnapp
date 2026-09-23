@@ -91,9 +91,9 @@ export const NAV_ITEMS: NavItem[] = [
   { href: "/matching", label: "Creator Product Match", roles: [...MANAGEMENT_ROLES, ...CM_ROLES, "bizdev_lead", "bizdev"], group: "BizDev & Deal" },
   // Product×Creator Matching: catalog TAP (master upload + derive dari TAP) + rekomendasi.
   { href: "/products", label: "Produk TAP", roles: [...MANAGEMENT_ROLES, ...CM_ROLES, ...BIZDEV_ROLES], group: "BizDev & Deal" },
-  // Hidden from nav: postponed until production data is complete (user decision 2026-07-08).
-  // Route & /predictor code left intact — only the menu entry is disabled.
-  // { href: "/predictor", label: "Prediksi Deal (M6)", roles: [...MANAGEMENT_ROLES, "bizdev_lead", "bizdev"], group: "BizDev & Deal" },
+  // Un-hidden 2026-09-23: M6 diganti model pool (lib/m6/predictor.ts) —
+  // lihat rencana PLAN_MCN_PRODUCT_MATCH_PREDICTOR_LEADBANK_PX.md §B.
+  { href: "/predictor", label: "BD Value Predictor", roles: [...MANAGEMENT_ROLES, "bizdev_lead", "bizdev"], group: "BizDev & Deal" },
 
   { href: "/projects", label: "Special Project (M7)", roles: [...MANAGEMENT_ROLES, "cm_lead", "bizdev_lead", "acquisition_lead", "campaign_ops", "finance"], group: "Project & Campaign" },
   // M10: Campaign & Ads Support portal — Management + Campaign Ops (lead) + ads_support (execute).
