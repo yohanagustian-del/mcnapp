@@ -38,7 +38,7 @@ export async function uploadLeakArtifactAction(
 
     const result = await uploadLeakArtifact({ leakFile: leakRaw, bdFile, actorId: actor.id });
 
-    revalidatePath("/ingest");
+    revalidatePath("/link-leakage");
     revalidatePath("/workspace/cm");
     return { ok: true, result };
   } catch (e) {

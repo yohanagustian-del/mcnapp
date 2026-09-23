@@ -7,7 +7,6 @@ import { CreatorsWithoutCmAlert } from "@/components/creators-without-cm-alert";
 import { daysInMonth, weekOfMonth } from "@/lib/utils/date";
 import { IngestForm } from "./ingest-form";
 import { ShopeeIngestForm } from "./shopee-ingest-form";
-import { LeakArtifactForm } from "./leak-artifact-form";
 import { BatchHistoryTable, type BatchRow } from "./batch-history-table";
 
 const STATUS_LABELS: Record<string, string> = {
@@ -90,7 +89,6 @@ function buildWeekCalendar(
 export default async function IngestPage() {
   const member = await requireMember();
   const canRun = hasPermission("ingest.run", member.role);
-  const canUploadLeak = hasPermission("leak.upload_artifact", member.role);
   const canAssignCm = hasPermission("m8.assign_creator", member.role);
   // CPM: boleh mencentang lalu MENGAJUKAN diri sebagai CM (bukan assign langsung).
   const canRequestCm = hasPermission("creators.request_cm", member.role) && !canAssignCm;
@@ -131,11 +129,12 @@ export default async function IngestPage() {
     <div>
       <h1 className="text-2xl font-semibold">Upload Data Platform Mingguan</h1>
       <p className="mt-1 text-sm text-slate-500">
-        Satu upload untuk semuanya: file MCN (semua transaksi) + TAP (via agency link) diproses
-        sekali — ringkasan periode (M2/M8), GMV subkategori×segmen (M5/M6), top produk, katalog
-        produk TAP, DAN analisa kebocoran link agency (rollup per kreator, peluang BD, alert)
-        dihitung serentak dari file yang sama, lalu baris mentah dibuang (tidak pernah disimpan ke
-        DB). Tidak perlu lagi menjalankan artifak Agency Leaked Generator di luar platform.
+        TikTok (file MCN + TAP) dan Shopee — satu upload per platform, sekali proses. Perlu
+        menghitung ulang kebocoran link untuk minggu yang terlewat atau data historis?{" "}
+        <Link href="/link-leakage" className="text-blue-700 underline">
+          hitung ulang kebocoran → /link-leakage
+        </Link>
+        .
       </p>
 
       <details className="mt-6 max-w-2xl rounded-lg border border-blue-200 bg-blue-50/60 p-4" open>
@@ -227,30 +226,6 @@ export default async function IngestPage() {
       ) : (
         <p className="mt-2 rounded-lg border border-slate-200 bg-white p-4 text-sm text-slate-400">
           Role Anda tidak memiliki izin upload ingest.
-        </p>
-      )}
-
-      <h2 className="mt-10 text-xl font-semibold">
-        Upload Hasil Agency Leaked (Artifak) — fallback data lama
-      </h2>
-      <p className="mt-1 text-sm text-slate-500">
-        Tidak dipakai untuk upload mingguan lagi: analisa kebocoran kini dihitung platform dari file
-        MCN+TAP di atas (atau lewat halaman{" "}
-        <Link href="/link-leakage" className="text-blue-700 underline">
-          Link Leakage
-        </Link>
-        ). Jalur ini DIBIARKAN untuk memasukkan hasil artifak Excel lama (2 file, format v1/v2) —
-        mis. minggu-minggu historis yang file platform mentahnya sudah tidak ada. Platform hanya
-        menyimpan ROLLUP per kreator per minggu; status link & rasio bocor dihitung ulang
-        deterministik dengan ambang app_config yang sama.
-      </p>
-      {canUploadLeak ? (
-        <div className="mt-4 max-w-2xl">
-          <LeakArtifactForm />
-        </div>
-      ) : (
-        <p className="mt-4 rounded-lg border border-slate-200 bg-white p-4 text-sm text-slate-400">
-          Role Anda tidak memiliki izin upload hasil artifak.
         </p>
       )}
 

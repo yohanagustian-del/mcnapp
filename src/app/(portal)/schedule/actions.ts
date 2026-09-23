@@ -19,7 +19,7 @@ import type {
  * Discriminated-union return (never throw across the server-action boundary): Next.js
  * censors a server action's thrown Error message in production, so every rejection is
  * caught and returned as `error` (Bahasa Indonesia) instead. Same pattern as
- * src/app/(portal)/ingest/leak-actions.ts. Writes go through the service-role client
+ * src/app/(portal)/link-leakage/leak-artifact-actions.ts. Writes go through the service-role client
  * (RLS has no user write policy for live_schedule_slots); authorization is done here.
  */
 export type ScheduleActionResult =
