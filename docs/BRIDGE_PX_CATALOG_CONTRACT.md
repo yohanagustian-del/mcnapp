@@ -10,8 +10,9 @@ satu fixture bersama, tanpa paket terbit).
 
 Sumber data sisi CDPS: view `px_catalog_item_v` (migrasi
 `20261101010000_px_m3b_volume_eligibility_coverage.sql`) — SKU dengan verdict
-`lolos` terbaru pada policy aktif. Tugas job push di sisi CDPS (belum dibangun
-di sesi ini) ada di §"Sisi CDPS" di bawah.
+`lolos` terbaru pada policy aktif. Job push sisi CDPS SUDAH dibangun
+(2026-09-23, `MEAgrup/AgencyAPP` `docs/DECISIONS.md` "PX-CATALOG-PUSH-CDPS") — lihat §"Sisi CDPS"
+di bawah untuk lokasi kodenya.
 
 ## Envelope
 
@@ -53,7 +54,7 @@ Response: `{ "batch_key": "px-catalog-20260923-a1b2c3d4e5f6", "rows_received": 2
 2. **Nol angka volume, MUTLAK (D-06).** `gmv_30d`/pesanan/harga satuan/apa pun angka performa TIDAK PERNAH ada di payload ini — itu semua berhenti di CDPS. Baris hanya identitas produk + taksonomi + status afiliasi.
 3. **Nol identitas kreator, MUTLAK (K-2).** `creator_id`/`creator_ids`/nama kreator TIDAK PERNAH ada — `sudah_afiliasi` adalah boolean agregat ("ada kreator atau tidak"), bukan daftar siapa.
 4. **`price_segment` milik taksonomi MCN, diisi CDPS dari taksonomi yang sama** (kebalikan dari Flow C di mana `price_segment` milik MCN dikirim apa adanya ke CDPS yang menyimpannya sebagai TEXT bebas). Di sini nilainya harus salah satu dari lima segmen MCN (`low|entry|sweet|high|premium`) — nilai lain ⇒ 422 (bagian dari validasi kolom, bukan diterima lalu diabaikan).
-5. **Arah: CDPS push → MCN terima, selalu.** MCN tidak pernah menarik dari CDPS. Frekuensi: setelah tiap `evaluate/tick` di sisi CDPS (job belum dibangun — lihat §Sisi CDPS).
+5. **Arah: CDPS push → MCN terima, selalu.** MCN tidak pernah menarik dari CDPS. Frekuensi: setelah tiap `evaluate/tick` di sisi CDPS (lihat §Sisi CDPS untuk lokasi kode job-nya).
 6. **Snapshot = keadaan PENUH, bukan delta.** Tiap push menggantikan pemahaman MCN tentang katalog PX: baris yang ADA di push sebelumnya tapi TIDAK ADA lagi di push terbaru (batch_key berbeda dan berhasil diproses) ⇒ `active=false` di `px_catalog_items` — bukan dihapus (jejak tetap ada). `rows` boleh kosong (`[]`) untuk menyatakan "katalog PX kosong sekarang" — itu payload sah, bukan 422 (beda dari Flow C yang menolak nol baris, karena MCN kosong artinya "belum push", sedangkan CDPS kosong bisa berarti benar-benar tidak ada SKU lolos verdict saat ini).
 7. **Idempotensi wajib.** `Idempotency-Key` yang berulang ⇒ HTTP 200, hasil ASLI dari `px_catalog_pushes` (bukan re-proses payload baru), nol perubahan `px_catalog_items`.
 8. **Baris ≤ 5.000 per request.** Lebih dari itu ⇒ CDPS yang perlu paginasi (perubahan kontrak), bukan dipotong diam-diam di MCN.
@@ -77,14 +78,20 @@ membaca lewat server action admin, bukan langsung).
 - Tidak ada komisi/rate — Product Match menampilkan produk PX tanpa harga/komisi (label "Seller manage by MEA" saja), karena CDPS tidak mengirimkannya.
 - Tidak ada `deal_id`/kontrak — katalog PX bukan bagian dari `products_tap`/`brand_deals`, tabelnya terpisah (`px_catalog_items`), digabung hanya di lapisan tampilan (Product Match engine, `source: 'px'`).
 
-## Sisi CDPS (di luar lingkup repo `mcnapp` — tiket terpisah untuk sesi `MEAgrup/AgencyAPP`)
+## Sisi CDPS — SUDAH DIBANGUN (2026-09-23, `MEAgrup/AgencyAPP`)
 
-Job baru: setelah tiap `evaluate/tick` (Flow E), bangun payload dari
-`px_catalog_item_v` (SKU verdict `lolos` pada policy aktif) sesuai bentuk di
-atas, dan POST ke `${MCN_BRIDGE_URL}/api/bridge/px-catalog` dengan header yang
-sama. `MCN_BRIDGE_URL` = env baru di sisi CDPS (URL dasar deployment `mcnapp`,
-mis. `https://mcn.meaagency.co.id`). `price_segment` diisi dari taksonomi
-lima-segmen MCN (`low|entry|sweet|high|premium`) — CDPS TIDAK membuat enum
-segmen sendiri untuk field ini (Non-negotiables #4). Sampai job ini dibangun,
-MCN tidak menerima push apa pun dan menampilkan pesan "Belum ada produk PX
-dari CDPS" (Non-negotiables #9) — itu keadaan yang diharapkan, bukan bug.
+Dipicu dari akhir `POST/GET /internal/px/evaluate/tick` (Flow A+B) setiap
+tick berjalan — `productexchange.buildCatalogSnapshot(sql)` (baca
+`px_catalog_item_v`, bentuk payload persis kontrak di atas) +
+`apps/api/src/lib/px-catalog-push.ts::pushCatalogSnapshot()` (fetch +
+header sama persis §Envelope) + `productexchange.recordCatalogPush(sql, …)`
+(audit_log). `MCN_BRIDGE_URL` = env di sisi CDPS (URL dasar deployment
+`mcnapp`, contoh di `.env.example`). `price_segment` di luar taksonomi
+lima-segmen MCN (`low|entry|sweet|high|premium`) diubah jadi null di sisi
+CDPS sebelum dikirim (Non-negotiables #4) — satu baris kotor tidak
+menggagalkan seluruh payload. Rincian keputusan (termasuk pemetaan field
+`client_platform_id`) ada di `docs/DECISIONS.md` "PX-CATALOG-PUSH-CDPS".
+AKTIVASI mengikuti `evaluate/tick` sendiri (ketokan 2026-09-15): sampai cron
+dipasang, push ini pun hanya jalan mengikuti tick manual — di luar jam tick
+manual MCN tetap menampilkan pesan "Belum ada produk PX dari CDPS"
+(Non-negotiables #9), bukan bug.
