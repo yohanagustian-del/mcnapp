@@ -78,5 +78,6 @@ describe("genId (centralized entity IDs)", () => {
     expect(genId("CRT")).toMatch(/^CRT-[A-Z2-9]{5}$/);
     expect(genId("DEAL")).toMatch(/^DEAL-[A-Z2-9]{5}$/);
     expect(genId("LNK")).toMatch(/^LNK-[A-Z2-9]{5}$/);
+    expect(genId("LEAD")).toMatch(/^LEAD-[A-Z2-9]{5}$/);
   });
 });
