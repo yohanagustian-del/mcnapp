@@ -5,6 +5,7 @@ import { ChangePasswordButton } from "@/components/change-password-button";
 
 const CREATOR_NAV = [
   { href: "/portal", label: "Performa Saya" },
+  { href: "/portal/produk", label: "Produk Cocok Untukmu" },
   { href: "/portal/agency-plan", label: "Agency Plan" },
   { href: "/portal/reports", label: "Report Saya" },
   { href: "/portal/requests", label: "Request Brand/Ads" },
