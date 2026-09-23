@@ -44,7 +44,7 @@ export async function fetchWindowHistory(
   return fetchAll<SubcatSegmentGmvRow>(
     admin,
     "creator_subcat_segment_gmv",
-    "creator_id, level2_category, price_segment, gmv, live_gmv",
+    "creator_id, level2_category, price_segment, gmv, live_gmv, orders",
     (q) => {
       const filtered = q.gte("window_end", cutoff);
       return creatorId ? filtered.eq("creator_id", creatorId) : filtered;
