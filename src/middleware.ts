@@ -39,7 +39,10 @@ export async function middleware(request: NextRequest) {
     request.nextUrl.pathname.startsWith("/api/join") ||
     // PRD R36/PR-18: invite-token activation — the creator has no session yet
     // (that's what this page creates), so it must be reachable unauthenticated.
-    request.nextUrl.pathname.startsWith("/aktivasi");
+    request.nextUrl.pathname.startsWith("/aktivasi") ||
+    // Server-to-server bridges (PX-M3-A push out; PX catalog push in) — bearer
+    // secret IS the access control (route handler itself), no Supabase session.
+    request.nextUrl.pathname.startsWith("/api/bridge");
 
   if (!user && !isPublic) {
     const url = request.nextUrl.clone();
