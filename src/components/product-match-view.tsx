@@ -35,7 +35,7 @@ function CopyProductIdButton({ productId }: { productId: string }) {
   );
 }
 
-function ProductCard({ product, showCommission = true }: { product: MatchedProduct; showCommission?: boolean }) {
+function ProductCard({ product }: { product: MatchedProduct }) {
   return (
     <div className="rounded-lg border border-slate-200 bg-white p-3 text-sm">
       <div className="flex items-start justify-between gap-2">
@@ -55,7 +55,7 @@ function ProductCard({ product, showCommission = true }: { product: MatchedProdu
           </span>
         )}
         {product.orders > 0 && <span>· {product.orders} order</span>}
-        {showCommission && product.commissionPct != null && <span>· komisi {product.commissionPct}%</span>}
+        {product.commissionPct != null && <span>· komisi {product.commissionPct}%</span>}
       </div>
       <div className="mt-2 flex items-center justify-between gap-2">
         <CopyProductIdButton productId={product.productId} />
@@ -76,18 +76,12 @@ function ProductCard({ product, showCommission = true }: { product: MatchedProdu
 
 /**
  * Tampilan hasil Creator Product Match — dipakai apa adanya oleh /matching,
- * CM Workspace, dan portal kreator (CLAUDE.md #4). `showCommission` dimatikan
- * di portal kreator (M9: komisi MEA/margin tidak pernah ditampilkan ke kreator
- * — di sini hanya komisi kreator yang ditampilkan, jadi aman ditampilkan bila
- * dibutuhkan; halaman portal memilih untuk menyembunyikannya demi kesederhanaan).
+ * CM Workspace, dan portal kreator (CLAUDE.md #4). `commissionPct` yang
+ * dibawa `MatchedProduct` selalu komisi KREATOR (products_tap.commission_pct),
+ * tidak pernah komisi/margin MEA (field itu tidak pernah ada di engine ini) —
+ * jadi aman ditampilkan apa adanya di ketiga pemakai, termasuk portal kreator (M9).
  */
-export function ProductMatchView({
-  result,
-  showCommission = true,
-}: {
-  result: ProductMatchResult;
-  showCommission?: boolean;
-}) {
+export function ProductMatchView({ result }: { result: ProductMatchResult }) {
   if (result.categories.length === 0) {
     return (
       <p className="rounded-lg border border-slate-200 bg-white p-4 text-sm text-slate-500">
@@ -128,7 +122,7 @@ export function ProductMatchView({
             {cat.products.length > 0 ? (
               <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-4">
                 {cat.products.map((p) => (
-                  <ProductCard key={`${p.source}-${p.productId}`} product={p} showCommission={showCommission} />
+                  <ProductCard key={`${p.source}-${p.productId}`} product={p} />
                 ))}
               </div>
             ) : (
