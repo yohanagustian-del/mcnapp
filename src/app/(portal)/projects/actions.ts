@@ -36,8 +36,25 @@ export type AddParticipantResult =
   | { ok: true }
   | { ok: false; error: string };
 
+/**
+ * Discriminated state untuk form buat project — SAMA dengan pola DealFormState
+ * (deals/actions.ts): validasi isian manusia (nama kosong, Target GMV belum
+ * kebaca) ditulis sebagai `fieldErrors` yang tampil di sebelah kolomnya,
+ * BUKAN dilempar sebagai Error mentah — Next.js menyensor pesan Error di
+ * production jadi layar "Application error" generik (digest 365562566),
+ * bukan pesan Indonesia yang seharusnya dilihat pengisi form.
+ */
+export interface ProjectFormState {
+  ok: boolean;
+  message: string;
+  fieldErrors?: Record<string, string>;
+}
+
 /** Create project (Planning). PRD §3.1 — target dipecah harian via kurva (lib m7). */
-export async function createProject(formData: FormData): Promise<void> {
+export async function createProject(
+  _prev: ProjectFormState | null,
+  formData: FormData
+): Promise<ProjectFormState> {
   const actor = await requirePermission("m7.manage");
 
   const name = String(formData.get("name") ?? "").trim();
@@ -51,16 +68,22 @@ export async function createProject(formData: FormData): Promise<void> {
   const adsCap = parseRupiah(String(formData.get("ads_budget_cap") ?? ""));
   const targetCreatorsRaw = String(formData.get("target_creators") ?? "").trim();
   const targetCreators = targetCreatorsRaw ? Number(targetCreatorsRaw) : null;
-  if (targetCreators !== null && (!Number.isInteger(targetCreators) || targetCreators < 1)) {
-    throw new Error("Target creator harus bilangan bulat ≥ 1");
-  }
   const shape: CurveShape = formData.get("curve_shape") === "flat" ? "flat" : "ramp";
 
-  if (!name) throw new Error("Nama project wajib diisi");
+  const fieldErrors: Record<string, string> = {};
+  if (!name) fieldErrors.name = "Nama project wajib diisi";
   if (!isIsoDate(startDate) || !isIsoDate(endDate) || endDate < startDate) {
-    throw new Error("Periode project tidak valid (start ≤ end)");
+    fieldErrors.start_date = "Periode project tidak valid (start ≤ end)";
   }
-  if (targetGmv === null || targetGmv <= 0) throw new Error("Target GMV wajib diisi");
+  if (targetGmv === null || targetGmv <= 0) {
+    fieldErrors.target_gmv = "Target GMV wajib diisi, angka murni (mis. 50000000 atau Rp50.000.000)";
+  }
+  if (targetCreators !== null && (!Number.isInteger(targetCreators) || targetCreators < 1)) {
+    fieldErrors.target_creators = "Target creator harus bilangan bulat ≥ 1";
+  }
+  if (Object.keys(fieldErrors).length > 0) {
+    return { ok: false, message: "Periksa kembali isian form.", fieldErrors };
+  }
 
   const admin = createAdminClient();
   const { data, error } = await admin
@@ -73,12 +96,12 @@ export async function createProject(formData: FormData): Promise<void> {
     })
     .select("id")
     .single();
-  if (error) throw new Error(`Gagal membuat project: ${error.message}`);
+  if (error) return { ok: false, message: `Gagal membuat project: ${error.message}` };
 
   // R3: slug butuh id (unik by construction) → dibuat setelah insert, bukan di dalamnya.
   const slug = slugifyProjectName(name, data.id);
   const { error: slugError } = await admin.from("special_projects").update({ slug }).eq("id", data.id);
-  if (slugError) throw new Error(`Gagal membuat slug: ${slugError.message}`);
+  if (slugError) return { ok: false, message: `Gagal membuat slug: ${slugError.message}` };
 
   await writeAudit({
     actorId: actor.id, action: "m7.create_project", entityType: "special_projects",
@@ -86,6 +109,7 @@ export async function createProject(formData: FormData): Promise<void> {
     type: "auto",
   });
   revalidatePath("/projects");
+  return { ok: true, message: `Project "${name}" berhasil dibuat.` };
 }
 
 /** Buka/tutup pendaftaran publik (R8/§3.4 langkah 3) + tenggat opsional. */
