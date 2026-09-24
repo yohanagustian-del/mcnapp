@@ -1,7 +1,7 @@
 import { requireMember, hasPermission } from "@/lib/rbac";
 import { createClient } from "@/lib/supabase/server";
 import { PROJECT_TYPES } from "@/lib/m7/project-type";
-import { createProject } from "./actions";
+import { ProjectCreateForm } from "./project-create-form";
 import { ProjectsTable, type ProjectRow } from "./projects-table";
 
 export default async function ProjectsPage() {
@@ -50,44 +50,7 @@ export default async function ProjectsPage() {
         (alert anti-rugi bila ads &gt; komisi MEA), peserta & man power. Deterministik, 0 token AI.
       </p>
 
-      {canManage && (
-        <form
-          action={createProject}
-          className="mt-6 grid gap-3 rounded-lg border border-slate-200 bg-white p-4 sm:grid-cols-2 lg:grid-cols-4"
-        >
-          <input name="name" required placeholder="Nama project"
-            className="rounded-md border border-slate-300 px-3 py-2 text-sm" />
-          <select name="type" required className="rounded-md border border-slate-300 px-3 py-2 text-sm">
-            {PROJECT_TYPES.map((t) => (
-              <option key={t.value} value={t.value}>{t.label}</option>
-            ))}
-          </select>
-          <label className="flex items-center gap-2 text-xs text-slate-500">
-            Mulai
-            <input type="date" name="start_date" required
-              className="flex-1 rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-900" />
-          </label>
-          <label className="flex items-center gap-2 text-xs text-slate-500">
-            Selesai
-            <input type="date" name="end_date" required
-              className="flex-1 rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-900" />
-          </label>
-          <input name="target_gmv" required placeholder="Target GMV (Rp)"
-            className="rounded-md border border-slate-300 px-3 py-2 text-sm" />
-          <input name="target_creators" type="number" min="1" placeholder="Target jumlah creator"
-            className="rounded-md border border-slate-300 px-3 py-2 text-sm" />
-          <input name="ads_budget_cap" placeholder="Ads budget cap (Rp, opsional)"
-            className="rounded-md border border-slate-300 px-3 py-2 text-sm" />
-          <select name="curve_shape" className="rounded-md border border-slate-300 px-3 py-2 text-sm">
-            <option value="ramp">Kurva target: ramp-up (default)</option>
-            <option value="flat">Kurva target: flat</option>
-          </select>
-          <button type="submit"
-            className="rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-700">
-            Buat Project
-          </button>
-        </form>
-      )}
+      {canManage && <ProjectCreateForm projectTypes={PROJECT_TYPES} />}
 
       <ProjectsTable rows={projectRows} />
     </div>
