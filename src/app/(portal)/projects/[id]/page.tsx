@@ -22,6 +22,7 @@ import { CmPerformanceTable, type CmPerformanceRow } from "./cm-performance-tabl
 import { JoinRequestPanel, type JoinRequestRow } from "../join-request-panel";
 import { ExternalApplicantPanel, type ExternalApplicantRow } from "../external-applicant-panel";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { ManpowerMemberPicker } from "./manpower-member-picker";
 
 const STATUS_LABELS: Record<string, string> = {
   on_track: "On-track", behind: "Behind", ahead: "Ahead",
@@ -704,12 +705,7 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
             <form action={assignManpower}
               className="mt-2 grid gap-2 rounded-lg border border-slate-200 bg-white p-3 text-sm sm:grid-cols-2">
               <input type="hidden" name="project_id" value={project.id} />
-              <select name="member_id" required className="rounded-md border border-slate-300 px-3 py-2">
-                <option value="">— Pilih anggota tim —</option>
-                {(teamMembers ?? []).map((t) => (
-                  <option key={t.id} value={t.id}>{t.name} ({t.role})</option>
-                ))}
-              </select>
+              <ManpowerMemberPicker members={teamMembers ?? []} />
               <select name="role" className="rounded-md border border-slate-300 px-3 py-2">
                 <option value="">— Peran di project —</option>
                 {MANPOWER_ROLES.map((r) => (

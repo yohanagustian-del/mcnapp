@@ -120,6 +120,12 @@ export const NAV_ITEMS: NavItem[] = [
 /** Server-side write permissions per action (enforced in server actions + RLS, not just UI). */
 export const PERMISSIONS: Record<string, Role[]> = {
   "team.bulk_upload": MANAGEMENT_ROLES,
+  // Nonaktifkan/aktifkan akun (mencabut akses login — RLS 0002 menggerbang
+  // sesi lewat `active`). Management saja: menonaktifkan berpotensi merugikan
+  // (CLAUDE.md #2), dan hard delete tidak dipakai — puluhan tabel (audit_logs,
+  // creators.owner_cpm_id, project_manpower, dst) mereferensikan team_members
+  // tanpa cascade, jadi riwayatnya harus tetap ada.
+  "team.deactivate": MANAGEMENT_ROLES,
   // Tambah kreator (manual satu baris lewat tombol "Tambah Kreator" di tab Kreator,
   // import Username+CM, dan upload master sheet lengkap). CM ikut punya izin ini:
   // CM-lah yang mendaftarkan kreator yang mereka pegang, dan mereka sudah boleh

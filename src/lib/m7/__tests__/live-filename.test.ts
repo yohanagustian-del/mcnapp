@@ -119,4 +119,37 @@ describe("parseLiveFilename", () => {
   it("still rejects a single underscore before the date even with no kind word (ambiguity guard unchanged)", () => {
     expect(parseLiveFilename("tesakun_Sesi_1_17_September_2026.xlsx")).toBeNull();
   });
+
+  // Bug report (2026-09-24): a real username containing "_" (e.g. "bang_dull111")
+  // got truncated to "bang" because the no-hint heuristic stops at the first
+  // separator. When the caller supplies the selected participant's username (+
+  // aliases) as a hint, it must be preferred over that heuristic.
+  it("keeps a username containing '_' intact when it's supplied as a known candidate", () => {
+    expect(
+      parseLiveFilename("bang_dull111 Product sesi 1, 24 September 2026.xlsx", ["bang_dull111"])
+    ).toEqual({ username: "bang_dull111", sessionNo: 1, date: "2026-09-24" });
+    expect(
+      parseLiveFilename("bang_dull111_Sesi_1__24_September_2026.xlsx", ["bang_dull111"])
+    ).toEqual({ username: "bang_dull111", sessionNo: 1, date: "2026-09-24" });
+  });
+
+  it("still truncates at the first separator when the underscored username isn't a known candidate", () => {
+    // Documents the residual ambiguity: without a hint, there's no way to tell a
+    // real underscore-in-username apart from a dropped filler word.
+    expect(
+      parseLiveFilename("bang_dull111 Product sesi 1, 24 September 2026.xlsx")
+    ).toEqual({ username: "bang", sessionNo: 1, date: "2026-09-24" });
+  });
+
+  it("prefers the longest matching known candidate (one alias isn't a prefix trap for another)", () => {
+    expect(
+      parseLiveFilename("bang_dull111 Product sesi 1, 24 September 2026.xlsx", ["bang", "bang_dull111"])
+    ).toEqual({ username: "bang_dull111", sessionNo: 1, date: "2026-09-24" });
+  });
+
+  it("falls back to the no-hint heuristic when no known candidate matches the filename", () => {
+    expect(
+      parseLiveFilename("haikalpratama136 Product sesi 1, 15 September 2026.xlsx", ["someoneelse"])
+    ).toEqual({ username: "haikalpratama136", sessionNo: 1, date: "2026-09-15" });
+  });
 });

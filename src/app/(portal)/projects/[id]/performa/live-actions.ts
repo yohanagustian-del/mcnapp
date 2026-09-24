@@ -8,7 +8,7 @@ import { hasPermission, requireMember, type TeamMember } from "@/lib/rbac";
 import { canUploadProjectPerformance, isAssignedManpower } from "@/lib/m7/access";
 import { parseLiveFilename } from "@/lib/m7/live-filename";
 import {
-  analyzeLiveSessionGroups, groupUploadedFiles, persistLiveSessions, toPreview,
+  analyzeLiveSessionGroups, groupUploadedFiles, loadKnownUsernames, persistLiveSessions, toPreview,
   type LiveSessionOwner, type SessionGroupPreview, type SessionOverrides, type UnreadableFile,
 } from "@/lib/m7/live-ingest";
 import { verifyLiveSession } from "@/lib/m7/live-verify";
@@ -90,10 +90,11 @@ export async function previewLiveSessions(formData: FormData): Promise<PreviewLi
     const files = formData.getAll("files").filter((f): f is File => f instanceof File && f.size > 0);
     if (files.length === 0) throw new Error("Pilih minimal satu file untuk diunggah");
 
-    const [owner, tolerance] = await Promise.all([
+    const [owner, tolerance, knownUsernames] = await Promise.all([
       projectOwner(admin, projectId), getConfig<number>("m7.gmv_trend_tolerance"),
+      loadKnownUsernames(admin, creatorId),
     ]);
-    const { groups, unreadable } = await groupUploadedFiles(files);
+    const { groups, unreadable } = await groupUploadedFiles(files, knownUsernames);
     const analyzed = await analyzeLiveSessionGroups(admin, owner, creatorId, groups, tolerance);
 
     return { ok: true, sessions: analyzed.map(toPreview), unreadableFiles: unreadable };
@@ -123,10 +124,11 @@ export async function saveLiveSessions(formData: FormData): Promise<SaveLiveSess
     const files = formData.getAll("files").filter((f): f is File => f instanceof File && f.size > 0);
     if (files.length === 0) throw new Error("Pilih minimal satu file untuk diunggah");
 
-    const [owner, tolerance] = await Promise.all([
+    const [owner, tolerance, knownUsernames] = await Promise.all([
       projectOwner(admin, projectId), getConfig<number>("m7.gmv_trend_tolerance"),
+      loadKnownUsernames(admin, creatorId),
     ]);
-    const { groups, unreadable } = await groupUploadedFiles(files);
+    const { groups, unreadable } = await groupUploadedFiles(files, knownUsernames);
     const analyzed = await analyzeLiveSessionGroups(admin, owner, creatorId, groups, tolerance);
 
     const result = await persistLiveSessions(admin, owner, creatorId, analyzed, {

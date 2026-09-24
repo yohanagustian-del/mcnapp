@@ -146,3 +146,49 @@ export async function uploadTeamMembers(formData: FormData): Promise<UploadRepor
   revalidatePath("/tim");
   return report;
 }
+
+export interface TeamMemberActionState {
+  ok: boolean;
+  message: string;
+}
+
+/**
+ * Nonaktifkan/aktifkan akun — soft delete via `active` (bukan hard DELETE:
+ * puluhan tabel mereferensikan team_members tanpa cascade, dan RLS 0002 sudah
+ * menggerbang sesi lewat kolom ini, jadi menonaktifkan = mencabut akses
+ * seketika). Trigger `guard_last_director` (migrasi 0010) menolak menonaktifkan
+ * Director aktif terakhir — errornya dikembalikan sebagai pesan, bukan throw
+ * (Next.js menyensor Error mentah di production, lihat projects/actions.ts).
+ */
+export async function setTeamMemberActive(formData: FormData): Promise<TeamMemberActionState> {
+  const actor = await requirePermission("team.deactivate");
+  const memberId = String(formData.get("member_id") ?? "").trim();
+  const active = formData.get("active") === "true";
+  if (!memberId) return { ok: false, message: "Anggota tim tidak valid" };
+
+  const admin = createAdminClient();
+  const { data: before } = await admin
+    .from("team_members").select("name, active").eq("id", memberId).maybeSingle();
+  if (!before) return { ok: false, message: "Anggota tim tidak ditemukan" };
+  if (before.active === active) {
+    return { ok: true, message: `${before.name} sudah ${active ? "aktif" : "nonaktif"}.` };
+  }
+
+  const { error } = await admin.from("team_members").update({ active }).eq("id", memberId);
+  if (error) {
+    return { ok: false, message: `Gagal ${active ? "mengaktifkan" : "menonaktifkan"} ${before.name}: ${error.message}` };
+  }
+
+  await writeAudit({
+    actorId: actor.id,
+    action: active ? "team_member.activate" : "team_member.deactivate",
+    entityType: "team_members",
+    entityId: memberId,
+    before: { active: before.active },
+    after: { active },
+    type: "auto",
+  });
+
+  revalidatePath("/tim");
+  return { ok: true, message: `${before.name} berhasil di${active ? "aktifkan" : "nonaktifkan"}.` };
+}

@@ -128,16 +128,35 @@ export function ownerDateWindow(owner: LiveSessionOwner): { start: string; end: 
 }
 
 /**
+ * Username aktif + alias kreator (lowercase) — kandidat untuk disambiguasi
+ * nama file (lihat `knownUsernames` di live-filename.ts) supaya username yang
+ * SENDIRI mengandung "_" (mis. "bang_dull111") tidak salah kepotong di
+ * separator pertama. Dipanggil sebelum `groupUploadedFiles` karena peserta
+ * sudah dipilih di form upload lebih dulu (R40) — `analyzeLiveSessionGroups`
+ * di bawah query hal yang sama lagi untuk V1, sengaja: query tunggal per
+ * kreator, murah, dan menjaga kedua fungsi tetap independen/testable.
+ */
+export async function loadKnownUsernames(admin: SupabaseClient, creatorId: string): Promise<string[]> {
+  const [{ data: creator }, { data: aliasRows }] = await Promise.all([
+    admin.from("creators").select("username").eq("id", creatorId).single(),
+    admin.from("creator_username_aliases").select("username").eq("creator_id", creatorId),
+  ]);
+  return [creator?.username, ...(aliasRows ?? []).map((a) => a.username)].filter(
+    (u): u is string => Boolean(u)
+  );
+}
+
+/**
  * Kelompokkan file per (username, sesi, tanggal) dari NAMA file; jenis
  * Product vs Trend Stats dibaca dari ISI file (kolomnya), bukan namanya.
  */
 export async function groupUploadedFiles(
-  files: File[]
+  files: File[], knownUsernames: string[] = []
 ): Promise<{ groups: SessionGroup[]; unreadable: UnreadableFile[] }> {
   const groups = new Map<string, SessionGroup>();
   const unreadable: UnreadableFile[] = [];
   for (const file of files) {
-    const parsed = parseLiveFilename(file.name);
+    const parsed = parseLiveFilename(file.name, knownUsernames);
     if (!parsed) {
       unreadable.push({ name: file.name, reason: "Nama file tidak terbaca — butuh username, \"sesi\" + nomor, dan tanggal (§9)." });
       continue;

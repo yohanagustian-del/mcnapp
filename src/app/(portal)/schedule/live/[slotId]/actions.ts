@@ -9,7 +9,7 @@ import { assertCreatorInScope } from "@/lib/schedule/scope";
 import { slotUploadEligibility } from "@/lib/schedule/live-report";
 import type { SlotStatus } from "@/lib/schedule/types";
 import {
-  analyzeLiveSessionGroups, groupUploadedFiles, persistLiveSessions, toPreview,
+  analyzeLiveSessionGroups, groupUploadedFiles, loadKnownUsernames, persistLiveSessions, toPreview,
   type LiveSessionOwner, type SessionGroupPreview, type SessionOverrides, type UnreadableFile,
 } from "@/lib/m7/live-ingest";
 import { buildSlotLiveReportData } from "@/lib/m7/report-data";
@@ -103,8 +103,10 @@ export async function previewSlotLiveSessions(formData: FormData): Promise<Previ
     const files = formData.getAll("files").filter((f): f is File => f instanceof File && f.size > 0);
     if (files.length === 0) throw new Error("Pilih minimal satu file untuk diunggah");
 
-    const tolerance = await getConfig<number>("m7.gmv_trend_tolerance");
-    const { groups, unreadable } = await groupUploadedFiles(files);
+    const [tolerance, knownUsernames] = await Promise.all([
+      getConfig<number>("m7.gmv_trend_tolerance"), loadKnownUsernames(admin, slot.creator_id),
+    ]);
+    const { groups, unreadable } = await groupUploadedFiles(files, knownUsernames);
     const analyzed = await analyzeLiveSessionGroups(admin, slotOwner(slot), slot.creator_id, groups, tolerance);
     return { ok: true, sessions: analyzed.map(toPreview), unreadableFiles: unreadable };
   } catch (e) {
@@ -131,8 +133,10 @@ export async function saveSlotLiveSessions(formData: FormData): Promise<SaveResu
     const files = formData.getAll("files").filter((f): f is File => f instanceof File && f.size > 0);
     if (files.length === 0) throw new Error("Pilih minimal satu file untuk diunggah");
 
-    const tolerance = await getConfig<number>("m7.gmv_trend_tolerance");
-    const { groups, unreadable } = await groupUploadedFiles(files);
+    const [tolerance, knownUsernames] = await Promise.all([
+      getConfig<number>("m7.gmv_trend_tolerance"), loadKnownUsernames(admin, slot.creator_id),
+    ]);
+    const { groups, unreadable } = await groupUploadedFiles(files, knownUsernames);
     const owner = slotOwner(slot);
     const analyzed = await analyzeLiveSessionGroups(admin, owner, slot.creator_id, groups, tolerance);
     const result = await persistLiveSessions(admin, owner, slot.creator_id, analyzed, {
