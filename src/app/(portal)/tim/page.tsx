@@ -4,10 +4,12 @@ import { createClient } from "@/lib/supabase/server";
 import { CsvUploadForm } from "@/components/csv-upload-form";
 import { uploadTeamMembers } from "./actions";
 import { DownloadTeamTemplateButton } from "./download-template-button";
+import { ToggleActiveButton } from "./toggle-active-button";
 
 export default async function TimPage() {
   const member = await requireMember();
   if (!hasPermission("team.bulk_upload", member.role)) redirect("/dashboard");
+  const canDeactivate = hasPermission("team.deactivate", member.role);
 
   const supabase = await createClient();
   const { data: members } = await supabase
@@ -49,6 +51,7 @@ export default async function TimPage() {
               <th className="px-4 py-3">Grup</th>
               <th className="px-4 py-3">Segmen</th>
               <th className="px-4 py-3">Status</th>
+              {canDeactivate && <th className="px-4 py-3">Aksi</th>}
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
@@ -60,11 +63,16 @@ export default async function TimPage() {
                 <td className="px-4 py-2">{m.team_group}</td>
                 <td className="px-4 py-2">{m.platform_segment ?? "—"}</td>
                 <td className="px-4 py-2">{m.active ? "Aktif" : "Nonaktif"}</td>
+                {canDeactivate && (
+                  <td className="px-4 py-2">
+                    <ToggleActiveButton memberId={m.id} memberName={m.name} active={m.active} />
+                  </td>
+                )}
               </tr>
             ))}
             {(members ?? []).length === 0 && (
               <tr>
-                <td colSpan={6} className="px-4 py-6 text-center text-slate-400">
+                <td colSpan={canDeactivate ? 7 : 6} className="px-4 py-6 text-center text-slate-400">
                   Belum ada anggota tim. Upload CSV untuk seed awal.
                 </td>
               </tr>

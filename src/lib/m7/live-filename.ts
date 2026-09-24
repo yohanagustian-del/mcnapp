@@ -47,24 +47,69 @@ const MONTHS_ID: Record<string, number> = {
 // itself. Anything (".*?", lazy) is then allowed between that separator and
 // "sesi" — an AM's rename can drop or reword the product/trend-stats hint
 // entirely; it's no longer this parser's job to read it (see file header).
+//
+// This is inherently ambiguous when the REAL username itself contains "_"
+// (e.g. "bang_dull111"): "first separator wins" stops at "bang". There is no
+// way to tell that apart from "bang" + a dropped filler word using the
+// filename text alone — see `knownUsernames` below, which is how the caller
+// (who already knows which participant was selected) resolves it.
 const FILENAME_RE =
   /^([a-z0-9._]+?)[ _]+.*?sesi[ _]*(\d+)(?:,\s*|__)(\d{1,2})[ _]+([a-z]+)[ _]+(\d{4})\.xlsx$/i;
 
-export function parseLiveFilename(filename: string): ParsedLiveFilename | null {
-  const match = FILENAME_RE.exec(filename.trim());
-  if (!match) return null;
-  const [, username, sessionNoRaw, dayRaw, monthRaw, yearRaw] = match;
+// Same tail as FILENAME_RE, applied to whatever remains AFTER a known
+// username has already been stripped off the front (see below) — so it
+// starts at the separator right after the username instead of re-deciding
+// where the username ends.
+const REST_RE =
+  /^[ _]+.*?sesi[ _]*(\d+)(?:,\s*|__)(\d{1,2})[ _]+([a-z]+)[ _]+(\d{4})\.xlsx$/i;
 
+function finishParse(
+  sessionNoRaw: string, dayRaw: string, monthRaw: string, yearRaw: string
+): Omit<ParsedLiveFilename, "username"> | null {
   const monthNum = MONTHS_ID[monthRaw.toLowerCase()];
   if (!monthNum) return null;
-
   const day = Number(dayRaw);
   if (day < 1 || day > 31) return null;
   const year = Number(yearRaw);
-
   return {
-    username: username.toLowerCase(),
     sessionNo: Number(sessionNoRaw),
     date: `${year}-${String(monthNum).padStart(2, "0")}-${String(day).padStart(2, "0")}`,
   };
+}
+
+/**
+ * @param knownUsernames Kandidat username nyata (peserta terpilih + alias-nya,
+ * lowercase atau tidak — dinormalisasi di sini). Kalau nama filenya diawali
+ * salah satu kandidat ini persis, kandidat itu DIPAKAI APA ADANYA sebagai
+ * username walau mengandung "_" — baru sisanya (filler kind-word opsional +
+ * "sesi" + nomor + tanggal) di-parse. Tanpa kandidat yang cocok (termasuk saat
+ * parameter ini kosong — kreator yang belum diketahui, atau caller lama yang
+ * belum diupdate), jatuh ke heuristik lama (berhenti di separator pertama).
+ */
+export function parseLiveFilename(
+  filename: string, knownUsernames?: string[]
+): ParsedLiveFilename | null {
+  const trimmed = filename.trim();
+
+  if (knownUsernames?.length) {
+    const candidates = [...new Set(knownUsernames.map((u) => u.trim().toLowerCase()))]
+      .filter(Boolean)
+      .sort((a, b) => b.length - a.length); // terpanjang dulu, jaga-jaga satu alias jadi prefix alias lain
+    const lower = trimmed.toLowerCase();
+    for (const candidate of candidates) {
+      if (!lower.startsWith(candidate)) continue;
+      const restMatch = REST_RE.exec(trimmed.slice(candidate.length));
+      if (!restMatch) continue;
+      const [, sessionNoRaw, dayRaw, monthRaw, yearRaw] = restMatch;
+      const parsed = finishParse(sessionNoRaw, dayRaw, monthRaw, yearRaw);
+      if (parsed) return { username: candidate, ...parsed };
+    }
+  }
+
+  const match = FILENAME_RE.exec(trimmed);
+  if (!match) return null;
+  const [, username, sessionNoRaw, dayRaw, monthRaw, yearRaw] = match;
+  const parsed = finishParse(sessionNoRaw, dayRaw, monthRaw, yearRaw);
+  if (!parsed) return null;
+  return { username: username.toLowerCase(), ...parsed };
 }
