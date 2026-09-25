@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import Papa from "papaparse";
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { useCreatorFilter } from "@/components/creator-filter";
 import { MAX_BULK_DELETE } from "@/lib/creators/delete";
@@ -172,6 +173,13 @@ interface TableColumn {
   cell: (c: CreatorTableRow, ctx: CellContext) => ReactNode;
   /** Kelas <td>; default `td` (nowrap). */
   className?: string;
+  /**
+   * Teks kolom ini untuk export CSV. Default (tidak diisi): `String(value ?? "—")`.
+   * Diisi hanya saat tampilan sel beda dari nilai urutnya (Rupiah, persen, label
+   * kelas/estimasi, sisa kontrak, niche gabungan) — supaya CSV terbaca sama seperti
+   * yang ditampilkan tabel, bukan angka mentah.
+   */
+  csvValue?: (c: CreatorTableRow, nowMs: number) => string;
 }
 
 /**
@@ -223,6 +231,7 @@ const COLUMNS: TableColumn[] = [
     label: "Kelas Kreator",
     compact: true,
     value: (c) => creatorClassLabel(c.creator_class),
+    csvValue: (c) => creatorClassLabel(c.creator_class),
     cell: (c) => (
       <span className={creatorClassBadge(c.creator_class)}>{creatorClassLabel(c.creator_class)}</span>
     ),
@@ -230,6 +239,7 @@ const COLUMNS: TableColumn[] = [
   {
     label: "Niche (Top 3)",
     value: (c) => c.top_niches?.[0] ?? c.niche,
+    csvValue: (c) => (c.top_niches?.length ? c.top_niches.slice(0, 3).join(", ") : c.niche ?? "—"),
     className: "px-2 py-2",
     cell: (c) => {
       const niches: string[] = c.top_niches ?? (c.niche ? [c.niche] : []);
@@ -252,9 +262,9 @@ const COLUMNS: TableColumn[] = [
     cell: (c) => c.followers ?? "—",
   },
   { label: "Kualitas", value: (c) => c.content_quality, cell: (c) => c.content_quality ?? "—" },
-  { label: "GMV Total", hint: "(avg/bln)", compact: true, value: (c) => c.gmv, cell: (c) => formatRp(c.gmv) },
-  { label: "GMV Live", hint: "(avg/bln)", value: (c) => c.gmv_live, cell: (c) => formatRp(c.gmv_live) },
-  { label: "GMV Video", hint: "(avg/bln)", value: (c) => c.gmv_video, cell: (c) => formatRp(c.gmv_video) },
+  { label: "GMV Total", hint: "(avg/bln)", compact: true, value: (c) => c.gmv, csvValue: (c) => formatRp(c.gmv), cell: (c) => formatRp(c.gmv) },
+  { label: "GMV Live", hint: "(avg/bln)", value: (c) => c.gmv_live, csvValue: (c) => formatRp(c.gmv_live), cell: (c) => formatRp(c.gmv_live) },
+  { label: "GMV Video", hint: "(avg/bln)", value: (c) => c.gmv_video, csvValue: (c) => formatRp(c.gmv_video), cell: (c) => formatRp(c.gmv_video) },
   {
     label: "Sharing Komisi",
     compact: true,
@@ -265,6 +275,7 @@ const COLUMNS: TableColumn[] = [
         : c.commission_share <= 1
           ? c.commission_share * 100
           : c.commission_share,
+    csvValue: (c) => formatShare(c.commission_share),
     cell: (c) => formatShare(c.commission_share),
   },
   {
@@ -282,6 +293,7 @@ const COLUMNS: TableColumn[] = [
   {
     label: "Rate Card (Rp)",
     value: (c) => c.rate_card,
+    csvValue: (c) => formatRp(c.rate_card),
     className: "px-2 py-2",
     cell: (c, ctx) =>
       ctx.canUpload ? (
@@ -309,6 +321,7 @@ const COLUMNS: TableColumn[] = [
     label: "Level",
     compact: true,
     value: (c) => c.level,
+    csvValue: (c) => (c.level ? `L${c.level}` : "—"),
     cell: (c) => {
       const mismatch = levelMismatch(c.level, c.level_estimate);
       return (
@@ -329,6 +342,7 @@ const COLUMNS: TableColumn[] = [
   {
     label: "Level (est. GMV)",
     value: (c) => c.level_estimate,
+    csvValue: (c) => estimateLabel(c.level_estimate),
     cell: (c) => estimateLabel(c.level_estimate),
   },
   // Tanggal ISO ("2026-01-31") urut leksikografis = urut kronologis.
@@ -343,6 +357,7 @@ const COLUMNS: TableColumn[] = [
     label: "Sisa Kontrak",
     compact: true,
     value: (c, nowMs) => contractDays(c.join_date, c.contract_end_date, nowMs),
+    csvValue: (c, nowMs) => contractRemaining(c.join_date, c.contract_end_date, nowMs).label,
     cell: (c, ctx) => {
       const r = contractRemaining(c.join_date, c.contract_end_date, ctx.nowMs);
       return <span className={r.danger ? "font-medium text-red-600" : undefined}>{r.label}</span>;
@@ -549,6 +564,33 @@ export function CreatorsTable({
 
   const labelOf = (c: CreatorTableRow) => c.username || c.name || c.id;
 
+  /**
+   * Export kolom yang SEDANG TAMPIL, untuk baris hasil filter+urut saat ini
+   * (bukan seluruh `rows` mentah) — supaya CSV persis apa yang dilihat user di
+   * layar, termasuk saat filter CM/pencarian username aktif. Data sudah dimuat
+   * di klien (tidak ada query baru), jadi tidak menambah paparan data.
+   */
+  const exportCsv = useCallback(() => {
+    const data = sortedRows.map((c) => {
+      const row: Record<string, string> = {};
+      for (const col of visibleColumns) {
+        row[col.label] = col.csvValue
+          ? col.csvValue(c, nowMs)
+          : String(normalizeSortValue(col.value ? col.value(c, nowMs) : null) ?? "—");
+      }
+      return row;
+    });
+    const csv = Papa.unparse(data, { columns: visibleColumns.map((c) => c.label) });
+    // BOM supaya Excel membaca UTF-8 dengan benar (karakter Rp/aksen tidak rusak).
+    const blob = new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `kreator_${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }, [sortedRows, visibleColumns, nowMs]);
+
   const showActions = canEdit || canDelete || canRequestCm;
   const requestedIds = useMemo(() => new Set(requestedCreatorIds ?? []), [requestedCreatorIds]);
 
@@ -680,9 +722,20 @@ export function CreatorsTable({
             </>
           )}
         </div>
-        <span className="text-xs text-slate-400">
-          Klik judul kolom untuk mengurutkan · pilihan kolom tersimpan di browser ini
-        </span>
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-slate-400">
+            Klik judul kolom untuk mengurutkan · pilihan kolom tersimpan di browser ini
+          </span>
+          <button
+            type="button"
+            onClick={exportCsv}
+            disabled={sortedRows.length === 0}
+            title="Export kolom yang tampil, untuk baris hasil filter saat ini"
+            className="rounded-md border border-slate-300 px-3 py-1 text-sm text-slate-700 hover:bg-slate-50 disabled:opacity-40"
+          >
+            Export CSV
+          </button>
+        </div>
       </div>
 
       <div className="overflow-x-auto">
