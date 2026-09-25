@@ -11,6 +11,8 @@ export interface UploadReport {
   summary?: { label: string; value: string }[];
   /** Peringatan non-fatal: upload berhasil tapi ada yang perlu ditindaklanjuti. */
   warning?: string;
+  /** Password sementara akun baru (tab Tim) — ditampilkan sekali, tidak disimpan ulang. */
+  credentials?: { email: string; password: string }[];
 }
 
 /**
@@ -95,6 +97,33 @@ export function CsvUploadForm({
             </dl>
           )}
           {report.warning && <p className="mt-2 text-xs text-amber-800">⚠ {report.warning}</p>}
+        </div>
+      )}
+
+      {report && !error && report.credentials && report.credentials.length > 0 && (
+        <div className="mt-3 rounded-md border border-amber-300 bg-amber-50 p-3" role="status">
+          <p className="text-sm font-semibold text-amber-900">
+            🔑 Password sementara akun baru — hanya ditampilkan sekali di sini
+          </p>
+          <p className="mt-1 text-xs text-amber-800">
+            Segera catat &amp; teruskan ke masing-masing anggota tim, lalu minta ganti password setelah login pertama.
+          </p>
+          <table className="mt-2 w-full text-xs">
+            <thead className="text-left text-amber-700">
+              <tr>
+                <th className="py-1 pr-4">Email</th>
+                <th className="py-1">Password sementara</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-amber-100">
+              {report.credentials.map((c) => (
+                <tr key={c.email}>
+                  <td className="py-1 pr-4 text-amber-900">{c.email}</td>
+                  <td className="py-1 font-mono text-amber-900">{c.password}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
       )}
 

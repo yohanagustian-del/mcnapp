@@ -126,6 +126,10 @@ export const PERMISSIONS: Record<string, Role[]> = {
   // creators.owner_cpm_id, project_manpower, dst) mereferensikan team_members
   // tanpa cascade, jadi riwayatnya harus tetap ada.
   "team.deactivate": MANAGEMENT_ROLES,
+  // Tambah satu akun anggota tim lewat form (di luar bulk upload). Sengaja sama
+  // persis dengan team.bulk_upload: menambah akun = memberi akses login baru ke
+  // sistem internal, jadi dibatasi setara/di atas SPV (director/head/spv).
+  "team.add_single": MANAGEMENT_ROLES,
   // Tambah kreator (manual satu baris lewat tombol "Tambah Kreator" di tab Kreator,
   // import Username+CM, dan upload master sheet lengkap). CM ikut punya izin ini:
   // CM-lah yang mendaftarkan kreator yang mereka pegang, dan mereka sudah boleh

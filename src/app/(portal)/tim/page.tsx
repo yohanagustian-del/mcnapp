@@ -5,11 +5,13 @@ import { CsvUploadForm } from "@/components/csv-upload-form";
 import { uploadTeamMembers } from "./actions";
 import { DownloadTeamTemplateButton } from "./download-template-button";
 import { ToggleActiveButton } from "./toggle-active-button";
+import { AddMemberForm } from "./add-member-form";
 
 export default async function TimPage() {
   const member = await requireMember();
   if (!hasPermission("team.bulk_upload", member.role)) redirect("/dashboard");
   const canDeactivate = hasPermission("team.deactivate", member.role);
+  const canAddSingle = hasPermission("team.add_single", member.role);
 
   const supabase = await createClient();
   const { data: members } = await supabase
@@ -37,9 +39,21 @@ export default async function TimPage() {
         <CsvUploadForm
           action={uploadTeamMembers}
           buttonLabel="Upload Anggota Tim"
-          helpText="Kolom CSV: name, email, role (wajib); team_group & platform_segment opsional. team_group kosong akan diisi otomatis dari role (cpm/cm_lead→cm, director/head/spv→management, dst). Role: director|head|spv|cm_lead|cpm|bizdev_lead|bizdev|campaign_ops|bd_admin|ads_support|acquisition_lead|acquisition_spec|campaign_external|creator_support|finance|od_viewer. Catatan: 'cm' bukan role — pakai 'cpm' atau 'cm_lead'."
+          helpText="Kolom CSV: name, email, role (wajib); team_group & platform_segment opsional. team_group kosong akan diisi otomatis dari role (cpm/cm_lead→cm, director/head/spv→management, dst). Role: director|head|spv|cm_lead|cpm|bizdev_lead|bizdev|campaign_ops|bd_admin|ads_support|acquisition_lead|acquisition_spec|campaign_external|creator_support|finance|od_viewer. Catatan: 'cm' bukan role — pakai 'cpm' atau 'cm_lead'. Setiap akun baru otomatis dapat password sementara (ditampilkan sekali setelah upload)."
         />
       </div>
+
+      {canAddSingle && (
+        <div className="mt-6">
+          <h2 className="text-sm font-semibold text-slate-700">Tambah Akun Satuan</h2>
+          <p className="mt-1 text-xs text-slate-500">
+            Khusus Director/Head/SPV. Akun baru otomatis dapat password sementara — ditampilkan sekali di layar ini.
+          </p>
+          <div className="mt-2">
+            <AddMemberForm />
+          </div>
+        </div>
+      )}
 
       <div className="mt-6 overflow-x-auto rounded-lg border border-slate-200 bg-white">
         <table className="min-w-full text-sm">
