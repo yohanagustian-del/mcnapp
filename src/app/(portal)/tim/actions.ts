@@ -7,6 +7,7 @@ import { writeAudit } from "@/lib/audit";
 import { requirePermission, ROLES, type Role } from "@/lib/rbac";
 import { parseSheet } from "@/lib/utils/sheet";
 import { ROLE_TEAM_GROUP, SEGMENTS, TEAM_GROUPS } from "@/lib/tim/roles";
+import { generateTempPassword } from "@/lib/utils/password";
 
 /** Pesan error yang menyebut kolom + nilai yang ditolak, bukan sekadar daftar enum. */
 function roleErrorMessage(value: string): string {
@@ -56,6 +57,12 @@ export interface UploadReport {
   summary?: { label: string; value: string }[];
   /** Peringatan non-fatal (upload tetap berhasil), mis. kolom opsional tidak ditemukan. */
   warning?: string;
+  /**
+   * Password sementara akun baru — ditampilkan SEKALI di layar hasil upload (tidak
+   * disimpan di sisi kita, hanya Supabase Auth yang punya hash-nya). Kosong untuk
+   * baris yang emailnya sudah punya auth user sebelumnya (lihat fallback authError).
+   */
+  credentials?: { email: string; password: string }[];
 }
 
 /**
@@ -69,7 +76,7 @@ export async function uploadTeamMembers(formData: FormData): Promise<UploadRepor
   if (!(file instanceof File)) throw new Error("File Excel (.xlsx) atau CSV wajib diunggah");
 
   const { rows, errors } = await parseSheet(file);
-  const report: UploadReport = { inserted: 0, skipped: errors.map((e) => ({ row: -1, reason: e })) };
+  const report: UploadReport = { inserted: 0, skipped: errors.map((e) => ({ row: -1, reason: e })), credentials: [] };
   const admin = createAdminClient();
 
   for (const [i, raw] of rows.entries()) {
@@ -103,8 +110,11 @@ export async function uploadTeamMembers(formData: FormData): Promise<UploadRepor
 
     // team_members.id references auth.users(id) → ensure the auth user exists first.
     let userId: string;
+    let tempPassword: string | undefined;
+    const password = generateTempPassword();
     const { data: created, error: authError } = await admin.auth.admin.createUser({
       email: row.email,
+      password,
       email_confirm: true,
     });
     if (authError) {
@@ -114,9 +124,11 @@ export async function uploadTeamMembers(formData: FormData): Promise<UploadRepor
         report.skipped.push({ row: rowNum, reason: `gagal buat auth user: ${authError.message}` });
         continue;
       }
+      // Auth user sudah ada sebelumnya (mis. bekas creator_user) — jangan timpa passwordnya.
       userId = match.id;
     } else {
       userId = created.user.id;
+      tempPassword = password;
     }
 
     const { error: insertError } = await admin.from("team_members").insert({
@@ -140,6 +152,7 @@ export async function uploadTeamMembers(formData: FormData): Promise<UploadRepor
       after: row,
       type: "auto",
     });
+    if (tempPassword) report.credentials!.push({ email: row.email, password: tempPassword });
     report.inserted++;
   }
 
@@ -150,6 +163,74 @@ export async function uploadTeamMembers(formData: FormData): Promise<UploadRepor
 export interface TeamMemberActionState {
   ok: boolean;
   message: string;
+}
+
+export interface AddMemberResult extends TeamMemberActionState {
+  /** Password sementara — ditampilkan SEKALI di layar hasil, tidak disimpan di sisi kita. */
+  tempPassword?: string;
+}
+
+/**
+ * Tambah satu akun anggota tim lewat form (bukan upload massal). Dibatasi
+ * "team.add_single" (= MANAGEMENT_ROLES: director/head/spv) karena menambah
+ * akun berarti memberi akses login baru ke sistem internal.
+ */
+export async function addTeamMember(formData: FormData): Promise<AddMemberResult> {
+  const actor = await requirePermission("team.add_single");
+
+  const roleRaw = String(formData.get("role") ?? "").trim().toLowerCase();
+  const teamGroupRaw = String(formData.get("team_group") ?? "").trim().toLowerCase();
+  const parsed = memberRowSchema.safeParse({
+    name: String(formData.get("name") ?? "").trim(),
+    email: String(formData.get("email") ?? "").trim().toLowerCase(),
+    role: roleRaw,
+    team_group: teamGroupRaw || ROLE_TEAM_GROUP[roleRaw as Role] || "",
+    platform_segment: String(formData.get("platform_segment") ?? "").trim().toLowerCase() || null,
+  });
+  if (!parsed.success) {
+    return { ok: false, message: parsed.error.issues.map((iss) => iss.message).join("; ") };
+  }
+  const row = parsed.data;
+
+  const admin = createAdminClient();
+  const { data: existing } = await admin
+    .from("team_members").select("id").eq("email", row.email).maybeSingle();
+  if (existing) return { ok: false, message: `${row.email} sudah terdaftar` };
+
+  const password = generateTempPassword();
+  const { data: created, error: authError } = await admin.auth.admin.createUser({
+    email: row.email,
+    password,
+    email_confirm: true,
+  });
+  if (authError) return { ok: false, message: `Gagal membuat akun login: ${authError.message}` };
+  const userId = created.user.id;
+
+  const { error: insertError } = await admin.from("team_members").insert({
+    id: userId,
+    name: row.name,
+    email: row.email,
+    role: row.role,
+    team_group: row.team_group,
+    platform_segment: row.platform_segment,
+  });
+  if (insertError) {
+    // Auth user sudah terlanjur dibuat — hapus lagi supaya email ini bisa dicoba ulang.
+    await admin.auth.admin.deleteUser(userId);
+    return { ok: false, message: insertError.message };
+  }
+
+  await writeAudit({
+    actorId: actor.id,
+    action: "team_member.add_single",
+    entityType: "team_members",
+    entityId: userId,
+    after: row,
+    type: "auto",
+  });
+
+  revalidatePath("/tim");
+  return { ok: true, message: `${row.name} berhasil ditambahkan.`, tempPassword: password };
 }
 
 /**
