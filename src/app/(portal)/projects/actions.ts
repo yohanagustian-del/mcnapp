@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { writeAudit } from "@/lib/audit";
-import { hasPermission, requireMember, requirePermission, type TeamMember } from "@/lib/rbac";
+import { hasPermission, MANAGEMENT_ROLES, requireMember, requirePermission, type TeamMember } from "@/lib/rbac";
 import { fetchAll } from "@/lib/supabase/fetch-all";
 import { parseRupiah } from "@/lib/utils/rupiah";
 import { canManageProjectParticipants, isAssignedManpower } from "@/lib/m7/access";
@@ -16,6 +16,20 @@ import { genId } from "@/lib/utils/id";
 import { endOfDayWib } from "@/lib/utils/date";
 
 const isIsoDate = (s: string) => /^\d{4}-\d{2}-\d{2}$/.test(s);
+
+/**
+ * Guard edit/hapus project (spv/head/director) — lebih sempit dari m7.manage
+ * (yang juga mencakup cm_lead/bizdev_lead/acquisition_lead/campaign_ops): mengubah
+ * atau menghapus project itu sendiri (bukan operasional harian-nya) dibatasi ke
+ * tim management, sama seperti koreksi "selesai → aktif" (R2) di setProjectStatus.
+ */
+async function requireProjectLead(): Promise<TeamMember> {
+  const member = await requireMember();
+  if (!MANAGEMENT_ROLES.includes(member.role)) {
+    throw new Error(`Akses ditolak: hanya SPV/Head/Director yang bisa mengubah atau menghapus project (role Anda: ${member.role})`);
+  }
+  return member;
+}
 
 /**
  * Discriminated-union return (never throw across the server-action boundary): Next.js
@@ -110,6 +124,134 @@ export async function createProject(
   });
   revalidatePath("/projects");
   return { ok: true, message: `Project "${name}" berhasil dibuat.` };
+}
+
+/**
+ * Edit project (nama, tipe, periode, target, ads cap, kurva) — SPV/Head/Director
+ * saja (requireProjectLead). Validasi sama dengan createProject; tidak menyentuh
+ * status/slug/hasil (jalur itu tetap setProjectStatus & generate-report).
+ */
+export async function updateProject(
+  _prev: ProjectFormState | null,
+  formData: FormData
+): Promise<ProjectFormState> {
+  const actor = await requireProjectLead();
+
+  const projectId = Number(formData.get("project_id"));
+  if (!Number.isInteger(projectId)) return { ok: false, message: "Project tidak dikenali." };
+
+  const name = String(formData.get("name") ?? "").trim();
+  const typeRaw = String(formData.get("type") ?? "").trim();
+  const type = isProjectType(typeRaw) ? typeRaw : "other";
+  const startDate = String(formData.get("start_date") ?? "");
+  const endDate = String(formData.get("end_date") ?? "");
+  const targetGmv = parseRupiah(String(formData.get("target_gmv") ?? ""));
+  const adsCap = parseRupiah(String(formData.get("ads_budget_cap") ?? ""));
+  const targetCreatorsRaw = String(formData.get("target_creators") ?? "").trim();
+  const targetCreators = targetCreatorsRaw ? Number(targetCreatorsRaw) : null;
+  const shape: CurveShape = formData.get("curve_shape") === "flat" ? "flat" : "ramp";
+
+  const fieldErrors: Record<string, string> = {};
+  if (!name) fieldErrors.name = "Nama project wajib diisi";
+  if (!isIsoDate(startDate) || !isIsoDate(endDate) || endDate < startDate) {
+    fieldErrors.start_date = "Periode project tidak valid (start ≤ end)";
+  }
+  if (targetGmv === null || targetGmv <= 0) {
+    fieldErrors.target_gmv = "Target GMV wajib diisi, angka murni (mis. 50000000 atau Rp50.000.000)";
+  }
+  if (targetCreators !== null && (!Number.isInteger(targetCreators) || targetCreators < 1)) {
+    fieldErrors.target_creators = "Target creator harus bilangan bulat ≥ 1";
+  }
+  if (Object.keys(fieldErrors).length > 0) {
+    return { ok: false, message: "Periksa kembali isian form.", fieldErrors };
+  }
+
+  const admin = createAdminClient();
+  const { data: existing } = await admin
+    .from("special_projects")
+    .select("name, type, start_date, end_date, target_gmv, ads_budget_cap, target_creators, daily_target_curve")
+    .eq("id", projectId)
+    .maybeSingle();
+  if (!existing) return { ok: false, message: `Project ${projectId} tidak ditemukan.` };
+
+  const { error } = await admin
+    .from("special_projects")
+    .update({
+      name, type, start_date: startDate, end_date: endDate,
+      target_gmv: targetGmv, ads_budget_cap: adsCap, target_creators: targetCreators,
+      daily_target_curve: { shape },
+    })
+    .eq("id", projectId);
+  if (error) return { ok: false, message: `Gagal menyimpan project: ${error.message}` };
+
+  await writeAudit({
+    actorId: actor.id, action: "m7.update_project", entityType: "special_projects",
+    entityId: String(projectId), before: existing,
+    after: { name, type, startDate, endDate, targetGmv, adsCap, targetCreators, shape },
+    type: "auto",
+  });
+  revalidatePath("/projects");
+  revalidatePath(`/projects/${projectId}`);
+  return { ok: true, message: `Project "${name}" berhasil diubah.` };
+}
+
+/**
+ * Hapus project — SPV/Head/Director saja (requireProjectLead), dan minta konfirmasi
+ * ketik nama project (sama seperti deleteBdProject). Penghapusan datanya sendiri
+ * (peserta, metrik harian, live session, report, dst — semua yang FK-nya NO ACTION
+ * ke special_projects) dilakukan atomik lewat RPC delete_special_project (migrasi
+ * 0069), bukan serangkaian DELETE terpisah dari sini yang bisa gagal di tengah jalan.
+ */
+export async function deleteProject(
+  _prev: ProjectFormState | null,
+  formData: FormData
+): Promise<ProjectFormState> {
+  const actor = await requireProjectLead();
+  const projectId = Number(formData.get("project_id"));
+  if (!Number.isInteger(projectId)) return { ok: false, message: "Project tidak dikenali." };
+
+  const admin = createAdminClient();
+  const { data: project } = await admin
+    .from("special_projects")
+    .select("id, name, type, start_date, end_date, target_gmv, ads_budget_cap, target_creators, status, result_summary")
+    .eq("id", projectId)
+    .maybeSingle();
+  if (!project) return { ok: false, message: `Project ${projectId} tidak ditemukan.` };
+
+  if (String(formData.get("confirm") ?? "").trim() !== project.name) {
+    return {
+      ok: false,
+      message: `Ketik nama project persis ("${project.name}") untuk konfirmasi.`,
+      fieldErrors: { confirm: "Nama project tidak cocok" },
+    };
+  }
+
+  // Isi lengkap yang hilang lewat cascade harus terekam SEBELUM dihapus (CLAUDE.md
+  // #2) — satu-satunya jalan pulih kalau salah hapus adalah baca ulang audit_logs.
+  const [{ data: participants }, { data: manpower }, { count: dailyCount }, { count: liveCount }, { count: reportCount }] =
+    await Promise.all([
+      admin.from("project_participants").select("creator_id, target_gmv, is_external, live_type, tiktok_binding_status").eq("project_id", projectId),
+      admin.from("project_manpower").select("member_id, role, involvement_pct").eq("project_id", projectId),
+      admin.from("project_daily_metrics").select("date", { count: "exact", head: true }).eq("project_id", projectId),
+      admin.from("project_live_sessions").select("id", { count: "exact", head: true }).eq("project_id", projectId),
+      admin.from("creator_reports").select("id", { count: "exact", head: true }).eq("project_id", projectId),
+    ]);
+
+  const { error } = await admin.rpc("delete_special_project", { p_project_id: projectId });
+  if (error) return { ok: false, message: `Gagal menghapus project: ${error.message}` };
+
+  await writeAudit({
+    actorId: actor.id, action: "m7.delete_project", entityType: "special_projects",
+    entityId: String(projectId),
+    before: {
+      project, participants, manpower,
+      daily_metrics_count: dailyCount ?? 0, live_sessions_count: liveCount ?? 0, creator_reports_count: reportCount ?? 0,
+    },
+    after: null,
+    type: "auto",
+  });
+  revalidatePath("/projects");
+  return { ok: true, message: `Project "${project.name}" dihapus (tercatat di audit log).` };
 }
 
 /** Buka/tutup pendaftaran publik (R8/§3.4 langkah 3) + tenggat opsional. */
@@ -382,6 +524,87 @@ export async function addParticipant(formData: FormData): Promise<AddParticipant
       entityId: `${projectId}:${creatorId}`,
       after: { input: typed, is_external: isExternal, binding, live_type: liveType },
       type: "auto",
+    });
+    revalidatePath(`/projects/${projectId}`);
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "Terjadi kesalahan tidak terduga." };
+  }
+}
+
+/**
+ * Ubah target GMV peserta dari tabel "Performa per Kreator" — SPV/Head/Director
+ * saja (requireProjectLead). Hanya target_gmv yang bisa diubah lewat sini: GMV
+ * aktual/item terjual datang dari upload performa (project_creator_metrics), read-only
+ * per CLAUDE.md #3 — tidak ada input manual untuk itu di mana pun, termasuk di sini.
+ */
+export async function updateParticipantTarget(formData: FormData): Promise<AddParticipantResult> {
+  try {
+    const actor = await requireProjectLead();
+    const projectId = Number(formData.get("project_id"));
+    const creatorId = String(formData.get("creator_id") ?? "").trim();
+    if (!projectId || !creatorId) throw new Error("Project & kreator wajib dikenali");
+
+    const targetGmv = parseRupiah(String(formData.get("target_gmv") ?? ""));
+    if (targetGmv === null || targetGmv < 0) throw new Error("Target GMV wajib diisi, angka murni");
+
+    const admin = createAdminClient();
+    const { data: existing } = await admin
+      .from("project_participants")
+      .select("target_gmv")
+      .eq("project_id", projectId).eq("creator_id", creatorId)
+      .maybeSingle();
+    if (!existing) throw new Error("Peserta tidak ditemukan di project ini");
+
+    const { error } = await admin
+      .from("project_participants")
+      .update({ target_gmv: targetGmv })
+      .eq("project_id", projectId).eq("creator_id", creatorId);
+    if (error) throw new Error(`Gagal menyimpan target GMV: ${error.message}`);
+
+    await writeAudit({
+      actorId: actor.id, action: "m7.update_participant_target", entityType: "project_participants",
+      entityId: `${projectId}:${creatorId}`,
+      before: { target_gmv: existing.target_gmv }, after: { target_gmv: targetGmv }, type: "auto",
+    });
+    revalidatePath(`/projects/${projectId}`);
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "Terjadi kesalahan tidak terduga." };
+  }
+}
+
+/**
+ * Keluarkan peserta dari project — dari tabel "Performa per Kreator" ATAU tabel
+ * Peserta, SPV/Head/Director saja (requireProjectLead). Yang dihapus hanya baris
+ * keanggotaannya (project_participants); GMV yang sudah ter-upload di
+ * project_creator_metrics TIDAK ikut terhapus — tetap tercatat di histori platform,
+ * sekadar tak lagi dijumlahkan ke performa project ini begitu pesertanya keluar.
+ */
+export async function removeParticipant(formData: FormData): Promise<AddParticipantResult> {
+  try {
+    const actor = await requireProjectLead();
+    const projectId = Number(formData.get("project_id"));
+    const creatorId = String(formData.get("creator_id") ?? "").trim();
+    if (!projectId || !creatorId) throw new Error("Project & kreator wajib dikenali");
+
+    const admin = createAdminClient();
+    const { data: existing } = await admin
+      .from("project_participants")
+      .select("creator_id, is_external, tiktok_binding_status, live_type, target_gmv, added_via")
+      .eq("project_id", projectId).eq("creator_id", creatorId)
+      .maybeSingle();
+    if (!existing) throw new Error("Peserta tidak ditemukan di project ini");
+
+    const { error } = await admin
+      .from("project_participants")
+      .delete()
+      .eq("project_id", projectId).eq("creator_id", creatorId);
+    if (error) throw new Error(`Gagal mengeluarkan peserta: ${error.message}`);
+
+    await writeAudit({
+      actorId: actor.id, action: "m7.remove_participant", entityType: "project_participants",
+      entityId: `${projectId}:${creatorId}`, before: existing, after: null, type: "auto",
     });
     revalidatePath(`/projects/${projectId}`);
     return { ok: true };

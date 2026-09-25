@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation";
 import Link from "next/link";
-import { requireMember, hasPermission } from "@/lib/rbac";
+import { requireMember, hasPermission, MANAGEMENT_ROLES } from "@/lib/rbac";
+import { EditProjectPanel } from "./edit-project-panel";
 import { createClient } from "@/lib/supabase/server";
 import { getConfig } from "@/lib/config";
 import { resolveOrigin } from "@/lib/auth/origin";
@@ -11,7 +12,7 @@ import {
   assignManpower, decideProjectCancellation, requestProjectCancellation,
   setProjectStatus, setSignupOpen, upsertDailyMetric,
 } from "../actions";
-import { MANPOWER_ROLES } from "@/lib/m7/project-type";
+import { MANPOWER_ROLES, PROJECT_TYPES } from "@/lib/m7/project-type";
 import { suggestParticipantTargetGmv } from "@/lib/m7/participant-target";
 import { generateProjectReports } from "./report-actions";
 import { PortalInviteButton } from "./portal-invite-button";
@@ -319,6 +320,25 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
         <h1 className="text-2xl font-semibold">{project.name}</h1>
         <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-600">{project.status}</span>
         {project.type && <span className="text-sm text-slate-400">{project.type}</span>}
+        {/* Edit/Hapus project — SPV/Head/Director saja (requireProjectLead di
+            actions.ts). Lebih sempit dari canManage (m7.manage), yang juga
+            mencakup cm_lead/bizdev_lead/acquisition_lead/campaign_ops. */}
+        {MANAGEMENT_ROLES.includes(member.role) && (
+          <EditProjectPanel
+            project={{
+              id: project.id,
+              name: project.name,
+              type: project.type,
+              startDate: project.start_date,
+              endDate: project.end_date,
+              targetGmv: project.target_gmv === null ? null : Number(project.target_gmv),
+              adsBudgetCap: project.ads_budget_cap === null ? null : Number(project.ads_budget_cap),
+              targetCreators: project.target_creators,
+              curveShape: shape,
+            }}
+            projectTypes={PROJECT_TYPES}
+          />
+        )}
       </div>
 
       {canManage && (
@@ -566,7 +586,11 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
       <p className="mt-1 text-xs text-amber-700">
         Angka GMV hanya dari upload data performa project — tidak ada lagi input manual per kreator.
       </p>
-      <CreatorPerformanceTable rows={creatorPerformanceRows} />
+      <CreatorPerformanceTable
+        rows={creatorPerformanceRows}
+        projectId={project.id}
+        canManage={MANAGEMENT_ROLES.includes(member.role)}
+      />
 
       {/* ===== Performa per CM — rollup dari tabel di atas ===== */}
       <h2 className="mt-8 text-lg font-medium">Performa per CM</h2>
