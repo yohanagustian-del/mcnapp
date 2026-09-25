@@ -1,7 +1,7 @@
 "use client";
 
 import { useRef, useState, useTransition } from "react";
-import { ROLES } from "@/lib/rbac";
+import { ROLES } from "@/lib/rbac-constants";
 import { SEGMENTS, TEAM_GROUPS } from "@/lib/tim/roles";
 import { addTeamMember, type AddMemberResult } from "./actions";
 
