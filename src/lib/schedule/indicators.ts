@@ -2,7 +2,22 @@
 // These drive the visual flags in the calendar (PK missing, TAP not connected, needs
 // verification, tentative/off/done, "besok belum ada jadwal").
 
-import type { LiveScheduleSlot } from "./types";
+import type { AdsPayer, LiveScheduleSlot } from "./types";
+
+/**
+ * Label tampil untuk `ads_payer` — SATU sumber (dipakai board kalender, compact
+ * list CM/BizDev, dan slot-form) supaya labelnya tidak diketik ulang beda-beda.
+ */
+export const ADS_PAYER_LABELS: Record<AdsPayer, string> = {
+  brand: "Brand",
+  mea: "MEA",
+  invoicing_mea: "Invoicing MEA",
+  organik: "Organik",
+};
+
+export function adsPayerLabel(payer: AdsPayer | null | undefined): string | null {
+  return payer ? ADS_PAYER_LABELS[payer] : null;
+}
 
 export interface SlotFlags {
   /** scheduled/tentative slot whose Product Knowledge is not yet prepared. */

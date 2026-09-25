@@ -2,7 +2,7 @@
 
 import { useMemo } from "react";
 import Link from "next/link";
-import { slotFlags } from "@/lib/schedule/indicators";
+import { adsPayerLabel, slotFlags } from "@/lib/schedule/indicators";
 import type { LiveScheduleSlot } from "@/lib/schedule/types";
 import {
   PAGE_SIZE_10, SortableTh, TableFilterBar, TablePagination, useTableControls,
@@ -38,6 +38,7 @@ const searchRowText = (r: CompactSlotRow) =>
     r.slot.status === "off" ? "" : r.slot.brand_name?.trim() || "Organik",
     r.slot.schedule_date,
     timeRange(r.slot),
+    adsPayerLabel(r.slot.ads_payer) ?? "",
     r.slot.ads_note ?? "",
   ].join(" ");
 
@@ -56,6 +57,7 @@ const SORT: SortConfig<CompactSlotRow> = {
     username: { value: (r) => r.creatorUsername ?? r.creatorName },
     brand: { value: (r) => (r.slot.status === "off" ? null : r.slot.brand_name?.trim() || "Organik") },
     jam: { value: (r) => r.slot.start_time },
+    pembayar_ads: { value: (r) => (r.slot.status === "off" ? null : adsPayerLabel(r.slot.ads_payer)) },
     // Catatan ads ditulis bebas ("Rp500rb", "invoicing MEA"); diurutkan sebagai
     // teks, slot tanpa catatan (null) selalu jatuh ke bawah lewat sortRows.
     catatan_ads: { value: (r) => r.slot.ads_note?.trim() || null },
@@ -80,6 +82,12 @@ function slotHour(r: CompactSlotRow): FacetOption | null {
   if (r.slot.status === "off" || !r.slot.start_time) return null;
   const hh = r.slot.start_time.slice(0, 2);
   return { value: hh, label: `${hh}:00–${hh}:59` };
+}
+
+/** Nilai facet "Pembayar Ads" — slot OFF atau belum diisi tidak punya nilai. */
+function slotAdsPayer(r: CompactSlotRow): FacetOption | null {
+  if (r.slot.status === "off" || !r.slot.ads_payer) return null;
+  return { value: r.slot.ads_payer, label: adsPayerLabel(r.slot.ads_payer) as string };
 }
 
 /**
@@ -141,6 +149,10 @@ export function CompactScheduleList({
         }),
       },
       { key: "jam", label: "Jam", sortBy: "value", value: slotHour, emptyLabel: "Belum ada jam mulai pada jadwal ini." },
+      {
+        key: "pembayar_ads", label: "Pembayar Ads", value: slotAdsPayer,
+        emptyLabel: "Belum ada pembayar ads pada jadwal ini.",
+      },
     ];
   }, [filterable, todayIso]);
 
@@ -188,6 +200,7 @@ export function CompactScheduleList({
                 </SortableTh>
                 <SortableTh controls={controls} sortKey="brand" className="px-3 py-2">Brand</SortableTh>
                 <SortableTh controls={controls} sortKey="jam" className="px-3 py-2">Jam</SortableTh>
+                <SortableTh controls={controls} sortKey="pembayar_ads" className="px-3 py-2">Pembayar Ads</SortableTh>
                 {showAdsNote && (
                   <SortableTh controls={controls} sortKey="catatan_ads" className="px-3 py-2">
                     Catatan Ads
@@ -220,6 +233,15 @@ export function CompactScheduleList({
                     </td>
                     <td className="px-3 py-2">{flags.isOff ? "—" : r.slot.brand_name?.trim() || "Organik"}</td>
                     <td className="px-3 py-2">{timeRange(r.slot)}</td>
+                    <td className="px-3 py-2">
+                      {flags.isOff ? (
+                        "—"
+                      ) : adsPayerLabel(r.slot.ads_payer) ? (
+                        adsPayerLabel(r.slot.ads_payer)
+                      ) : (
+                        <span className="text-amber-600">belum diisi</span>
+                      )}
+                    </td>
                     {showAdsNote && (
                       <td className="max-w-[200px] truncate px-3 py-2" title={r.slot.ads_note ?? ""}>
                         {r.slot.ads_note?.trim() || <span className="text-slate-300">—</span>}
@@ -254,7 +276,7 @@ export function CompactScheduleList({
               })}
               {controls.visibleRows.length === 0 && (
                 <tr>
-                  <td colSpan={showAdsNote ? 6 : 5} className="px-4 py-5 text-center text-slate-400">
+                  <td colSpan={showAdsNote ? 7 : 6} className="px-4 py-5 text-center text-slate-400">
                     {controls.filterActive
                       ? "Tidak ada jadwal yang cocok dengan pencarian kreator/brand/tanggal/jam atau filter yang aktif."
                       : emptyLabel}
