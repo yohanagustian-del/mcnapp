@@ -11,6 +11,7 @@ import { RouteCampaignForm } from "./route-campaign-form";
 import { CompactScheduleList, type CompactSlotRow } from "../../schedule/compact-list";
 import type { LiveScheduleSlot } from "@/lib/schedule/types";
 import { getWeekStart, getWeekDays } from "@/lib/schedule/week";
+import { todayWib } from "@/lib/utils/date";
 
 export const dynamic = "force-dynamic";
 
@@ -46,7 +47,7 @@ export default async function BizdevWorkspacePage() {
     : { count: null };
 
   // ===== M13 Jadwal Live (deal BD) — minggu berjalan, deals_by='bd' atau deal_id terisi =====
-  const todayIso = new Date().toISOString().slice(0, 10);
+  const todayIso = todayWib();
   const bdWeekStart = getWeekStart(new Date());
   const bdWeekDays = getWeekDays(bdWeekStart);
   const bdWeekEnd = bdWeekDays[6];

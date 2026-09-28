@@ -94,6 +94,23 @@ export function endOfDayWib(dateOnly: string): string | null {
 }
 
 /**
+ * Current instant shifted to Asia/Jakarta (WIB, UTC+7, no DST) — a wall-clock
+ * reading, not a real timezone-aware Date. Mirrors endOfDayWib() above: this file's
+ * several `new Date().toISOString().slice(0, 10)` call sites read "today" from the
+ * server's UTC clock, which is still YESTERDAY's date for 00:00-06:59 WIB (bug hit
+ * live in Jadwal Live "Verifikasi Hari Ini" — see PLAN_MSDPS_mcnapp.md §1).
+ */
+export function nowWib(): Date {
+  return new Date(Date.now() + 7 * 60 * 60 * 1000);
+}
+
+/** "Today" in Asia/Jakarta as YYYY-MM-DD — the WIB-correct replacement for
+ * `new Date().toISOString().slice(0, 10)`. */
+export function todayWib(): string {
+  return nowWib().toISOString().slice(0, 10);
+}
+
+/**
  * Number of days in a given month (1-12) of a given year (accounts for leap
  * years). Exported for the ingest calendar UI (need to know whether W5
  * exists for a given month — Feb non-kabisat ends at day 28 == no W5).

@@ -1,4 +1,5 @@
 import { createAdminClient } from "@/lib/supabase/admin";
+import { todayWib } from "@/lib/utils/date";
 
 /**
  * Notifikasi PIC TAP di sidebar: jadwal live brand yang PIC TAP-nya akun ini.
@@ -50,7 +51,7 @@ export async function loadPicTapScheduleAlert(memberId: string): Promise<PicTapS
 
   // 2. Slot live yang menautkan shop itu, dari hari ini ke depan. Slot yang sudah
   //    lewat atau sudah diverifikasi (done) bukan lagi hal yang perlu diingatkan.
-  const today = new Date().toISOString().slice(0, 10);
+  const today = todayWib();
   const { data: slots } = await admin
     .from("live_schedule_slots")
     .select("id, shop_key, brand_name, schedule_date, start_time")

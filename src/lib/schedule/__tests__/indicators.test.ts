@@ -24,6 +24,8 @@ function slot(partial: Partial<LiveScheduleSlot>): LiveScheduleSlot {
     fokus_produk: null,
     actual_start: null,
     actual_end: null,
+    actual_time_source: null,
+    fokus_produk_live: null,
     verified_by: null,
     verified_at: null,
     created_by: "m1",

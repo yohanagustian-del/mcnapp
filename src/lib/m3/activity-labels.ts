@@ -19,6 +19,7 @@ const EXACT: Record<string, string> = {
   "schedule.update_slot": "Ubah jadwal live",
   "schedule.delete_slot": "Hapus jadwal live",
   "schedule.verify_slot": "Verifikasi jadwal live",
+  "schedule.cancel_verified_slot": "Tandai jadwal live tidak jadi",
   "schedule.copy_week": "Salin jadwal live minggu lain",
   "schedule.toggle_roster": "Ubah roster jadwal live",
   "schedule.create_creator": "Tambah kreator ke jadwal live",

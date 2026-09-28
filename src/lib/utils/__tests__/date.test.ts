@@ -1,5 +1,23 @@
-import { describe, expect, it } from "vitest";
-import { endOfDayWib, validateLeakPeriod, validateW1W5Period, weekOfMonth } from "../date";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { endOfDayWib, todayWib, validateLeakPeriod, validateW1W5Period, weekOfMonth } from "../date";
+
+describe("todayWib (PLAN_MSDPS A-00: 'hari ini' harus WIB, bukan UTC server)", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("02:00 WIB tanggal 28 (= 19:00 UTC tanggal 27) tetap terbaca sebagai tanggal 28", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-09-27T19:00:00.000Z"));
+    expect(todayWib()).toBe("2026-09-28");
+  });
+
+  it("23:00 WIB tanggal 28 (= 16:00 UTC tanggal 28) tetap tanggal 28", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-09-28T16:00:00.000Z"));
+    expect(todayWib()).toBe("2026-09-28");
+  });
+});
 
 describe("weekOfMonth (skema upload W1-W5)", () => {
   it("maps day-of-month to the correct week window", () => {

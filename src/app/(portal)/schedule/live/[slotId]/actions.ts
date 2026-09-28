@@ -6,6 +6,7 @@ import { writeAudit } from "@/lib/audit";
 import { getConfig } from "@/lib/config";
 import { requirePermission, type TeamMember } from "@/lib/rbac";
 import { assertCreatorInScope } from "@/lib/schedule/scope";
+import { todayWib } from "@/lib/utils/date";
 import { slotUploadEligibility } from "@/lib/schedule/live-report";
 import type { SlotStatus } from "@/lib/schedule/types";
 import {
@@ -76,7 +77,7 @@ async function requireSlotUploadAccess(
   await assertCreatorInScope(admin, member, slot.creator_id);
   const eligibility = slotUploadEligibility(
     { status: slot.status as SlotStatus, schedule_date: slot.schedule_date },
-    new Date().toISOString().slice(0, 10)
+    todayWib()
   );
   if (!eligibility.ok) throw new Error(eligibility.reason);
   return { member, slot };

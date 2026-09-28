@@ -25,6 +25,7 @@ import { CompactScheduleList, type CompactSlotRow } from "../../schedule/compact
 import type { LiveScheduleSlot } from "@/lib/schedule/types";
 import { ComplaintReplyForm, ComplaintStatusForm } from "./complaint-forms";
 import { rupiah } from "@/lib/utils/format";
+import { todayWib } from "@/lib/utils/date";
 import { WeeklyGrowthTable, type WeeklyGrowthRow } from "./weekly-growth-table";
 import { CmWeeklyGrowthTable, type CmWeeklyGrowthRow } from "./cm-weekly-growth-table";
 import { CreatorGrowthPanel, type CreatorGrowthRow } from "./creator-growth-panel";
@@ -147,7 +148,7 @@ export default async function CmWorkspacePage({
   const creatorIds = creators.map((c) => c.id);
 
   // ===== M13 Jadwal Live — compact read-only preview (scope: sama seperti creators di atas) =====
-  const todayIso = new Date().toISOString().slice(0, 10);
+  const todayIso = todayWib();
   const tomorrowIso = new Date(Date.now() + 86_400_000).toISOString().slice(0, 10);
   type RosterCreator = {
     id: string;

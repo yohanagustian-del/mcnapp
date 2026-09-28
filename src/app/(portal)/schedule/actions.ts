@@ -8,6 +8,7 @@ import { genId } from "@/lib/utils/id";
 import { buildCopiedSlots } from "@/lib/schedule/copy-week";
 import { searchShopSummary } from "@/lib/deals/shop-search";
 import { assertCreatorInScope } from "@/lib/schedule/scope";
+import { todayWib } from "@/lib/utils/date";
 import type {
   AdsPayer,
   DealsBy,
@@ -425,22 +426,21 @@ export async function deleteSlotAction(formData: FormData): Promise<ScheduleActi
  * checkboxes, set status='done'. CM verifies during work hours, Creator Support outside
  * them (both hold schedule.verify). Only scheduled|tentative slots dated <= today.
  */
+/**
+ * Verification mode (PLAN_MSDPS Paket A, R1): 'sesuai_rencana' confirms the planned
+ * time as-is (server copies start_time/end_time — never trusts a client-sent actual
+ * time for this mode, so a stale form can't fabricate a different one); 'jam_baru' is
+ * the pre-existing client-entered-time behavior. Both set status='done'.
+ */
 export async function verifySlotAction(formData: FormData): Promise<ScheduleActionResult> {
   try {
     const member = await requirePermission("schedule.verify");
     const slotId = str(formData, "slot_id");
     if (!slotId) throw new Error("ID slot wajib diisi.");
 
-    const actualStart = str(formData, "actual_start");
-    const actualEnd = str(formData, "actual_end");
-    if (!actualStart || !actualEnd) {
-      throw new Error("Jam mulai & selesai aktual wajib diisi saat verifikasi.");
-    }
-    if (!TIME_RE.test(actualStart) || !TIME_RE.test(actualEnd)) {
-      throw new Error("Format jam aktual tidak valid (HH:MM).");
-    }
-    if (actualStart >= actualEnd) {
-      throw new Error("Jam mulai aktual harus lebih awal dari jam selesai aktual.");
+    const mode = str(formData, "mode") ?? "jam_baru";
+    if (mode !== "sesuai_rencana" && mode !== "jam_baru") {
+      throw new Error("Mode verifikasi tidak dikenali.");
     }
 
     const admin = createAdminClient();
@@ -454,19 +454,49 @@ export async function verifySlotAction(formData: FormData): Promise<ScheduleActi
     if (before.status !== "scheduled" && before.status !== "tentative") {
       throw new Error("Hanya slot berstatus scheduled/tentative yang dapat diverifikasi.");
     }
-    const todayIso = new Date().toISOString().slice(0, 10);
+    const todayIso = todayWib();
     if (before.schedule_date > todayIso) {
       throw new Error("Slot masa depan belum dapat diverifikasi.");
     }
     await assertCreatorInScope(admin, member, before.creator_id);
 
+    let actualStart: string;
+    let actualEnd: string;
+    let actualTimeSource: "sesuai_rencana" | "input_manual";
+    if (mode === "sesuai_rencana") {
+      if (!before.start_time || !before.end_time) {
+        throw new Error("Jadwal ini belum punya jam rencana, pilih Live Dengan Jam Baru.");
+      }
+      actualStart = before.start_time as string;
+      actualEnd = before.end_time as string;
+      actualTimeSource = "sesuai_rencana";
+    } else {
+      const inputStart = str(formData, "actual_start");
+      const inputEnd = str(formData, "actual_end");
+      if (!inputStart || !inputEnd) {
+        throw new Error("Jam mulai & selesai aktual wajib diisi saat verifikasi.");
+      }
+      if (!TIME_RE.test(inputStart) || !TIME_RE.test(inputEnd)) {
+        throw new Error("Format jam aktual tidak valid (HH:MM).");
+      }
+      if (inputStart >= inputEnd) {
+        throw new Error("Jam mulai aktual harus lebih awal dari jam selesai aktual.");
+      }
+      actualStart = inputStart;
+      actualEnd = inputEnd;
+      actualTimeSource = "input_manual";
+    }
+
     // Optional final checkbox states — only override when the field was submitted.
     const hasPk = formData.has("pk_ready");
     const hasTap = formData.has("product_connected_tap");
+    const fokusProdukLive = str(formData, "fokus_produk_live");
     const update: Record<string, unknown> = {
       status: "done",
       actual_start: actualStart,
       actual_end: actualEnd,
+      actual_time_source: actualTimeSource,
+      fokus_produk_live: fokusProdukLive,
       verified_by: member.id,
       verified_at: new Date().toISOString(),
       updated_by: member.id,
@@ -527,7 +557,7 @@ export async function cancelVerifiedSlotAction(formData: FormData): Promise<Sche
     if (before.status !== "scheduled" && before.status !== "tentative") {
       throw new Error("Hanya slot berstatus scheduled/tentative yang dapat diverifikasi.");
     }
-    const todayIso = new Date().toISOString().slice(0, 10);
+    const todayIso = todayWib();
     if (before.schedule_date > todayIso) {
       throw new Error("Slot masa depan belum dapat diverifikasi.");
     }
