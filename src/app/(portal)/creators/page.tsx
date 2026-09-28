@@ -3,6 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import { fetchAll } from "@/lib/supabase/fetch-all";
 import { getConfig } from "@/lib/config";
 import { gmvLevelEstimate, type AffiliateLevelRule } from "@/lib/creators/affiliate-level";
+import { loadContractAlertDays } from "@/lib/creators/contract-alerts";
 import { loadCreatorsWithoutCm } from "@/lib/creators/without-cm";
 import { loadCmRequests } from "@/lib/creators/cm-requests";
 import { CsvUploadForm } from "@/components/csv-upload-form";
@@ -41,6 +42,7 @@ export default async function CreatorsPage() {
   // CPM: boleh mengajukan request, tidak boleh assign. Yang sudah boleh assign
   // memakai dropdown CM di modal Edit — tidak perlu (dan tidak boleh) dua jalur.
   const canRequestCm = hasPermission("creators.request_cm", member.role) && !canAssignCm;
+  const alertDays = await loadContractAlertDays();
 
   const supabase = await createClient();
   // Tabel dipaginasi di klien (10/20/50/100 per halaman), jadi daftar penuh
@@ -278,6 +280,7 @@ export default async function CreatorsPage() {
           <CreatorsTable
             rows={rows}
             nowMs={Date.now()}
+            alertDays={alertDays}
             canUpload={canUpload}
             canEdit={canEdit}
             canDelete={canDelete}

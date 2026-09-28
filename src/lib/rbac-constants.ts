@@ -109,6 +109,9 @@ export const NAV_ITEMS: NavItem[] = [
   { href: "/workspace/external", label: "External Workspace", roles: [...MANAGEMENT_ROLES, "bizdev_lead", "bizdev", "campaign_external", "acquisition_lead"], group: "Project & Campaign" },
 
   { href: "/workspace/acquisition", label: "Acquisition Workspace", roles: [...MANAGEMENT_ROLES, ...ACQUISITION_ROLES], group: "Akuisisi" },
+  // PLAN_MSDPS Paket D (R5): countdown kontrak + perpanjangan. Q7: Akuisisi, CM, dan
+  // Management boleh memperpanjang (CM/CPM dibatasi scope kreatornya di server action).
+  { href: "/workspace/acquisition/perpanjangan", label: "Perpanjangan Kreator", roles: [...MANAGEMENT_ROLES, ...ACQUISITION_ROLES, ...CM_ROLES], group: "Akuisisi" },
 
   // Module 0.5: shared ingest (MCN + TAP) — process-on-ingest, drop-raw (matrix §2.8).
   { href: "/ingest", label: "Upload Data Platform Mingguan", roles: [...MANAGEMENT_ROLES, ...CM_ROLES, "campaign_external"], group: "Data Platform" },
@@ -317,6 +320,11 @@ export const PERMISSIONS: Record<string, Role[]> = {
   "m12.purge_manual": ["director"] as Role[],
   // NOTE: od_viewer appears in NO write permission by design — every mutation is rejected
   // server-side (requirePermission) in addition to RLS. See __tests__/rbac.test.ts.
+  // ===== Paket D (R5): Perpanjangan Kreator =====
+  // Q7 (disetujui pemilik): Akuisisi, CM, dan Management boleh memperpanjang. cpm/CM
+  // dibatasi ke kreator dalam scope-nya lewat assertCreatorInScope di server action
+  // (pola sama schedule.edit) — daftar role di sini hanya gerbang kasar per aksi.
+  "creators.contract_renew": [...MANAGEMENT_ROLES, ...ACQUISITION_ROLES, ...CM_ROLES],
 };
 
 export function canAccessNav(item: NavItem, role: Role): boolean {

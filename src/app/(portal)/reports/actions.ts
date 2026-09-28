@@ -10,6 +10,7 @@ import { requirePermission, type TeamMember } from "@/lib/rbac";
 import type { PeriodType } from "@/lib/report/aggregate";
 import { buildCreatorReportData } from "@/lib/report/build";
 import type { LiveBenchmarks, ReportRules } from "@/lib/report/rules";
+import { DEFAULT_CONTRACT_ALERT_DAYS, type ContractAlertDays } from "@/lib/creators/contract";
 import { isReportV2, type ReportEdits } from "@/lib/report/types";
 
 export interface ReportActionState {
@@ -79,10 +80,17 @@ export async function generateReport(
     };
   }
 
+  // Ambang kontrak (m8.contract_alert_days, migrasi 0075) TIDAK menggagalkan generate
+  // kalau belum ada — beda dari rules/benchmarks di atas, ini hanya mengatur satu badge
+  // opsional (contractAlert), bukan seluruh isi report.
+  const alertDays = await getConfig<ContractAlertDays>("m8.contract_alert_days").catch(
+    () => DEFAULT_CONTRACT_ALERT_DAYS
+  );
+
   let dataJson;
   try {
     dataJson = await buildCreatorReportData(supabase, {
-      creatorId: creator_id, periodType, periodStart: period_start, rules, benchmarks,
+      creatorId: creator_id, periodType, periodStart: period_start, rules, benchmarks, alertDays,
     });
   } catch (e) {
     return { ok: false, message: `Gagal merakit report: ${e instanceof Error ? e.message : "error"}` };
