@@ -8,7 +8,10 @@ import {
   useTableControls,
   type SortConfig,
 } from "@/components/table-controls";
-import { removeParticipant, updateParticipantTarget } from "../actions";
+import { removeParticipant, updateParticipantAchieveBy, updateParticipantTarget } from "../actions";
+
+/** Pilihan tetap kolom "Achieve By" — kosong ("—") = belum diisi (default). */
+const ACHIEVE_BY_OPTIONS = ["Keterangan", "Brand Pairs", "Ads By"] as const;
 
 /**
  * Satu baris Performa per Kreator — angkanya sudah dijumlahkan di server dari
@@ -28,6 +31,8 @@ export interface CreatorPerformanceRow {
   pctTarget: number | null;
   /** GMV peserta / total GMV project. */
   contribution: number;
+  /** Kosong (null) secara default — diisi tim lewat dropdown setelah project berjalan. */
+  achieveBy: string | null;
 }
 
 const rupiah = (n: number | null | undefined) =>
@@ -43,6 +48,7 @@ const SORT: SortConfig<CreatorPerformanceRow> = {
     items: { value: (r) => r.items, firstDir: "desc" },
     pct: { value: (r) => r.pctTarget, firstDir: "desc" },
     kontribusi: { value: (r) => r.contribution, firstDir: "desc" },
+    achieveBy: { value: (r) => r.achieveBy ?? "" },
   },
   initial: { key: "gmv", dir: "desc" },
 };
@@ -91,6 +97,53 @@ function EditTargetForm({
       </button>
       {error && <span className="ml-1 text-xs text-red-700">{error}</span>}
     </form>
+  );
+}
+
+/**
+ * Dropdown "Achieve By" — simpan langsung saat dipilih (tanpa tombol Edit terpisah),
+ * kosong ("—") = belum diisi (default). Kalau gagal simpan, kembalikan ke nilai semula.
+ */
+function AchieveBySelect({
+  projectId, creatorId, initialValue,
+}: {
+  projectId: number; creatorId: string; initialValue: string | null;
+}) {
+  const [value, setValue] = useState(initialValue ?? "");
+  const [error, setError] = useState<string | null>(null);
+  const [pending, startTransition] = useTransition();
+
+  return (
+    <span className="inline-flex items-center gap-1">
+      <select
+        value={value}
+        disabled={pending}
+        onChange={(e) => {
+          const next = e.target.value;
+          const previous = value;
+          setValue(next);
+          setError(null);
+          const formData = new FormData();
+          formData.set("project_id", String(projectId));
+          formData.set("creator_id", creatorId);
+          formData.set("achieve_by", next);
+          startTransition(async () => {
+            const res = await updateParticipantAchieveBy(formData);
+            if (!res.ok) {
+              setValue(previous);
+              setError(res.error);
+            }
+          });
+        }}
+        className="rounded-md border border-slate-300 px-2 py-1 text-xs disabled:opacity-50"
+      >
+        <option value="">—</option>
+        {ACHIEVE_BY_OPTIONS.map((opt) => (
+          <option key={opt} value={opt}>{opt}</option>
+        ))}
+      </select>
+      {error && <span className="text-xs text-red-700">{error}</span>}
+    </span>
   );
 }
 
@@ -158,6 +211,7 @@ export function CreatorPerformanceTable({
               <SortableTh controls={controls} sortKey="items">Item Terjual</SortableTh>
               <SortableTh controls={controls} sortKey="pct">% Target</SortableTh>
               <SortableTh controls={controls} sortKey="kontribusi">Kontribusi Project</SortableTh>
+              <SortableTh controls={controls} sortKey="achieveBy">Achieve By</SortableTh>
               {showActions && <th className="px-4 py-3">Aksi</th>}
             </tr>
           </thead>
@@ -203,6 +257,13 @@ export function CreatorPerformanceTable({
                   )}
                 </td>
                 <td className="px-4 py-2">{(r.contribution * 100).toFixed(0)}%</td>
+                <td className="px-4 py-2">
+                  {showActions ? (
+                    <AchieveBySelect projectId={projectId as number} creatorId={r.creatorId} initialValue={r.achieveBy} />
+                  ) : (
+                    r.achieveBy ?? "—"
+                  )}
+                </td>
                 {showActions && (
                   <td className="px-4 py-2">
                     {editingId !== r.creatorId && (
@@ -223,7 +284,7 @@ export function CreatorPerformanceTable({
             ))}
             {controls.total === 0 && (
               <tr>
-                <td colSpan={showActions ? 8 : 7} className="px-4 py-6 text-center text-slate-400">
+                <td colSpan={showActions ? 9 : 8} className="px-4 py-6 text-center text-slate-400">
                   Belum ada peserta.
                 </td>
               </tr>
