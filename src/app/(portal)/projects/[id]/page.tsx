@@ -24,6 +24,7 @@ import { JoinRequestPanel, type JoinRequestRow } from "../join-request-panel";
 import { ExternalApplicantPanel, type ExternalApplicantRow } from "../external-applicant-panel";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { ManpowerMemberPicker } from "./manpower-member-picker";
+import { CloseProjectButton } from "./close-project-button";
 
 const STATUS_LABELS: Record<string, string> = {
   on_track: "On-track", behind: "Behind", ahead: "Ahead",
@@ -428,12 +429,7 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
               Aktifkan Project
             </button>
           )}
-          {project.status === "aktif" && (
-            <button name="status" value="selesai"
-              className="rounded-md bg-blue-700 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-600">
-              Tutup Project (hitung hasil)
-            </button>
-          )}
+          {project.status === "aktif" && <CloseProjectButton />}
           {/* R2 (LOCKED): koreksi "selesai → aktif" untuk upload terlambat — Director/Head saja. */}
           {project.status === "selesai" && ["director", "head"].includes(member.role) && (
             <button name="status" value="aktif"

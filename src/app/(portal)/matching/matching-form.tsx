@@ -3,6 +3,7 @@
 import { useActionState } from "react";
 import { ProductMatchView } from "@/components/product-match-view";
 import { runMatching, type MatchingActionResult } from "./actions";
+import { CreatorPicker } from "./creator-picker";
 
 /** Creator Product Match (M5, satu engine): pilih kreator → profil kategori + produk cocok. 0 token AI. */
 export function MatchingForm({ creators }: { creators: { id: string; name: string }[] }) {
@@ -17,14 +18,7 @@ export function MatchingForm({ creators }: { creators: { id: string; name: strin
         action={formAction}
         className="flex flex-wrap items-center gap-3 rounded-lg border border-slate-200 bg-white p-4"
       >
-        <select name="creator_id" required className="rounded-md border border-slate-300 px-3 py-2 text-sm">
-          <option value="">— Pilih kreator —</option>
-          {creators.map((c) => (
-            <option key={c.id} value={c.id}>
-              {c.name} ({c.id})
-            </option>
-          ))}
-        </select>
+        <CreatorPicker creators={creators} />
         <button
           type="submit"
           disabled={pending}

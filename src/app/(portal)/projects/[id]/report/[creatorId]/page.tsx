@@ -5,8 +5,14 @@ import { createClient } from "@/lib/supabase/server";
 import { ProjectReportView } from "@/components/project-report-view";
 import { finalizeProjectReport } from "../../report-actions";
 import type { ProjectReportData } from "@/lib/m7/report-data";
+import { PrintButton } from "@/app/(portal)/reports/[id]/print-button";
 
-/** Halaman report peserta (tim) — PRD §6.13/B3: presentasi di halaman, tanpa unduhan PNG/PDF. */
+/**
+ * Halaman report peserta (tim) — PRD §6.13/B3: presentasi di halaman, tanpa
+ * template unduhan PNG/PDF baru. Tombol Export (Print/PDF) yang dipakai di sini
+ * adalah tombol print browser yang sama dengan report kreator (reports/[id]/
+ * print-button.tsx, B3: "dipakai ulang apa adanya") — bukan generator PDF baru.
+ */
 export default async function ProjectReportPage({
   params,
 }: { params: Promise<{ id: string; creatorId: string }> }) {
@@ -33,9 +39,12 @@ export default async function ProjectReportPage({
 
   return (
     <div>
-      <Link href={`/projects/${projectId}`} className="text-sm text-blue-700 hover:underline">
-        ← Kembali ke Project
-      </Link>
+      <div className="flex items-center justify-between print:hidden">
+        <Link href={`/projects/${projectId}`} className="text-sm text-blue-700 hover:underline">
+          ← Kembali ke Project
+        </Link>
+        {report.status === "final" && <PrintButton />}
+      </div>
       <div className="mt-3">
         <ProjectReportView data={data} insight={insight} status={report.status as "draft" | "final"} audience="team" />
       </div>
