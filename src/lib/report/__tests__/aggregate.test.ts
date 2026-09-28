@@ -8,6 +8,7 @@ import {
   sumMetrics,
   totalsFromPeriodSummary,
   topSubCategoriesFromProducts,
+  validateCustomPeriod,
   type RawMetricRow,
 } from "../aggregate";
 
@@ -148,5 +149,88 @@ describe("periodBounds", () => {
       start: "2026-06-01", end: "2026-07-01",
       prevStart: "2026-05-01", prevEnd: "2026-06-01",
     });
+  });
+
+  describe("PLAN_MSDPS Paket C (C-02): bug W5 'start + 7 hari' menelan bulan berikutnya", () => {
+    it("W5 September (30 hari, start=29) berakhir 1 Oktober, BUKAN 6 Oktober", () => {
+      expect(periodBounds("weekly", "2026-09-29")).toEqual({
+        start: "2026-09-29", end: "2026-10-01",
+        prevStart: "2026-09-22", prevEnd: "2026-09-29",
+      });
+    });
+
+    it("W5 Januari (31 hari, start=29) berakhir 1 Februari, hanya 3 hari", () => {
+      expect(periodBounds("weekly", "2026-01-29")).toEqual({
+        start: "2026-01-29", end: "2026-02-01",
+        prevStart: "2026-01-22", prevEnd: "2026-01-29",
+      });
+    });
+
+    it("W1 bulan manapun -> minggu pembanding = W5 bulan SEBELUMNYA (lintas bulan benar)", () => {
+      expect(periodBounds("weekly", "2026-10-01")).toEqual({
+        start: "2026-10-01", end: "2026-10-08",
+        prevStart: "2026-09-29", prevEnd: "2026-10-01",
+      });
+    });
+
+    it("Februari non-kabisat: W4=22-28 berakhir tepat 1 Maret (tidak ada W5)", () => {
+      expect(periodBounds("weekly", "2026-02-22")).toEqual({
+        start: "2026-02-22", end: "2026-03-01",
+        prevStart: "2026-02-15", prevEnd: "2026-02-22",
+      });
+    });
+  });
+
+  describe("PLAN_MSDPS Paket C: periode custom", () => {
+    it("start s/d endExclusive dipakai apa adanya", () => {
+      const b = periodBounds("custom", "2026-09-08", "2026-09-29");
+      expect(b.start).toBe("2026-09-08");
+      expect(b.end).toBe("2026-09-29");
+    });
+
+    it("pembanding = jumlah jendela yang SAMA tepat sebelumnya (3 jendela W2-W4 -> pembanding W... x3 sebelum W2)", () => {
+      // W2-W4 September (2026-09-08 s/d 2026-09-29) = 3 jendela -> pembanding 3 jendela
+      // sebelum W2 = W4,W3,... mundur 3x dari 2026-09-08: W1(9/1-9/8) lalu W5+W4+W3 Agustus.
+      const b = periodBounds("custom", "2026-09-08", "2026-09-29");
+      expect(b.prevEnd).toBe("2026-09-08");
+      // Mundur 3 jendela dari 8 Sept: -> 1 Sept (W1) -> 29 Agu (W5 Agustus) -> 22 Agu (W4).
+      expect(b.prevStart).toBe("2026-08-22");
+    });
+
+    it("melempar tanpa endExclusive", () => {
+      expect(() => periodBounds("custom", "2026-09-08")).toThrow();
+    });
+  });
+});
+
+describe("validateCustomPeriod (C-04)", () => {
+  it("menerima rentang yang sejajar jendela W1-W5", () => {
+    expect(validateCustomPeriod("2026-09-08", "2026-09-29")).toEqual({ valid: true });
+  });
+
+  it("menolak start yang bukan awal jendela", () => {
+    const r = validateCustomPeriod("2026-09-10", "2026-09-29");
+    expect(r.valid).toBe(false);
+    expect(r.reason).toMatch(/awal jendela/);
+  });
+
+  it("menolak end yang bukan akhir jendela", () => {
+    const r = validateCustomPeriod("2026-09-08", "2026-09-20");
+    expect(r.valid).toBe(false);
+    expect(r.reason).toMatch(/akhir jendela/);
+  });
+
+  it("menolak end <= start", () => {
+    expect(validateCustomPeriod("2026-09-08", "2026-09-08").valid).toBe(false);
+  });
+
+  it("menolak rentang > 12 bulan", () => {
+    const r = validateCustomPeriod("2026-01-01", "2027-02-01");
+    expect(r.valid).toBe(false);
+    expect(r.reason).toMatch(/12 bulan/);
+  });
+
+  it("menerima rentang lintas bulan yang sejajar jendela", () => {
+    expect(validateCustomPeriod("2026-08-29", "2026-09-08")).toEqual({ valid: true });
   });
 });

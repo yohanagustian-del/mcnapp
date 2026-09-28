@@ -2,6 +2,7 @@
 
 import { useActionState } from "react";
 import { generateReport, type ReportActionState } from "./actions";
+import { ReportPeriodPicker } from "./report-period-picker";
 
 export function GenerateReportForm({ creators }: { creators: { id: string; name: string }[] }) {
   const [state, formAction, pending] = useActionState<ReportActionState | null, FormData>(
@@ -18,11 +19,7 @@ export function GenerateReportForm({ creators }: { creators: { id: string; name:
             <option key={c.id} value={c.id}>{c.name} ({c.id})</option>
           ))}
         </select>
-        <select name="period_type" required defaultValue="weekly" className="rounded-md border border-slate-300 px-3 py-2 text-sm">
-          <option value="weekly">Weekly</option>
-          <option value="monthly">Monthly</option>
-        </select>
-        <input type="date" name="period_start" required className="rounded-md border border-slate-300 px-3 py-2 text-sm" />
+        <ReportPeriodPicker />
         <button
           type="submit" disabled={pending}
           className="rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-700 disabled:opacity-50"

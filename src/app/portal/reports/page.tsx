@@ -8,6 +8,7 @@ import { generateSelfReport } from "../actions";
 const PERIOD_LABELS: Record<string, string> = {
   weekly: "Report mingguan",
   monthly: "Report bulanan",
+  custom: "Report custom",
   project: "Report Special Project",
   live_session: "Report live stream",
 };

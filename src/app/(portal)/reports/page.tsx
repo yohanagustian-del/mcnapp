@@ -8,6 +8,7 @@ import { GenerateReportForm } from "./generate-report-form";
 const PERIOD_LABELS: Record<string, string> = {
   weekly: "Mingguan",
   monthly: "Bulanan",
+  custom: "Custom",
   project: "Special Project",
   live_session: "Live stream (jadwal)",
 };
@@ -17,6 +18,15 @@ const PERIOD_LABELS: Record<string, string> = {
  * data_json-nya ProjectReportData, bukan report periode kreator) — tautkan
  * langsung ke sana, bukan lewat redirect.
  */
+/** "2026-09-08 – 2026-09-14" (period_end EKSKLUSIF -1 hari) atau tanggal tunggal bila period_end kosong (report lama, migrasi 0077). */
+function periodRangeLabel(start: string, endExclusive: string | null): string {
+  if (!endExclusive) return start;
+  const end = new Date(`${endExclusive}T00:00:00Z`);
+  end.setUTCDate(end.getUTCDate() - 1);
+  const endIso = end.toISOString().slice(0, 10);
+  return endIso === start ? start : `${start} – ${endIso}`;
+}
+
 function reportHref(r: { id: number; period_type: string; creator_id: string; project_id: number | null; schedule_slot_id: number | null }): string {
   if (r.period_type === "project" && r.project_id) return `/projects/${r.project_id}/report/${r.creator_id}`;
   if (r.period_type === "live_session" && r.schedule_slot_id) return `/schedule/live/${r.schedule_slot_id}/report`;
@@ -37,7 +47,7 @@ export default async function ReportsPage() {
     creatorsQuery,
     supabase
       .from("creator_reports")
-      .select("id, creator_id, period_type, period_start, status, token_used, generated_at, project_id, schedule_slot_id, creators(name)")
+      .select("id, creator_id, period_type, period_start, period_end, status, token_used, generated_at, project_id, schedule_slot_id, creators(name)")
       .order("generated_at", { ascending: false })
       .limit(50),
     supabase.from("token_baseline").select("report_type, best_token, updated_at"),
@@ -86,7 +96,7 @@ export default async function ReportsPage() {
                   {(r.creators as unknown as { name: string } | null)?.name ?? r.creator_id}
                 </td>
                 <td className="px-4 py-2">{PERIOD_LABELS[r.period_type] ?? r.period_type}</td>
-                <td className="px-4 py-2">{r.period_start}</td>
+                <td className="px-4 py-2">{periodRangeLabel(r.period_start, r.period_end)}</td>
                 <td className="px-4 py-2">
                   <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${r.status === "final" ? "bg-green-100 text-green-800" : "bg-amber-100 text-amber-800"}`}>
                     {r.status}

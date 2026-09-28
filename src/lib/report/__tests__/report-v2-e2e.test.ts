@@ -115,6 +115,22 @@ const buildMonthly = (db: FakeDb) =>
     rules: DEFAULT_REPORT_RULES, benchmarks: { default: DEFAULT_BENCHMARK },
   });
 
+const buildCustom = (db: FakeDb, periodStart: string, periodEnd: string) =>
+  buildCreatorReportData(db.client, {
+    creatorId: CREATOR_ID, periodType: "custom", periodStart, periodEnd,
+    rules: DEFAULT_REPORT_RULES, benchmarks: { default: DEFAULT_BENCHMARK },
+  });
+
+describe("Report Kreator v2 — PLAN_MSDPS Paket C: periode custom", () => {
+  it("W2-W4 September (3 jendela) menjumlah hanya minggu di rentang itu, bukan sebulan penuh", async () => {
+    const data = await buildCustom(seedDb(), "2026-09-08", "2026-09-29");
+    expect(data.period.type).toBe("custom");
+    expect(data.period.weeks_counted).toBe(3); // W2, W3, W4 — bukan W1 (1-7 Sept)
+    expect(data.metrics.gmv).toBe(30_000_000); // 3 × 10jt, bukan 4 × 10jt (bulan penuh)
+    expect(data.period.label).toBe("8–28 September 2026 (W2–W4)");
+  });
+});
+
 describe("Report Kreator v2 — bulanan", () => {
   it("MENJUMLAH seluruh minggu dalam bulan, bukan mengambil satu (bug audit #1)", async () => {
     const data = await buildMonthly(seedDb());

@@ -13,7 +13,7 @@
 
 export const REPORT_SCHEMA_VERSION = 2 as const;
 
-export type ReportPeriodType = "weekly" | "monthly";
+export type ReportPeriodType = "weekly" | "monthly" | "custom";
 
 /** Nada insight box — menentukan warna, bukan sekadar hiasan. */
 export type InsightTone = "good" | "warn" | "bad" | "info";
