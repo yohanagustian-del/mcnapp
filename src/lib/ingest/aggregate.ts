@@ -37,6 +37,10 @@ export interface PeriodSummaryRow {
   ctr: number | null;
   ctor: number | null;
   livePct: number | null;
+  /** PLAN_MSDPS Paket E — closing langsung saat siaran (migrasi 0074). */
+  liveDirectGmv: number;
+  liveDirectOrders: number;
+  liveItemsSold: number;
 }
 
 /**
@@ -65,6 +69,9 @@ export function buildPeriodSummary(rows: McnRow[]): PeriodSummaryRow[] {
     refundGmv: number;
     ctrWeighted: number; // sum(ctr * gmv)
     ctorWeighted: number; // sum(ctor * gmv)
+    liveDirectGmv: number;
+    liveDirectOrders: number;
+    liveItemsSold: number;
   }
   const byCreator = new Map<string, Acc>();
 
@@ -87,6 +94,9 @@ export function buildPeriodSummary(rows: McnRow[]): PeriodSummaryRow[] {
       refundGmv: 0,
       ctrWeighted: 0,
       ctorWeighted: 0,
+      liveDirectGmv: 0,
+      liveDirectOrders: 0,
+      liveItemsSold: 0,
     };
     if (r.periodStart && (!acc.periodStart || r.periodStart < acc.periodStart)) acc.periodStart = r.periodStart;
     if (r.periodEnd && (!acc.periodEnd || r.periodEnd > acc.periodEnd)) acc.periodEnd = r.periodEnd;
@@ -101,6 +111,9 @@ export function buildPeriodSummary(rows: McnRow[]): PeriodSummaryRow[] {
     acc.refundGmv += r.refundGmv;
     if (r.ctr !== null) acc.ctrWeighted += r.ctr * r.affiliateGmv;
     if (r.ctor !== null) acc.ctorWeighted += r.ctor * r.affiliateGmv;
+    acc.liveDirectGmv += r.liveDirectGmv;
+    acc.liveDirectOrders += r.liveDirectOrders;
+    acc.liveItemsSold += r.liveItemsSold;
     byCreator.set(key, acc);
   }
 
@@ -121,6 +134,9 @@ export function buildPeriodSummary(rows: McnRow[]): PeriodSummaryRow[] {
     ctr: acc.affiliateGmv > 0 ? acc.ctrWeighted / acc.affiliateGmv : null,
     ctor: acc.affiliateGmv > 0 ? acc.ctorWeighted / acc.affiliateGmv : null,
     livePct: acc.affiliateGmv > 0 ? acc.affiliateLiveGmv / acc.affiliateGmv : null,
+    liveDirectGmv: acc.liveDirectGmv,
+    liveDirectOrders: acc.liveDirectOrders,
+    liveItemsSold: acc.liveItemsSold,
   }));
 }
 
@@ -218,6 +234,10 @@ export interface TopProductRow {
   directGmv: number;
   ctr: number | null;
   ctor: number | null;
+  /** PLAN_MSDPS Paket E — closing langsung saat siaran, per produk (migrasi 0074). */
+  liveDirectGmv: number;
+  liveDirectOrders: number;
+  liveItemsSold: number;
 }
 
 /**
@@ -247,6 +267,9 @@ export function buildTopProducts(rows: McnRow[], topN: number): TopProductRow[] 
     ctrWeighted: number; // sum(ctr * gmv) — bobot yang sama dengan buildPeriodSummary
     ctorWeighted: number;
     weightedGmv: number; // gmv baris yang punya ctr/ctor (penyebut rata-rata berbobot)
+    liveDirectGmv: number;
+    liveDirectOrders: number;
+    liveItemsSold: number;
   }
   const byKey = new Map<string, Acc>();
 
@@ -274,6 +297,9 @@ export function buildTopProducts(rows: McnRow[], topN: number): TopProductRow[] 
       ctrWeighted: 0,
       ctorWeighted: 0,
       weightedGmv: 0,
+      liveDirectGmv: 0,
+      liveDirectOrders: 0,
+      liveItemsSold: 0,
     };
     if (r.periodStart && (!acc.periodStart || r.periodStart < acc.periodStart)) acc.periodStart = r.periodStart;
     if (r.periodEnd && r.periodEnd > acc.periodEnd) acc.periodEnd = r.periodEnd;
@@ -288,6 +314,9 @@ export function buildTopProducts(rows: McnRow[], topN: number): TopProductRow[] 
     acc.liveOrders += r.liveOrders;
     acc.videoOrders += r.videoOrders;
     acc.directGmv += r.directGmv;
+    acc.liveDirectGmv += r.liveDirectGmv;
+    acc.liveDirectOrders += r.liveDirectOrders;
+    acc.liveItemsSold += r.liveItemsSold;
     if (r.ctr !== null || r.ctor !== null) {
       // Baris ber-GMV nol tetap dihitung dengan bobot minimal supaya produk yang
       // hanya diklik (belum laku) tidak kehilangan CTR-nya sama sekali.
@@ -331,6 +360,9 @@ export function buildTopProducts(rows: McnRow[], topN: number): TopProductRow[] 
         directGmv: acc.directGmv,
         ctr: acc.weightedGmv > 0 ? acc.ctrWeighted / acc.weightedGmv : null,
         ctor: acc.weightedGmv > 0 ? acc.ctorWeighted / acc.weightedGmv : null,
+        liveDirectGmv: acc.liveDirectGmv,
+        liveDirectOrders: acc.liveDirectOrders,
+        liveItemsSold: acc.liveItemsSold,
       });
     });
   }

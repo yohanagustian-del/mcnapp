@@ -90,6 +90,26 @@ describe("parseMcnFile", () => {
     expect(rows).toHaveLength(0);
     expect(skipped).toHaveLength(1);
   });
+
+  it("parses LIVE direct GMV/orders/items (PLAN_MSDPS Paket E, migrasi 0074)", async () => {
+    const row = {
+      ...MCN_DATA_ROW,
+      "LIVE direct GMV": "Rp1.200.000", "LIVE direct orders": "15", "Creator LIVE items sold": "20",
+    };
+    const file = xlsxFile([row]);
+    const { rows } = await parseMcnFile(file);
+    expect(rows[0].liveDirectGmv).toBe(1_200_000);
+    expect(rows[0].liveDirectOrders).toBe(15);
+    expect(rows[0].liveItemsSold).toBe(20);
+  });
+
+  it("baris tanpa kolom LIVE direct (batch lama) = 0, bukan error", async () => {
+    const file = xlsxFile([MCN_DATA_ROW]);
+    const { rows } = await parseMcnFile(file);
+    expect(rows[0].liveDirectGmv).toBe(0);
+    expect(rows[0].liveDirectOrders).toBe(0);
+    expect(rows[0].liveItemsSold).toBe(0);
+  });
 });
 
 describe("parseTapFile", () => {

@@ -51,6 +51,7 @@ const summary: PeriodSummaryRow[] = [
     gmvTotal: 1_000_000, affiliateGmv: 1_000_000, affiliateLiveGmv: 600_000,
     affiliateVideoGmv: 400_000, liveOrders: 5, videoOrders: 3, orders: 8,
     itemsSold: 10, directGmv: 900_000, refundGmv: 0, ctr: 10, ctor: 2, livePct: 0.6,
+    liveDirectGmv: 0, liveDirectOrders: 0, liveItemsSold: 0,
   },
 ];
 const subcat: SubcatSegmentRow[] = [
@@ -67,6 +68,7 @@ const top: TopProductRow[] = [
     level1Category: "F&B", level2Category: "Drinks", gmv: 1_000_000, orders: 8,
     liveGmv: 600_000, videoGmv: 400_000, itemsSold: 10, liveOrders: 5, videoOrders: 3,
     directGmv: 0, ctr: 0.05, ctor: 0.02,
+    liveDirectGmv: 0, liveDirectOrders: 0, liveItemsSold: 0,
   },
 ];
 
@@ -118,6 +120,7 @@ describe("writeAggregates (idempotensi per creator x periode, bukan per upload_b
     expect(summaryInsert?.rows?.[0]).toMatchObject({
       creator_id: "CRT-001", affiliate_gmv: 1_000_000, affiliate_live_gmv: 600_000,
       live_pct: 0.6, gmv_total: 1_000_000, items_sold: 10,
+      live_direct_gmv: 0, live_direct_orders: 0, live_items_sold: 0,
     });
     const subcatInsert = ops.find((o) => o.op === "insert" && o.table === "creator_subcat_segment_gmv");
     expect(subcatInsert?.rows?.[0]).toMatchObject({

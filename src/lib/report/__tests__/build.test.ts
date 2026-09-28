@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
-  aggregateProducts, latestPerPeriod, periodLabel, productSplitAvailable, rankProducts,
-  sumPeriodSummaries, type PeriodSummaryRowV2, type TopProductRowV2,
+  aggregateProducts, latestPerPeriod, liveDirectAvailable, periodLabel, productSplitAvailable, rankProducts,
+  sumPeriodSummaries, weeklyLiveTrend, type PeriodSummaryRowV2, type TopProductRowV2,
 } from "../build";
 
 const week = (over: Partial<PeriodSummaryRowV2> = {}): PeriodSummaryRowV2 => ({
@@ -64,6 +64,55 @@ describe("sumPeriodSummaries", () => {
 
   it("affiliate_gmv null jatuh ke gmv_total", () => {
     expect(sumPeriodSummaries([week({ affiliate_gmv: null, gmv_total: 750_000 })]).gmv).toBe(750_000);
+  });
+
+  it("PLAN_MSDPS Paket E: menjumlah live_direct_gmv/orders/items dan menghitung live_direct_share", () => {
+    const kpi = sumPeriodSummaries([
+      week({ period_start: "2026-09-01", affiliate_live_gmv: 800_000, live_direct_gmv: 200_000, live_direct_orders: 3, live_items_sold: 4 }),
+      week({ period_start: "2026-09-08", affiliate_live_gmv: 800_000, live_direct_gmv: 400_000, live_direct_orders: 5, live_items_sold: 6 }),
+    ]);
+    expect(kpi.live_direct_gmv).toBe(600_000);
+    expect(kpi.live_direct_orders).toBe(8);
+    expect(kpi.live_items_sold).toBe(10);
+    expect(kpi.live_direct_share).toBeCloseTo(600_000 / 1_600_000);
+  });
+
+  it("live_direct_share null bila live_gmv=0 (bukan div-by-zero)", () => {
+    expect(sumPeriodSummaries([week({ affiliate_live_gmv: 0, live_direct_gmv: 0 })]).live_direct_share).toBeNull();
+  });
+
+  it("baris tanpa kolom live_direct (batch lama, undefined) dibaca sebagai 0", () => {
+    const legacy: PeriodSummaryRowV2 = week();
+    delete legacy.live_direct_gmv;
+    const kpi = sumPeriodSummaries([legacy]);
+    expect(kpi.live_direct_gmv).toBe(0);
+  });
+});
+
+describe("weeklyLiveTrend (PLAN_MSDPS Paket E, R6: tren W1-W5 GMV live vs video)", () => {
+  it("memproyeksikan tiap minggu apa adanya, tidak dijumlah", () => {
+    const trend = weeklyLiveTrend([
+      week({ period_start: "2026-09-01", affiliate_live_gmv: 800_000, affiliate_video_gmv: 200_000 }),
+      week({ period_start: "2026-09-08", affiliate_live_gmv: 500_000, affiliate_video_gmv: 300_000 }),
+    ]);
+    expect(trend).toEqual([
+      { period_start: "2026-09-01", live_gmv: 800_000, video_gmv: 200_000 },
+      { period_start: "2026-09-08", live_gmv: 500_000, video_gmv: 300_000 },
+    ]);
+  });
+
+  it("periode kosong -> array kosong", () => {
+    expect(weeklyLiveTrend([])).toEqual([]);
+  });
+});
+
+describe("liveDirectAvailable (batch lama tidak boleh tampil sebagai 0%)", () => {
+  it("false bila semua minggu live_direct_gmv/orders/items nol", () => {
+    expect(liveDirectAvailable([week(), week({ period_start: "2026-09-08" })])).toBe(false);
+  });
+
+  it("true bila salah satu minggu punya live_direct_gmv > 0", () => {
+    expect(liveDirectAvailable([week(), week({ period_start: "2026-09-08", live_direct_gmv: 100_000 })])).toBe(true);
   });
 });
 

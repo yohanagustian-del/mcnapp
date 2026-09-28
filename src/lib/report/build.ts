@@ -52,6 +52,10 @@ export interface PeriodSummaryRowV2 {
   items_sold: number | string | null;
   ctr: number | string | null;
   ctor: number | string | null;
+  /** PLAN_MSDPS Paket E (migrasi 0074) — null/absent pada batch lama, dibaca sebagai 0. */
+  live_direct_gmv?: number | string | null;
+  live_direct_orders?: number | string | null;
+  live_items_sold?: number | string | null;
 }
 
 const num = (v: number | string | null | undefined): number => Number(v ?? 0);
@@ -80,6 +84,7 @@ export function sumPeriodSummaries(rows: PeriodSummaryRowV2[]): ReportKpi {
   let gmv = 0, liveGmv = 0, videoGmv = 0, directGmv = 0;
   let orders = 0, liveOrders = 0, videoOrders = 0, items = 0;
   let ctrWeighted = 0, ctorWeighted = 0, ctrWeight = 0, ctorWeight = 0;
+  let liveDirectGmv = 0, liveDirectOrders = 0, liveItemsSold = 0;
 
   for (const r of rows) {
     const affiliate = r.affiliate_gmv === null || r.affiliate_gmv === undefined
@@ -96,6 +101,9 @@ export function sumPeriodSummaries(rows: PeriodSummaryRowV2[]): ReportKpi {
     const w = affiliate > 0 ? affiliate : 1;
     if (r.ctr !== null && r.ctr !== undefined) { ctrWeighted += num(r.ctr) * w; ctrWeight += w; }
     if (r.ctor !== null && r.ctor !== undefined) { ctorWeighted += num(r.ctor) * w; ctorWeight += w; }
+    liveDirectGmv += num(r.live_direct_gmv);
+    liveDirectOrders += num(r.live_direct_orders);
+    liveItemsSold += num(r.live_items_sold);
   }
 
   return {
@@ -106,7 +114,37 @@ export function sumPeriodSummaries(rows: PeriodSummaryRowV2[]): ReportKpi {
     video_share: ratio(videoGmv, gmv),
     ctr: ratio(ctrWeighted, ctrWeight),
     ctor: ratio(ctorWeighted, ctorWeight),
+    live_direct_gmv: liveDirectGmv,
+    live_direct_orders: liveDirectOrders,
+    live_items_sold: liveItemsSold,
+    live_direct_share: ratio(liveDirectGmv, liveGmv),
   };
+}
+
+/**
+ * Tren mingguan GMV live vs video (W1–W5) — proyeksi langsung `currentWeeks`
+ * (satu baris terbaru per period_start), tidak dijumlah, supaya tren bulanan
+ * terlihat naik/turun per minggu, bukan cuma total.
+ */
+export function weeklyLiveTrend(
+  weeks: PeriodSummaryRowV2[]
+): { period_start: string; live_gmv: number; video_gmv: number }[] {
+  return weeks.map((w) => ({
+    period_start: w.period_start,
+    live_gmv: num(w.affiliate_live_gmv),
+    video_gmv: num(w.affiliate_video_gmv),
+  }));
+}
+
+/**
+ * Batch lama (sebelum migrasi 0074) punya live_direct_gmv/orders/items = 0 untuk
+ * semua minggu. "% beli langsung saat live" tidak bisa dibuat dari itu — report
+ * HARUS bilang datanya belum ada, bukan menampilkan 0% (CLAUDE.md #5).
+ */
+export function liveDirectAvailable(weeks: PeriodSummaryRowV2[]): boolean {
+  return weeks.some(
+    (w) => num(w.live_direct_gmv) > 0 || num(w.live_direct_orders) > 0 || num(w.live_items_sold) > 0
+  );
 }
 
 /** Baris `creator_top_products` yang dibaca report v2 (kolom baru = migrasi 0066). */
@@ -242,7 +280,7 @@ interface CreatorRow {
 }
 
 const SUMMARY_COLUMNS =
-  "period_start, created_at, gmv_total, affiliate_gmv, affiliate_live_gmv, affiliate_video_gmv, direct_gmv, orders, live_orders, video_orders, items_sold, ctr, ctor";
+  "period_start, created_at, gmv_total, affiliate_gmv, affiliate_live_gmv, affiliate_video_gmv, direct_gmv, orders, live_orders, video_orders, items_sold, ctr, ctor, live_direct_gmv, live_direct_orders, live_items_sold";
 const PRODUCT_COLUMNS =
   "product_id, product_info, shop_name, level1_category, level2_category, gmv, orders, live_gmv, video_gmv, items_sold, live_orders, video_orders, direct_gmv, ctr, ctor";
 const LIVE_SESSION_COLUMNS =
@@ -285,6 +323,7 @@ export async function buildCreatorReportData(
   const currentWeeks = latestPerPeriod(currentRows);
   const metrics = sumPeriodSummaries(currentWeeks);
   const previous = sumPeriodSummaries(latestPerPeriod(previousRows));
+  const liveDirectOk = liveDirectAvailable(currentWeeks);
 
   const deltas: ReportDeltas = {
     gmv: computeDelta(metrics.gmv, previous.gmv),
@@ -316,7 +355,14 @@ export async function buildCreatorReportData(
   const sessions = sessionRows.map(toLiveSession);
   const liveSummary = summarizeLiveSessions(sessions, metrics.live_gmv, rules.top_n);
   const bench = pickBenchmark(benchmarks, creator.niche);
-  const live = { ...liveSummary, benchmarks: buildBenchmarkRows(liveSummary, bench) };
+  const trend = weeklyLiveTrend(currentWeeks);
+  const live = {
+    ...liveSummary,
+    benchmarks: buildBenchmarkRows(liveSummary, bench),
+    weekly_trend: trend,
+    weekly_available: trend.some((t) => t.live_gmv > 0 || t.video_gmv > 0),
+    live_direct_available: liveDirectOk,
+  };
 
   // ===== Bedah N sesi terbaik =====
   const deepDiveSessions = liveSummary.top_sessions.slice(0, Math.max(0, rules.deep_dive_sessions));
@@ -362,24 +408,30 @@ export async function buildCreatorReportData(
   });
 
   // ===== Kategori =====
-  const subcatRows = await fetchAll<{ level2_category: string; gmv: number | string | null }>(
-    supabase, "creator_subcat_segment_gmv", "level2_category, gmv",
+  const subcatRows = await fetchAll<{ level2_category: string; gmv: number | string | null; live_gmv: number | string | null }>(
+    supabase, "creator_subcat_segment_gmv", "level2_category, gmv, live_gmv",
     (q) => q.eq("creator_id", input.creatorId).gt("window_end", bounds.start).lte("window_end", bounds.end));
-  const byCategory = new Map<string, number>();
+  const byCategory = new Map<string, { gmv: number; liveGmv: number }>();
   for (const r of subcatRows) {
     if (!r.level2_category) continue;
-    byCategory.set(r.level2_category, (byCategory.get(r.level2_category) ?? 0) + num(r.gmv));
+    const acc = byCategory.get(r.level2_category) ?? { gmv: 0, liveGmv: 0 };
+    acc.gmv += num(r.gmv);
+    acc.liveGmv += num(r.live_gmv);
+    byCategory.set(r.level2_category, acc);
   }
   // Batch lama tanpa baris subkategori → turunkan dari produk (sumber yang sama-sama nyata).
   if (byCategory.size === 0) {
     for (const p of products) {
       if (!p.category) continue;
-      byCategory.set(p.category, (byCategory.get(p.category) ?? 0) + p.gmv);
+      const acc = byCategory.get(p.category) ?? { gmv: 0, liveGmv: 0 };
+      acc.gmv += p.gmv;
+      acc.liveGmv += p.live_gmv;
+      byCategory.set(p.category, acc);
     }
   }
-  const categoryTotal = [...byCategory.values()].reduce((a, b) => a + b, 0);
+  const categoryTotal = [...byCategory.values()].reduce((a, b) => a + b.gmv, 0);
   const categories = [...byCategory.entries()]
-    .map(([sub_category, gmv]) => ({ sub_category, gmv, share: ratio(gmv, categoryTotal) }))
+    .map(([sub_category, acc]) => ({ sub_category, gmv: acc.gmv, live_gmv: acc.liveGmv, share: ratio(acc.gmv, categoryTotal) }))
     .sort((a, b) => b.gmv - a.gmv)
     .slice(0, 6);
 
@@ -402,8 +454,8 @@ export async function buildCreatorReportData(
 
   const label = periodLabel(input.periodType, bounds.start, bounds.end);
   const rulesInput = {
-    metrics, previous, deltas, live: liveSummary, benchmarks: live.benchmarks,
-    topLive, topVideo, rules, periodLabel: label,
+    metrics, previous, deltas, live, benchmarks: live.benchmarks,
+    topLive, topVideo, rules, periodLabel: label, categories, liveDirectAvailable: liveDirectOk,
   };
 
   return {
@@ -435,7 +487,11 @@ export async function buildCreatorReportData(
     summary: buildSummary(rulesInput),
     insights: buildInsights(rulesInput),
     recommendations: buildRecommendations(rulesInput),
-    data_notes: buildDataNotes({ liveAvailable: liveSummary.available, productSplitAvailable: splitAvailable }),
+    data_notes: buildDataNotes({
+      liveAvailable: liveSummary.available,
+      productSplitAvailable: splitAvailable,
+      liveDirectMissing: metrics.live_gmv > 0 && !liveDirectOk,
+    }),
     benchmark: benchmarkPeer,
     contract_alert: contractAlert,
     link_leakage: linkStatus ?? null,

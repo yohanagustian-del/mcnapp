@@ -310,6 +310,17 @@ export function CreatorReportView({
     per_jam: b.gmv_per_hour ?? 0,
   }));
   const categoryChart = data.categories.map((c) => ({ name: c.sub_category, value: c.gmv }));
+  // PLAN_MSDPS Paket E (R6): tren W1–W5 dari data upload mingguan — dipakai tab Live
+  // Performance (grafik) DAN tab Analisa Live Terbaik (pilih minggu GMV live tertinggi).
+  const weeklyTrendChart = data.live.weekly_trend.map((w) => ({
+    label: w.period_start.slice(5),
+    live: w.live_gmv,
+    video: w.video_gmv,
+  }));
+  const bestWeek = data.live.weekly_trend.reduce<typeof data.live.weekly_trend[number] | null>(
+    (best, w) => (w.live_gmv > 0 && (!best || w.live_gmv > best.live_gmv) ? w : best),
+    null
+  );
   const handle = data.creator.username ? `@${data.creator.username}` : data.creator.name;
   const onDone = () => setVersion((v) => v + 1);
 
@@ -521,16 +532,60 @@ export function CreatorReportView({
         {/* ===== LIVE PERFORMANCE ===== */}
         {tab === "live" && (
           <>
-            {!data.live.available ? (
-              <Card title="Live performance">
-                <p className="text-sm text-slate-600">
-                  Belum ada file sesi live yang diunggah untuk periode ini lewat Jadwal Live.
-                  {data.metrics.live_gmv > 0 && (
-                    <> Data platform mencatat GMV live {rupiahShort(data.metrics.live_gmv)}, tapi rincian per sesi
-                    (jam terbaik, CVR, alur 30 menit) butuh file TikTok LIVE Center.</>
+            {data.live.weekly_available && (
+              <>
+                <Card title="Ringkasan live (data upload mingguan)"
+                  note="Selalu terisi dari upload mingguan — tidak butuh file TikTok LIVE Center.">
+                  <div className="grid gap-2 sm:grid-cols-4">
+                    <Stat label="GMV live" value={rupiahShort(data.metrics.live_gmv)} hint={`Δ ${delta(data.deltas.live_gmv)}`} />
+                    <Stat label="Order live" value={num(data.metrics.live_orders)} />
+                    <Stat label="Item live" value={num(data.metrics.live_items_sold)} />
+                    <Stat label="AOV live" value={rupiahShort(data.metrics.live_orders > 0 ? data.metrics.live_gmv / data.metrics.live_orders : null)} />
+                    <Stat label="Kontribusi live" value={pct(data.metrics.live_share)} />
+                    <Stat
+                      label="Beli langsung saat live"
+                      value={data.live.live_direct_available ? pct(data.metrics.live_direct_share) : "belum tersedia"}
+                      hint={data.live.live_direct_available ? rupiahShort(data.metrics.live_direct_gmv) : undefined}
+                    />
+                  </div>
+                </Card>
+
+                {weeklyTrendChart.length > 0 && (
+                  <Card title="Tren mingguan: GMV live vs video">
+                    <div className="h-56">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <BarChart data={weeklyTrendChart}>
+                          <CartesianGrid strokeDasharray="3 3" stroke="#E7EEE9" />
+                          <XAxis dataKey="label" tick={{ fontSize: 11 }} />
+                          <YAxis tickFormatter={(v: number) => rupiahShort(v)} tick={{ fontSize: 10 }} width={70} />
+                          <Tooltip formatter={(v) => rupiah(Number(v ?? 0))} />
+                          <Legend wrapperStyle={{ fontSize: 11 }} />
+                          <Bar dataKey="live" name="GMV live" fill={GREEN} radius={[4, 4, 0, 0]} />
+                          <Bar dataKey="video" name="GMV video" fill={ORANGE} radius={[4, 4, 0, 0]} />
+                        </BarChart>
+                      </ResponsiveContainer>
+                    </div>
+                  </Card>
+                )}
+
+                <Card title="Produk terbaik untuk live">
+                  {data.products.split_unavailable ? (
+                    <p className="text-sm text-slate-500">
+                      Pecahan GMV live vs video per produk belum tersedia untuk periode ini.
+                    </p>
+                  ) : (
+                    <ProductTable rows={data.products.top_live} dimension="live" />
                   )}
-                </p>
-              </Card>
+                </Card>
+              </>
+            )}
+
+            {!data.live.available ? (
+              !data.live.weekly_available && (
+                <Card title="Live performance">
+                  <p className="text-sm text-slate-600">Tidak ada data live yang tercatat pada periode ini.</p>
+                </Card>
+              )
             ) : (
               <>
                 <Card title="Ringkasan sesi live"
@@ -585,12 +640,30 @@ export function CreatorReportView({
 
         {/* ===== ANALISA LIVE TERBAIK ===== */}
         {tab === "deepdive" && (
-          data.live_deep_dive.length === 0 ? (
-            <Card title="Analisa live terbaik">
-              <p className="text-sm text-slate-600">Belum ada sesi live yang bisa dibedah untuk periode ini.</p>
-            </Card>
-          ) : (
-            <>
+          <>
+            {bestWeek ? (
+              <Card title="Minggu live terbaik" note="Dari data upload mingguan — jendela dengan GMV live tertinggi periode ini.">
+                <div className="grid gap-2 sm:grid-cols-3">
+                  <Stat label="Minggu" value={bestWeek.period_start} />
+                  <Stat label="GMV live" value={rupiahShort(bestWeek.live_gmv)} />
+                  <Stat label="GMV video minggu itu" value={rupiahShort(bestWeek.video_gmv)} />
+                </div>
+                {data.products.top_live.length > 0 && !data.products.split_unavailable && (
+                  <div className="mt-3">
+                    <p className="mb-1 text-xs text-slate-500">Produk teratas untuk live, periode ini:</p>
+                    <ProductTable rows={data.products.top_live.slice(0, 5)} dimension="live" />
+                  </div>
+                )}
+              </Card>
+            ) : (
+              data.live_deep_dive.length === 0 && (
+                <Card title="Analisa live terbaik">
+                  <p className="text-sm text-slate-600">Belum ada data live yang bisa dibedah untuk periode ini.</p>
+                </Card>
+              )
+            )}
+            {data.live_deep_dive.length > 0 && (
+              <>
               {data.live_deep_dive.map((dd) => (
                 <Card
                   key={dd.session.session_id}
@@ -661,8 +734,9 @@ export function CreatorReportView({
                   )}
                 </Card>
               ))}
-            </>
-          )
+              </>
+            )}
+          </>
         )}
 
         {/* ===== PRODUK OPTIMAL ===== */}
