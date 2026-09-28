@@ -29,6 +29,9 @@ function row(overrides: Partial<McnRow>): McnRow {
     refundGmv: 0,
     ctr: null,
     ctor: null,
+    liveDirectGmv: 0,
+    liveDirectOrders: 0,
+    liveItemsSold: 0,
     ...overrides,
   };
 }

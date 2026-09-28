@@ -37,6 +37,13 @@ export const MCN_COLUMNS = {
   refundGmv: "direct_refund_gmv",
   ctr: "ctr",
   ctor: "ctor",
+  // PLAN_MSDPS Paket E (R6, migrasi 0074): "% beli langsung saat live" butuh
+  // pecahan closing langsung-saat-siaran dari live-attributed GMV/orders/items.
+  // Header EN persis dari sample MCN 2026-09-08..09-14 (belum ada alias ID —
+  // QA lapangan perlu konfirmasi kalau akun berbahasa Indonesia dipakai).
+  liveDirectGmv: "live_direct_gmv",
+  liveDirectOrders: "live_direct_orders",
+  liveItemsSold: "creator_live_items_sold",
 } as const;
 
 /** TAP report (CSV-2 / agency-link) — normalized header → internal field. */
@@ -86,6 +93,10 @@ export interface McnRow {
   refundGmv: number;
   ctr: number | null;
   ctor: number | null;
+  /** PLAN_MSDPS Paket E — closing LANGSUNG saat siaran (subset dari affiliateLiveGmv/liveOrders/itemsSold). */
+  liveDirectGmv: number;
+  liveDirectOrders: number;
+  liveItemsSold: number;
 }
 
 /** Internal row shape produced by parse.ts for the TAP (agency-link) report. */

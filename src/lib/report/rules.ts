@@ -8,7 +8,7 @@
  * Murni (tanpa I/O) supaya bisa diuji langsung dan dipakai server maupun klien.
  */
 import type {
-  BenchmarkRow, InsightBox, Recommendation, ReportDeltas, ReportKpi, ReportLive, ReportProduct,
+  BenchmarkRow, InsightBox, Recommendation, ReportDataV2, ReportDeltas, ReportKpi, ReportLive, ReportProduct,
 } from "./types";
 
 // ---------- Bentuk konfigurasi (app_config) ----------
@@ -154,6 +154,10 @@ export interface RulesInput {
   topVideo: ReportProduct[];
   rules: ReportRules;
   periodLabel: string;
+  /** PLAN_MSDPS Paket E: kategori Level 2 dengan pecahan live_gmv, untuk insight "kategori terkuat di live". */
+  categories: ReportDataV2["categories"];
+  /** false = batch periode ini belum membawa live_direct_gmv/orders/items (sebelum migrasi 0074). */
+  liveDirectAvailable: boolean;
 }
 
 /**
@@ -193,6 +197,28 @@ export function buildInsights(input: RulesInput): InsightBox[] {
         (videoRendah
           ? ` Video di bawah ${persen(rules.video_share_low, 0)} — konten video yang konsisten bisa jadi bantalan saat jam live berkurang.`
           : " Dua kanal sama-sama berjalan."),
+    });
+  }
+
+  // % beli langsung saat live — dari data upload mingguan, TIDAK butuh file sesi
+  // (PLAN_MSDPS Paket E, R6: pemilik minta tab Live Performance jalan tanpa itu).
+  if (metrics.live_gmv > 0 && input.liveDirectAvailable && metrics.live_direct_share !== null) {
+    out.push({
+      key: "live_direct_share",
+      tone: "info",
+      title: "Pembelian langsung saat live",
+      text: `${persen(metrics.live_direct_share)} dari GMV live (${rupiahShort(metrics.live_direct_gmv)}) closing LANGSUNG saat siaran; sisanya dibeli belakangan lewat keranjang/etalase.`,
+    });
+  }
+
+  // Kategori Level 2 terkuat di live (dari creator_subcat_segment_gmv, mingguan).
+  const topCategoryLive = [...input.categories].sort((a, b) => b.live_gmv - a.live_gmv)[0];
+  if (topCategoryLive && topCategoryLive.live_gmv > 0) {
+    out.push({
+      key: "top_category_live",
+      tone: "info",
+      title: `Kategori terkuat di live: ${topCategoryLive.sub_category}`,
+      text: `"${topCategoryLive.sub_category}" menyumbang GMV live ${rupiahShort(topCategoryLive.live_gmv)} periode ini — kategori lain menyusul di bawahnya.`,
     });
   }
 
@@ -345,6 +371,11 @@ export function buildSummary(input: RulesInput): string {
       `${live.sessions} sesi live terekam (total ${jam(live.duration_total_min)})` +
         (live.gmv_per_hour !== null ? `, GMV per jam ${rupiahShort(live.gmv_per_hour)}` : "") + "."
     );
+  } else if (metrics.live_gmv > 0) {
+    bagian.push(
+      "Belum ada file sesi live (TikTok LIVE Center) yang diunggah lewat Jadwal Live untuk periode ini — " +
+        "ringkasan live di atas dari data upload mingguan."
+    );
   } else {
     bagian.push("Belum ada file sesi live yang diunggah untuk periode ini.");
   }
@@ -355,7 +386,12 @@ export function buildSummary(input: RulesInput): string {
  * Keterbatasan data yang disebut terang-terangan di report — supaya tidak ada
  * yang menunggu angka yang memang tidak ada di export platform.
  */
-export function buildDataNotes(input: { liveAvailable: boolean; productSplitAvailable: boolean }): string[] {
+export function buildDataNotes(input: {
+  liveAvailable: boolean;
+  productSplitAvailable: boolean;
+  /** metrics.live_gmv > 0 tapi live_direct_gmv/orders/items belum tersedia (batch sebelum migrasi 0074). */
+  liveDirectMissing: boolean;
+}): string[] {
   const notes = [
     "Durasi tonton per video dan AWD (average watch duration) tidak tersedia di export platform — tidak ditampilkan dan tidak diperkirakan.",
   ];
@@ -364,6 +400,9 @@ export function buildDataNotes(input: { liveAvailable: boolean; productSplitAvai
   }
   if (!input.liveAvailable) {
     notes.push("Analisa per sesi live hanya muncul untuk sesi yang file TikTok LIVE Center-nya diunggah lewat Jadwal Live.");
+  }
+  if (input.liveDirectMissing) {
+    notes.push("\"% beli langsung saat live\" belum tersedia untuk periode ini (data mingguan diunggah sebelum kolomnya ada).");
   }
   return notes;
 }

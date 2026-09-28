@@ -189,6 +189,7 @@ describe("leak pipeline (parse → compute → CSV)", () => {
         shopId: SHOP_DEAL, shopName: null, level1Category: null, level2Category: null,
         affiliateGmv: 1_000_000, affiliateLiveGmv: 0, affiliateVideoGmv: 0, orders: 0,
         liveOrders: 0, videoOrders: 0, directGmv: 0, itemsSold: 0, refundGmv: 0, ctr: null, ctor: null,
+        liveDirectGmv: 0, liveDirectOrders: 0, liveItemsSold: 0,
       },
     ];
     const tapRows = [

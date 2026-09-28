@@ -513,6 +513,9 @@ export async function writeAggregates(
     ctr: s.ctr,
     ctor: s.ctor,
     live_pct: s.livePct,
+    live_direct_gmv: s.liveDirectGmv,
+    live_direct_orders: s.liveDirectOrders,
+    live_items_sold: s.liveItemsSold,
   }));
   for (let i = 0; i < summaryRows.length; i += 500) {
     const { error } = await admin.from("creator_period_summary").insert(summaryRows.slice(i, i + 500));
@@ -559,6 +562,9 @@ export async function writeAggregates(
     direct_gmv: p.directGmv,
     ctr: p.ctr,
     ctor: p.ctor,
+    live_direct_gmv: p.liveDirectGmv,
+    live_direct_orders: p.liveDirectOrders,
+    live_items_sold: p.liveItemsSold,
   }));
   for (let i = 0; i < topRows.length; i += 500) {
     const { error } = await admin.from("creator_top_products").insert(topRows.slice(i, i + 500));

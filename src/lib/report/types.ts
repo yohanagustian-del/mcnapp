@@ -53,6 +53,12 @@ export interface ReportKpi {
   /** CTR/CTOR rata-rata berbobot GMV dari agregat ingest; null bila file tak membawanya. */
   ctr: number | null;
   ctor: number | null;
+  /** PLAN_MSDPS Paket E (migrasi 0074): closing LANGSUNG saat siaran, subset dari live_gmv/live_orders/items. */
+  live_direct_gmv: number;
+  live_direct_orders: number;
+  live_items_sold: number;
+  /** live_direct_gmv / live_gmv — "% beli langsung saat live"; null kalau live_gmv=0. */
+  live_direct_share: number | null;
 }
 
 export interface ReportDeltas {
@@ -162,6 +168,22 @@ export interface ReportLive {
    */
   platform_live_gmv: number;
   coverage_ratio: number | null;
+  /**
+   * PLAN_MSDPS Paket E (R6): tren GMV live vs video PER MINGGU (W1–W5) dari data
+   * upload mingguan — inti tab Live Performance bulanan, tidak butuh file TikTok
+   * LIVE Center. Selalu terisi (bahkan bila `available=false`, yakni tidak ada
+   * sesi Jadwal Live) selama ada minggu ber-data pada periode ini.
+   */
+  weekly_trend: { period_start: string; live_gmv: number; video_gmv: number }[];
+  /** true bila ada GMV live mingguan pada periode ini — beda dari `available` (sesi Jadwal Live). */
+  weekly_available: boolean;
+  /**
+   * false = batch periode ini belum membawa live_direct_gmv/orders/items (sebelum
+   * migrasi 0074) — metrics.live_direct_share bisa saja 0 (bukan null) untuk batch
+   * lama karena kolomnya memang tidak ada, BUKAN karena benar-benar nol pembelian
+   * langsung. UI harus memeriksa flag ini, bukan hanya `!== null` (CLAUDE.md #5).
+   */
+  live_direct_available: boolean;
 }
 
 export interface ReportLiveDeepDive {
@@ -225,7 +247,7 @@ export interface ReportDataV2 {
     /** true bila batch periode ini belum membawa kolom live/video per produk (upload sebelum 0066). */
     split_unavailable: boolean;
   };
-  categories: { sub_category: string; gmv: number; share: number | null }[];
+  categories: { sub_category: string; gmv: number; live_gmv: number; share: number | null }[];
   summary: string;
   insights: InsightBox[];
   recommendations: Recommendation[];

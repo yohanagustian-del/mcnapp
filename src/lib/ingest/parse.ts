@@ -95,6 +95,9 @@ export async function parseMcnFile(file: File): Promise<ParseResult<McnRow>> {
       refundGmv: parseRupiah(r[MCN_COLUMNS.refundGmv]) ?? 0,
       ctr: parsePercent(r[MCN_COLUMNS.ctr]),
       ctor: parsePercent(r[MCN_COLUMNS.ctor]),
+      liveDirectGmv: parseRupiah(r[MCN_COLUMNS.liveDirectGmv]) ?? 0,
+      liveDirectOrders: parseCount(r[MCN_COLUMNS.liveDirectOrders] ?? "") ?? 0,
+      liveItemsSold: parseCount(r[MCN_COLUMNS.liveItemsSold] ?? "") ?? 0,
     });
   }
   return { rows, skipped, rawHeadersFound };

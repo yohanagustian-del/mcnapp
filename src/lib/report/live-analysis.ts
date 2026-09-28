@@ -136,7 +136,7 @@ export function summarizeLiveSessions(
   sessions: ReportLiveSession[],
   platformLiveGmv: number,
   topSessionCount: number
-): Omit<ReportLive, "benchmarks"> {
+): Omit<ReportLive, "benchmarks" | "weekly_trend" | "weekly_available" | "live_direct_available"> {
   const sum = (pick: (s: ReportLiveSession) => number) => sessions.reduce((acc, s) => acc + pick(s), 0);
   const gmv = sum((s) => s.gmv);
   const orders = sum((s) => s.orders);

@@ -15,6 +15,7 @@ const kpi = (over: Partial<ReportKpi> = {}): ReportKpi => ({
   gmv: 10_000_000, live_gmv: 9_000_000, video_gmv: 1_000_000, direct_gmv: 0,
   orders: 100, live_orders: 90, video_orders: 10, items: 120,
   aov: 100_000, live_share: 0.9, video_share: 0.1, ctr: 0.05, ctor: 0.03,
+  live_direct_gmv: 0, live_direct_orders: 0, live_items_sold: 0, live_direct_share: null,
   ...over,
 });
 
@@ -23,7 +24,8 @@ const live = (over: Partial<Omit<ReportLive, "benchmarks">> = {}): Omit<ReportLi
   longest_session_min: 240, gmv: 9_000_000, orders: 90, items: 100, views: 30_000, viewers_peak: 400,
   gmv_per_session: 2_250_000, gmv_per_hour: 750_000, cvr: 0.003, err: 0.01, gpm: 300,
   ctr: 0.02, ctor: 0.01, by_start_hour: [], best_start_hour: 19, top_sessions: [],
-  platform_live_gmv: 9_000_000, coverage_ratio: 1, ...over,
+  platform_live_gmv: 9_000_000, coverage_ratio: 1, weekly_trend: [], weekly_available: true,
+  live_direct_available: true, ...over,
 });
 
 const product = (over: Partial<ReportProduct> = {}): ReportProduct => ({
@@ -42,6 +44,8 @@ const input = (over: Partial<RulesInput> = {}): RulesInput => ({
   topVideo: [],
   rules: DEFAULT_REPORT_RULES,
   periodLabel: "Minggu 1–7 September 2026",
+  categories: [],
+  liveDirectAvailable: false,
   ...over,
 });
 
@@ -115,6 +119,31 @@ describe("buildInsights", () => {
     expect(boxes.find((b) => b.key === "live_benchmark_gap")).toBeDefined();
   });
 
+  it("PLAN_MSDPS Paket E: % beli langsung saat live muncul bila liveDirectAvailable", () => {
+    const boxes = buildInsights(input({
+      metrics: kpi({ live_direct_gmv: 3_000_000, live_direct_share: 1 / 3 }),
+      liveDirectAvailable: true,
+    }));
+    const box = boxes.find((b) => b.key === "live_direct_share")!;
+    expect(box.text).toContain("33,3%");
+  });
+
+  it("PLAN_MSDPS Paket E: tidak menampilkan % beli langsung bila liveDirectAvailable=false (batch lama)", () => {
+    const boxes = buildInsights(input({ liveDirectAvailable: false }));
+    expect(boxes.find((b) => b.key === "live_direct_share")).toBeUndefined();
+  });
+
+  it("PLAN_MSDPS Paket E: kategori terkuat di live dipilih dari live_gmv, bukan gmv total", () => {
+    const boxes = buildInsights(input({
+      categories: [
+        { sub_category: "Fashion", gmv: 5_000_000, live_gmv: 500_000, share: 0.5 },
+        { sub_category: "Skincare", gmv: 4_000_000, live_gmv: 3_500_000, share: 0.4 },
+      ],
+    }));
+    const box = boxes.find((b) => b.key === "top_category_live")!;
+    expect(box.title).toContain("Skincare");
+  });
+
   it("tanpa sesi live, mengaku belum ada datanya (bukan angka nol yang menipu)", () => {
     const boxes = buildInsights(input({ live: live({ available: false, sessions: 0, gmv: 0 }) }));
     const box = boxes.find((b) => b.key === "live_no_session")!;
@@ -163,7 +192,13 @@ describe("buildSummary", () => {
 
 describe("buildDataNotes", () => {
   it("selalu menyebut metrik yang memang tidak ada di export", () => {
-    expect(buildDataNotes({ liveAvailable: true, productSplitAvailable: true })).toHaveLength(1);
-    expect(buildDataNotes({ liveAvailable: false, productSplitAvailable: false })).toHaveLength(3);
+    expect(buildDataNotes({ liveAvailable: true, productSplitAvailable: true, liveDirectMissing: false })).toHaveLength(1);
+    expect(buildDataNotes({ liveAvailable: false, productSplitAvailable: false, liveDirectMissing: false })).toHaveLength(3);
+  });
+
+  it("menyebut '% beli langsung saat live' belum tersedia (PLAN_MSDPS Paket E, batch sebelum migrasi 0074)", () => {
+    const notes = buildDataNotes({ liveAvailable: true, productSplitAvailable: true, liveDirectMissing: true });
+    expect(notes).toHaveLength(2);
+    expect(notes.some((n) => n.includes("beli langsung saat live"))).toBe(true);
   });
 });

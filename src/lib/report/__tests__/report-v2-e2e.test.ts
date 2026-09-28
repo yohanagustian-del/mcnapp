@@ -235,4 +235,42 @@ describe("Report Kreator v2 — seksi live", () => {
     expect(box.text).toMatch(/belum diunggah/i);
     expect(data.recommendations.map((r) => r.key)).not.toContain("schedule_best_hour");
   });
+
+  it("PLAN_MSDPS Paket E (R6): tab Live Performance TERISI dari data mingguan TANPA satu pun sesi LIVE Center", async () => {
+    const db = seedDb({
+      creator_period_summary: [
+        week("2026-09-01", { live_direct_gmv: 2_000_000, live_direct_orders: 20, live_items_sold: 25 }),
+        week("2026-09-08", { live_direct_gmv: 5_000_000, live_direct_orders: 40, live_items_sold: 50 }),
+        week("2026-09-15", { live_direct_gmv: 1_000_000, live_direct_orders: 10, live_items_sold: 12 }),
+        week("2026-09-22", { live_direct_gmv: 1_000_000, live_direct_orders: 10, live_items_sold: 12 }),
+        { ...week("2026-09-01"), creator_id: "CRT-002", affiliate_gmv: 5_000_000 },
+      ],
+    });
+    const data = await buildMonthly(db);
+
+    // Tidak ada sesi Jadwal Live (available=false), TAPI seksi live mingguan tetap terisi.
+    expect(data.live.available).toBe(false);
+    expect(data.live.weekly_available).toBe(true);
+    expect(data.live.weekly_trend).toHaveLength(4);
+    expect(data.live.weekly_trend[0]).toEqual({ period_start: "2026-09-01", live_gmv: 7_000_000, video_gmv: 3_000_000 });
+
+    expect(data.metrics.live_direct_gmv).toBe(9_000_000);
+    expect(data.metrics.live_direct_share).toBeCloseTo(9_000_000 / 28_000_000);
+    expect(data.live.live_direct_available).toBe(true);
+    expect(data.insights.map((i) => i.key)).toContain("live_direct_share");
+
+    // Produk terbaik untuk live tetap ada — dari creator_top_products, bukan dari sesi.
+    expect(data.products.top_live.length).toBeGreaterThan(0);
+  });
+
+  it("batch lama (sebelum migrasi 0074): % beli langsung saat live mengaku belum tersedia, bukan 0%", async () => {
+    const data = await buildMonthly(seedDb()); // week() bawaan tanpa live_direct_*
+    // live_direct_share MATEMATIS 0 (live_gmv>0, live_direct_gmv=0) — bukan null. Flag
+    // terpisah live_direct_available-lah yang membedakan "belum ada kolomnya" dari
+    // "benar-benar nol", supaya UI tidak menampilkan 0% yang menyesatkan.
+    expect(data.metrics.live_direct_share).toBe(0);
+    expect(data.live.live_direct_available).toBe(false);
+    expect(data.insights.map((i) => i.key)).not.toContain("live_direct_share");
+    expect(data.data_notes.some((n) => n.includes("beli langsung saat live"))).toBe(true);
+  });
 });
