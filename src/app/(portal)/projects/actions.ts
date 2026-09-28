@@ -574,45 +574,60 @@ export async function updateParticipantTarget(formData: FormData): Promise<AddPa
   }
 }
 
-/** Nilai yang diterima untuk kolom "Achieve By" — kosong ("") berarti null (belum diisi). */
-const ACHIEVE_BY_VALUES = ["Keterangan", "Brand Pairs", "Ads By"] as const;
+/** Nilai yang diterima untuk kolom "Ads By" — multi-pilihan tetap. */
+const ADS_BY_VALUES = ["MEA", "Brand"] as const;
 
 /**
- * Ubah "Achieve By" peserta dari tabel "Performa per Kreator" — SPV/Head/Director
- * saja (requireProjectLead), sejajar dengan updateParticipantTarget. Kosong secara
- * default (null); tim mengisinya kapan saja lewat dropdown, tidak wajib.
+ * Ubah catatan peserta (Analisa, Brand Pairs, Ads By) dari tabel "Performa per
+ * Kreator" — SPV/Head/Director saja (requireProjectLead), sejajar dengan
+ * updateParticipantTarget. Ketiganya kosong secara default; tim mengisinya kapan
+ * saja lewat form edit, tidak wajib. Menerima update SEBAGIAN — hanya field yang
+ * memang dikirim (ditandai `analisa`/`brand_pairs` hadir di form, atau
+ * `ads_by_touched` untuk Ads By) yang disentuh, supaya tiap kolom bisa disimpan
+ * sendiri-sendiri tanpa menimpa kolom lain yang sedang tidak diedit.
  */
-export async function updateParticipantAchieveBy(formData: FormData): Promise<AddParticipantResult> {
+export async function updateParticipantNotes(formData: FormData): Promise<AddParticipantResult> {
   try {
     const actor = await requireProjectLead();
     const projectId = Number(formData.get("project_id"));
     const creatorId = String(formData.get("creator_id") ?? "").trim();
     if (!projectId || !creatorId) throw new Error("Project & kreator wajib dikenali");
 
-    const raw = String(formData.get("achieve_by") ?? "").trim();
-    const achieveBy = raw === "" ? null : raw;
-    if (achieveBy !== null && !ACHIEVE_BY_VALUES.includes(achieveBy as (typeof ACHIEVE_BY_VALUES)[number])) {
-      throw new Error("Pilihan Achieve By tidak valid");
+    const updates: { analisa?: string | null; brand_pairs?: string | null; ads_by?: string[] | null } = {};
+    if (formData.has("analisa")) {
+      const v = String(formData.get("analisa") ?? "").trim();
+      updates.analisa = v === "" ? null : v;
     }
+    if (formData.has("brand_pairs")) {
+      const v = String(formData.get("brand_pairs") ?? "").trim();
+      updates.brand_pairs = v === "" ? null : v;
+    }
+    if (formData.has("ads_by_touched")) {
+      const adsBy = formData.getAll("ads_by").map(String);
+      for (const v of adsBy) {
+        if (!ADS_BY_VALUES.includes(v as (typeof ADS_BY_VALUES)[number])) throw new Error("Pilihan Ads By tidak valid");
+      }
+      updates.ads_by = adsBy.length ? adsBy : null;
+    }
+    if (Object.keys(updates).length === 0) throw new Error("Tidak ada perubahan untuk disimpan");
 
     const admin = createAdminClient();
     const { data: existing } = await admin
       .from("project_participants")
-      .select("achieve_by")
+      .select("analisa, brand_pairs, ads_by")
       .eq("project_id", projectId).eq("creator_id", creatorId)
       .maybeSingle();
     if (!existing) throw new Error("Peserta tidak ditemukan di project ini");
 
     const { error } = await admin
       .from("project_participants")
-      .update({ achieve_by: achieveBy })
+      .update(updates)
       .eq("project_id", projectId).eq("creator_id", creatorId);
-    if (error) throw new Error(`Gagal menyimpan Achieve By: ${error.message}`);
+    if (error) throw new Error(`Gagal menyimpan catatan peserta: ${error.message}`);
 
     await writeAudit({
-      actorId: actor.id, action: "m7.update_participant_achieve_by", entityType: "project_participants",
-      entityId: `${projectId}:${creatorId}`,
-      before: { achieve_by: existing.achieve_by }, after: { achieve_by: achieveBy }, type: "auto",
+      actorId: actor.id, action: "m7.update_participant_notes", entityType: "project_participants",
+      entityId: `${projectId}:${creatorId}`, before: existing, after: updates, type: "auto",
     });
     revalidatePath(`/projects/${projectId}`);
     return { ok: true };

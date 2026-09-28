@@ -3,9 +3,10 @@
 import { revalidatePath } from "next/cache";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { writeAudit } from "@/lib/audit";
-import { requirePermission } from "@/lib/rbac";
+import { MANAGEMENT_ROLES, requireMember, requirePermission } from "@/lib/rbac";
 import { buildProjectReportData } from "@/lib/m7/report-data";
 import { generateInsight, insightAvailable } from "@/lib/report/insight";
+import { buildProjectOverviewReport } from "@/lib/m7/project-report-export";
 
 /**
  * Generate/refresh ONE participant's project report draft (PRD §3.3/§6.8, PR-15).
@@ -194,4 +195,25 @@ export async function finalizeProjectReport(formData: FormData): Promise<void> {
 
   revalidatePath(`/projects/${report.project_id}`);
   revalidatePath(`/projects/${report.project_id}/report/${report.creator_id}`);
+}
+
+/**
+ * Download Report — .xlsx berisi apa yang ada di tab Special Project (ringkasan,
+ * Performa per Kreator, Metrik Harian). SPV/Head/Director saja, sejajar dengan
+ * tombol "Hapus Project" (di area yang sama, MANAGEMENT_ROLES) — bukan izin
+ * m7.manage yang lebih luas.
+ */
+export async function downloadProjectOverviewReport(
+  projectId: number
+): Promise<{ filename: string; base64: string }> {
+  const member = await requireMember();
+  if (!MANAGEMENT_ROLES.includes(member.role)) {
+    throw new Error(`Akses ditolak: hanya SPV/Head/Director yang bisa mengunduh report project (role Anda: ${member.role})`);
+  }
+
+  const admin = createAdminClient();
+  const result = await buildProjectOverviewReport(admin, projectId);
+  if (!result) throw new Error("Project tidak ditemukan");
+
+  return { filename: result.filename, base64: Buffer.from(result.buffer).toString("base64") };
 }

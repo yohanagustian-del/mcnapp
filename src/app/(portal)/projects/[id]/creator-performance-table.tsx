@@ -8,10 +8,10 @@ import {
   useTableControls,
   type SortConfig,
 } from "@/components/table-controls";
-import { removeParticipant, updateParticipantAchieveBy, updateParticipantTarget } from "../actions";
+import { removeParticipant, updateParticipantNotes, updateParticipantTarget } from "../actions";
 
-/** Pilihan tetap kolom "Achieve By" — kosong ("—") = belum diisi (default). */
-const ACHIEVE_BY_OPTIONS = ["Keterangan", "Brand Pairs", "Ads By"] as const;
+/** Pilihan tetap kolom "Ads By" — multi-pilihan, kosong secara default. */
+const ADS_BY_OPTIONS = ["MEA", "Brand"] as const;
 
 /**
  * Satu baris Performa per Kreator — angkanya sudah dijumlahkan di server dari
@@ -31,8 +31,12 @@ export interface CreatorPerformanceRow {
   pctTarget: number | null;
   /** GMV peserta / total GMV project. */
   contribution: number;
-  /** Kosong (null) secara default — diisi tim lewat dropdown setelah project berjalan. */
-  achieveBy: string | null;
+  /** Teks bebas, kosong secara default — diisi tim lewat form edit. */
+  analisa: string | null;
+  /** Teks bebas, kosong secara default — diisi tim lewat form edit. */
+  brandPairs: string | null;
+  /** Multi-pilihan tetap (MEA/Brand), kosong secara default. */
+  adsBy: string[];
 }
 
 const rupiah = (n: number | null | undefined) =>
@@ -48,7 +52,9 @@ const SORT: SortConfig<CreatorPerformanceRow> = {
     items: { value: (r) => r.items, firstDir: "desc" },
     pct: { value: (r) => r.pctTarget, firstDir: "desc" },
     kontribusi: { value: (r) => r.contribution, firstDir: "desc" },
-    achieveBy: { value: (r) => r.achieveBy ?? "" },
+    analisa: { value: (r) => r.analisa ?? "" },
+    brandPairs: { value: (r) => r.brandPairs ?? "" },
+    adsBy: { value: (r) => r.adsBy.join(", ") },
   },
   initial: { key: "gmv", dir: "desc" },
 };
@@ -101,44 +107,113 @@ function EditTargetForm({
 }
 
 /**
- * Dropdown "Achieve By" — simpan langsung saat dipilih (tanpa tombol Edit terpisah),
- * kosong ("—") = belum diisi (default). Kalau gagal simpan, kembalikan ke nilai semula.
+ * Field teks bebas (Analisa / Brand Pairs) — tampil sebagai teks + tombol "Edit"
+ * kecil, berubah jadi form saat diklik. Kosong ("—") = belum diisi (default).
  */
-function AchieveBySelect({
+function InlineTextField({
+  projectId, creatorId, field, initialValue,
+}: {
+  projectId: number; creatorId: string; field: "analisa" | "brand_pairs"; initialValue: string | null;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [value, setValue] = useState(initialValue ?? "");
+  const [error, setError] = useState<string | null>(null);
+  const [pending, startTransition] = useTransition();
+
+  if (!editing) {
+    return (
+      <span className="inline-flex items-center gap-1">
+        <span className="max-w-[160px] truncate" title={initialValue ?? undefined}>{initialValue || "—"}</span>
+        <button
+          type="button"
+          onClick={() => { setValue(initialValue ?? ""); setError(null); setEditing(true); }}
+          className="rounded-md border border-slate-300 px-1.5 py-0.5 text-xs hover:bg-slate-50"
+        >
+          Edit
+        </button>
+      </span>
+    );
+  }
+
+  return (
+    <form
+      className="flex items-center gap-1"
+      onSubmit={(e) => {
+        e.preventDefault();
+        setError(null);
+        const formData = new FormData();
+        formData.set("project_id", String(projectId));
+        formData.set("creator_id", creatorId);
+        formData.set(field, value);
+        startTransition(async () => {
+          const res = await updateParticipantNotes(formData);
+          if (res.ok) setEditing(false);
+          else setError(res.error);
+        });
+      }}
+    >
+      <input
+        value={value}
+        onChange={(e) => setValue(e.target.value)}
+        className="w-32 rounded-md border border-slate-300 px-2 py-1 text-xs"
+        autoFocus
+      />
+      <button type="submit" disabled={pending}
+        className="rounded-md bg-slate-900 px-2 py-1 text-xs font-medium text-white hover:bg-slate-700 disabled:opacity-50">
+        {pending ? "…" : "Simpan"}
+      </button>
+      <button type="button" onClick={() => setEditing(false)} disabled={pending}
+        className="rounded-md border border-slate-300 px-2 py-1 text-xs hover:bg-slate-50">
+        Batal
+      </button>
+      {error && <span className="ml-1 text-xs text-red-700">{error}</span>}
+    </form>
+  );
+}
+
+/**
+ * Multi-select "Ads By" — simpan langsung saat pilihan berubah (tanpa tombol Edit
+ * terpisah), kosong = belum diisi (default). Kalau gagal simpan, kembalikan ke
+ * nilai semula. `ads_by_touched` selalu dikirim supaya server tahu field ini
+ * memang disentuh walau hasil akhirnya kosong (bukan sekadar tidak diubah).
+ */
+function AdsByMultiSelect({
   projectId, creatorId, initialValue,
 }: {
-  projectId: number; creatorId: string; initialValue: string | null;
+  projectId: number; creatorId: string; initialValue: string[];
 }) {
-  const [value, setValue] = useState(initialValue ?? "");
+  const [value, setValue] = useState<string[]>(initialValue);
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
 
   return (
     <span className="inline-flex items-center gap-1">
       <select
+        multiple
         value={value}
         disabled={pending}
+        size={2}
         onChange={(e) => {
-          const next = e.target.value;
+          const next = Array.from(e.target.selectedOptions).map((o) => o.value);
           const previous = value;
           setValue(next);
           setError(null);
           const formData = new FormData();
           formData.set("project_id", String(projectId));
           formData.set("creator_id", creatorId);
-          formData.set("achieve_by", next);
+          formData.set("ads_by_touched", "1");
+          for (const v of next) formData.append("ads_by", v);
           startTransition(async () => {
-            const res = await updateParticipantAchieveBy(formData);
+            const res = await updateParticipantNotes(formData);
             if (!res.ok) {
               setValue(previous);
               setError(res.error);
             }
           });
         }}
-        className="rounded-md border border-slate-300 px-2 py-1 text-xs disabled:opacity-50"
+        className="min-w-[92px] rounded-md border border-slate-300 px-2 py-1 text-xs disabled:opacity-50"
       >
-        <option value="">—</option>
-        {ACHIEVE_BY_OPTIONS.map((opt) => (
+        {ADS_BY_OPTIONS.map((opt) => (
           <option key={opt} value={opt}>{opt}</option>
         ))}
       </select>
@@ -211,7 +286,9 @@ export function CreatorPerformanceTable({
               <SortableTh controls={controls} sortKey="items">Item Terjual</SortableTh>
               <SortableTh controls={controls} sortKey="pct">% Target</SortableTh>
               <SortableTh controls={controls} sortKey="kontribusi">Kontribusi Project</SortableTh>
-              <SortableTh controls={controls} sortKey="achieveBy">Achieve By</SortableTh>
+              <SortableTh controls={controls} sortKey="analisa">Analisa</SortableTh>
+              <SortableTh controls={controls} sortKey="brandPairs">Brand Pairs</SortableTh>
+              <SortableTh controls={controls} sortKey="adsBy">Ads By</SortableTh>
               {showActions && <th className="px-4 py-3">Aksi</th>}
             </tr>
           </thead>
@@ -259,9 +336,23 @@ export function CreatorPerformanceTable({
                 <td className="px-4 py-2">{(r.contribution * 100).toFixed(0)}%</td>
                 <td className="px-4 py-2">
                   {showActions ? (
-                    <AchieveBySelect projectId={projectId as number} creatorId={r.creatorId} initialValue={r.achieveBy} />
+                    <InlineTextField projectId={projectId as number} creatorId={r.creatorId} field="analisa" initialValue={r.analisa} />
                   ) : (
-                    r.achieveBy ?? "—"
+                    r.analisa ?? "—"
+                  )}
+                </td>
+                <td className="px-4 py-2">
+                  {showActions ? (
+                    <InlineTextField projectId={projectId as number} creatorId={r.creatorId} field="brand_pairs" initialValue={r.brandPairs} />
+                  ) : (
+                    r.brandPairs ?? "—"
+                  )}
+                </td>
+                <td className="px-4 py-2">
+                  {showActions ? (
+                    <AdsByMultiSelect projectId={projectId as number} creatorId={r.creatorId} initialValue={r.adsBy} />
+                  ) : (
+                    r.adsBy.length ? r.adsBy.join(", ") : "—"
                   )}
                 </td>
                 {showActions && (
@@ -284,7 +375,7 @@ export function CreatorPerformanceTable({
             ))}
             {controls.total === 0 && (
               <tr>
-                <td colSpan={showActions ? 9 : 8} className="px-4 py-6 text-center text-slate-400">
+                <td colSpan={showActions ? 11 : 10} className="px-4 py-6 text-center text-slate-400">
                   Belum ada peserta.
                 </td>
               </tr>

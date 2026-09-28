@@ -121,7 +121,7 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
       // wajib menyebut nama constraint supaya tidak ditolak sebagai ambigu.
       supabase.from("project_participants")
         .select(
-          "creator_id, is_external, tiktok_binding_status, live_type, target_gmv, achieve_by, creators(name, username, owner_cpm_id, team_members!creators_owner_cpm_id_fkey(name))"
+          "creator_id, is_external, tiktok_binding_status, live_type, target_gmv, analisa, brand_pairs, ads_by, creators(name, username, owner_cpm_id, team_members!creators_owner_cpm_id_fkey(name))"
         )
         .eq("project_id", projectId),
       supabase.from("project_manpower")
@@ -275,7 +275,9 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
       items: perf.items,
       pctTarget: target ? perf.gmv / target : null,
       contribution: tracking.cumActual > 0 ? perf.gmv / tracking.cumActual : 0,
-      achieveBy: p.achieve_by ?? null,
+      analisa: p.analisa ?? null,
+      brandPairs: p.brand_pairs ?? null,
+      adsBy: (p.ads_by as string[] | null) ?? [],
     };
   });
 
