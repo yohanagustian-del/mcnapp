@@ -3,8 +3,9 @@
  * Everything here is pure computation: aggregation, derived metrics, deltas,
  * and the skip-LLM gate. NO LLM in this module — the insight layer is separate.
  */
+import { daysInMonth } from "@/lib/utils/date";
 
-export type PeriodType = "weekly" | "monthly";
+export type PeriodType = "weekly" | "monthly" | "custom";
 
 export interface MetricTotals {
   gmv: number;
@@ -172,25 +173,116 @@ export function shouldSkipInsight(
   return triggers.every((d) => d !== null && Math.abs(d) <= threshold);
 }
 
-/** Period boundaries: weekly = [start, +7d), monthly = [start, +1 month). */
-export function periodBounds(periodType: PeriodType, periodStart: string): {
+function parseIso(iso: string): { y: number; m: number; d: number } {
+  const [y, m, d] = iso.split("-").map(Number);
+  return { y, m, d };
+}
+
+function fmtIso(y: number, m: number, d: number): string {
+  return new Date(Date.UTC(y, m - 1, d)).toISOString().slice(0, 10);
+}
+
+function addDaysIso(iso: string, days: number): string {
+  const d = new Date(`${iso}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
+}
+
+function addMonthsIso(iso: string, months: number): string {
+  const d = new Date(`${iso}T00:00:00Z`);
+  d.setUTCMonth(d.getUTCMonth() + months);
+  return d.toISOString().slice(0, 10);
+}
+
+/**
+ * Real W1-W5 window [start, endExclusive) containing `iso` (upload week-scheme,
+ * CLAUDE.md/lib/utils/date.ts validateW1W5Period) — fixes the bug where a blind
+ * "start + 7 days" swallowed part of the next month for W5 starts (day 29-31).
+ */
+function weekWindowBounds(iso: string): { start: string; end: string } {
+  const { y, m, d } = parseIso(iso);
+  const last = daysInMonth(y, m);
+  const startDay = d <= 7 ? 1 : d <= 14 ? 8 : d <= 21 ? 15 : d <= 28 ? 22 : 29;
+  const endDay = d <= 7 ? 7 : d <= 14 ? 14 : d <= 21 ? 21 : d <= 28 ? 28 : last;
+  return { start: fmtIso(y, m, startDay), end: addDaysIso(fmtIso(y, m, endDay), 1) };
+}
+
+/** Number of contiguous W1-W5 windows spanning [start, endExclusive). */
+function windowCount(start: string, endExclusive: string): number {
+  let count = 0;
+  let cursor = start;
+  while (cursor < endExclusive && count < 1000) {
+    cursor = weekWindowBounds(cursor).end;
+    count++;
+  }
+  return count;
+}
+
+/** Walks `n` W1-W5 windows backward from `start` (crosses month boundaries correctly). */
+function stepWindowsBack(start: string, n: number): string {
+  let cursor = start;
+  for (let i = 0; i < n; i++) cursor = weekWindowBounds(addDaysIso(cursor, -1)).start;
+  return cursor;
+}
+
+/**
+ * Period boundaries. `start` is always a real window start (weekly/custom: a W1-W5
+ * boundary; monthly: day 1) — validated by the caller (report-period-picker.tsx /
+ * generateReport's zod schema), not re-derived here.
+ *  - weekly: satu jendela W1-W5 mengandung `start` (endExclusive dihitung, bukan
+ *    "start + 7 hari" yang menelan sebagian bulan berikutnya untuk W5).
+ *  - monthly: `start` s/d awal bulan berikutnya (endExclusive opsional untuk
+ *    kompatibilitas pemanggil lama, tapi selalu = +1 bulan pada praktiknya).
+ *  - custom: `endExclusive` WAJIB (jendela terakhir yang dipilih user). Periode
+ *    pembanding = jumlah jendela mingguan yang SAMA, tepat sebelum `start`.
+ */
+export function periodBounds(
+  periodType: PeriodType,
+  start: string,
+  endExclusive?: string
+): {
   start: string;
   end: string; // exclusive
   prevStart: string;
   prevEnd: string; // exclusive
 } {
-  const start = new Date(`${periodStart}T00:00:00Z`);
-  const addPeriod = (d: Date, n: number) => {
-    const copy = new Date(d);
-    if (periodType === "weekly") copy.setUTCDate(copy.getUTCDate() + 7 * n);
-    else copy.setUTCMonth(copy.getUTCMonth() + n);
-    return copy;
-  };
-  const iso = (d: Date) => d.toISOString().slice(0, 10);
-  return {
-    start: iso(start),
-    end: iso(addPeriod(start, 1)),
-    prevStart: iso(addPeriod(start, -1)),
-    prevEnd: iso(start),
-  };
+  if (periodType === "monthly") {
+    const end = endExclusive ?? addMonthsIso(start, 1);
+    return { start, end, prevStart: addMonthsIso(start, -1), prevEnd: start };
+  }
+  if (periodType === "weekly") {
+    const w = weekWindowBounds(start);
+    const end = endExclusive ?? w.end;
+    return { start, end, prevStart: weekWindowBounds(addDaysIso(start, -1)).start, prevEnd: start };
+  }
+  // custom
+  if (!endExclusive) throw new Error("Periode custom butuh tanggal akhir.");
+  const n = windowCount(start, endExclusive);
+  return { start, end: endExclusive, prevStart: stepWindowsBack(start, n), prevEnd: start };
+}
+
+const MAX_CUSTOM_MONTHS = 12;
+
+/**
+ * Validasi periode custom (C-04): `start` harus awal jendela W1-W5, `endExclusive`
+ * harus akhir jendela W1-W5 (bukan tanggal sembarang di tengah), start < end, dan
+ * rentang tidak lebih dari MAX_CUSTOM_MONTHS bulan (report_period_picker.tsx
+ * membulatkan input user ke jendela terdekat SEBELUM memanggil ini — di sini
+ * hanya menolak yang benar-benar tidak sejajar, mis. dari pemanggilan langsung).
+ */
+export function validateCustomPeriod(start: string, endExclusive: string): { valid: boolean; reason?: string } {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(start) || !/^\d{4}-\d{2}-\d{2}$/.test(endExclusive)) {
+    return { valid: false, reason: "Format tanggal tidak valid." };
+  }
+  if (endExclusive <= start) return { valid: false, reason: "Tanggal akhir harus setelah tanggal mulai." };
+  if (weekWindowBounds(start).start !== start) {
+    return { valid: false, reason: "Tanggal mulai harus awal jendela mingguan (W1-W5)." };
+  }
+  if (weekWindowBounds(addDaysIso(endExclusive, -1)).end !== endExclusive) {
+    return { valid: false, reason: "Tanggal akhir harus akhir jendela mingguan (W1-W5)." };
+  }
+  if (addMonthsIso(start, MAX_CUSTOM_MONTHS) < endExclusive) {
+    return { valid: false, reason: `Rentang custom maksimal ${MAX_CUSTOM_MONTHS} bulan.` };
+  }
+  return { valid: true };
 }

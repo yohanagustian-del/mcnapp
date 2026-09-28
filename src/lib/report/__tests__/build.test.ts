@@ -186,4 +186,18 @@ describe("periodLabel", () => {
   it("bulanan", () => {
     expect(periodLabel("monthly", "2026-09-01", "2026-10-01")).toBe("September 2026");
   });
+
+  describe("PLAN_MSDPS Paket C (C-04): label custom", () => {
+    it("custom satu jendela -> anotasi W tunggal", () => {
+      expect(periodLabel("custom", "2026-09-08", "2026-09-15")).toBe("8–14 September 2026 (W2)");
+    });
+
+    it("custom lintas jendela dalam satu bulan -> anotasi W-range", () => {
+      expect(periodLabel("custom", "2026-09-08", "2026-09-29")).toBe("8–28 September 2026 (W2–W4)");
+    });
+
+    it("custom lintas bulan tetap memakai format rentang bulan berbeda", () => {
+      expect(periodLabel("custom", "2026-08-29", "2026-09-08")).toBe("29 Agustus – 7 September 2026 (W5)");
+    });
+  });
 });

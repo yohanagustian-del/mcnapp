@@ -19,7 +19,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { fetchAll } from "@/lib/supabase/fetch-all";
 import { shapeLive } from "@/lib/m7/report-data";
 import { DEFAULT_CONTRACT_ALERT_DAYS, type ContractAlertDays } from "@/lib/creators/contract";
-import { todayWib } from "@/lib/utils/date";
+import { todayWib, weekOfMonth } from "@/lib/utils/date";
 import { computeDelta, periodBounds, type PeriodType } from "./aggregate";
 import {
   sessionTimeline, summarizeLiveSessions, toLiveSession, topSessionProducts,
@@ -235,7 +235,7 @@ const BULAN = [
   "Juli", "Agustus", "September", "Oktober", "November", "Desember",
 ];
 
-/** "Minggu 1–7 September 2026" / "September 2026" — label yang dibaca manusia. */
+/** "Minggu 1–7 September 2026" / "September 2026" / "8–28 September 2026 (W2–W4)". */
 export function periodLabel(type: PeriodType, start: string, endExclusive: string): string {
   const [ys, ms, ds] = start.split("-").map(Number);
   if (type === "monthly") return `${BULAN[ms - 1] ?? ms} ${ys}`;
@@ -244,9 +244,16 @@ export function periodLabel(type: PeriodType, start: string, endExclusive: strin
   const de = end.getUTCDate();
   const me = end.getUTCMonth() + 1;
   const ye = end.getUTCFullYear();
-  return ms === me && ys === ye
-    ? `Minggu ${ds}–${de} ${BULAN[ms - 1] ?? ms} ${ys}`
-    : `Minggu ${ds} ${BULAN[ms - 1] ?? ms} – ${de} ${BULAN[me - 1] ?? me} ${ye}`;
+  const rentang =
+    ms === me && ys === ye
+      ? `${ds}–${de} ${BULAN[ms - 1] ?? ms} ${ys}`
+      : `${ds} ${BULAN[ms - 1] ?? ms} – ${de} ${BULAN[me - 1] ?? me} ${ye}`;
+  if (type === "custom") {
+    const w1 = weekOfMonth(new Date(Date.UTC(ys, ms - 1, ds)));
+    const w2 = weekOfMonth(new Date(Date.UTC(ye, me - 1, de)));
+    return ms === me && ys === ye && w1 !== w2 ? `${rentang} (W${w1}–W${w2})` : `${rentang} (W${w1})`;
+  }
+  return `Minggu ${rentang}`;
 }
 
 /** Peringkat produk: live-first bila pecahannya ada, kalau tidak pakai GMV total. */
@@ -268,6 +275,8 @@ export interface BuildReportInput {
   creatorId: string;
   periodType: PeriodType;
   periodStart: string;
+  /** WAJIB untuk periodType='custom' (jendela terakhir yang dipilih user); diabaikan untuk weekly/monthly. */
+  periodEnd?: string;
   rules?: ReportRules;
   benchmarks?: LiveBenchmarks;
   /** Ambang "segera habis"/"mendesak" untuk contractAlert (app_config m8.contract_alert_days). */
@@ -299,7 +308,7 @@ export async function buildCreatorReportData(
   const rules = input.rules ?? DEFAULT_REPORT_RULES;
   const benchmarks = input.benchmarks ?? { default: DEFAULT_BENCHMARK };
   const alertDays = input.alertDays ?? DEFAULT_CONTRACT_ALERT_DAYS;
-  const bounds = periodBounds(input.periodType, input.periodStart);
+  const bounds = periodBounds(input.periodType, input.periodStart, input.periodEnd);
 
   const { data: creatorRow } = await supabase
     .from("creators")

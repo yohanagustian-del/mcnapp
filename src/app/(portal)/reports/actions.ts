@@ -7,7 +7,7 @@ import { createClient } from "@/lib/supabase/server";
 import { writeAudit } from "@/lib/audit";
 import { getConfig } from "@/lib/config";
 import { requirePermission, type TeamMember } from "@/lib/rbac";
-import type { PeriodType } from "@/lib/report/aggregate";
+import { validateCustomPeriod, type PeriodType } from "@/lib/report/aggregate";
 import { buildCreatorReportData } from "@/lib/report/build";
 import type { LiveBenchmarks, ReportRules } from "@/lib/report/rules";
 import { DEFAULT_CONTRACT_ALERT_DAYS, type ContractAlertDays } from "@/lib/creators/contract";
@@ -21,8 +21,12 @@ export interface ReportActionState {
 
 const generateSchema = z.object({
   creator_id: z.string().min(1, "Creator wajib dipilih"),
-  period_type: z.enum(["weekly", "monthly"]),
+  period_type: z.enum(["weekly", "monthly", "custom"]),
   period_start: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Tanggal awal periode wajib"),
+  // WAJIB untuk custom (report-period-picker.tsx selalu mengirimnya untuk weekly/monthly
+  // juga, sebagai akhir jendela/bulan — tapi buildCreatorReportData mengabaikannya untuk
+  // dua tipe itu, dihitung ulang dari periodBounds sendiri).
+  period_end: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
 });
 
 /** CPM may only act on creators they own (PRD M2 §2.5 — server-enforced). */
@@ -51,8 +55,14 @@ export async function generateReport(
   if (!parsed.success) {
     return { ok: false, message: parsed.error.issues.map((i) => i.message).join("; ") };
   }
-  const { creator_id, period_type, period_start } = parsed.data;
+  const { creator_id, period_type, period_start, period_end } = parsed.data;
   const periodType = period_type as PeriodType;
+
+  if (periodType === "custom") {
+    if (!period_end) return { ok: false, message: "Periode custom butuh tanggal akhir." };
+    const check = validateCustomPeriod(period_start, period_end);
+    if (!check.valid) return { ok: false, message: check.reason ?? "Periode custom tidak valid." };
+  }
 
   const supabase = await createClient();
   const { data: creator } = await supabase
@@ -90,7 +100,9 @@ export async function generateReport(
   let dataJson;
   try {
     dataJson = await buildCreatorReportData(supabase, {
-      creatorId: creator_id, periodType, periodStart: period_start, rules, benchmarks, alertDays,
+      creatorId: creator_id, periodType, periodStart: period_start,
+      periodEnd: periodType === "custom" ? period_end : undefined,
+      rules, benchmarks, alertDays,
     });
   } catch (e) {
     return { ok: false, message: `Gagal merakit report: ${e instanceof Error ? e.message : "error"}` };
@@ -111,6 +123,7 @@ export async function generateReport(
       creator_id,
       period_type: periodType,
       period_start: dataJson.period.start,
+      period_end: dataJson.period.end_exclusive,
       data_json: dataJson,
       // Ringkasan eksekutif rule-based disimpan juga sebagai insight_draft supaya
       // daftar/preview lama (yang hanya membaca kolom ini) tetap bermakna.
