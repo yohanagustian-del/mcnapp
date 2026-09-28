@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 /**
@@ -77,7 +77,11 @@ vi.mock("@/lib/rbac", () => ({ requirePermission: (...args: unknown[]) => requir
 // "Today" pinned to 2026-09-20 (WIB) so schedule_date="2026-09-20" always verifies.
 vi.mock("@/lib/utils/date", () => ({ todayWib: () => "2026-09-20" }));
 
-import { verifySlotAction } from "../actions";
+// m13.auto_verify_correction_days default 7 (PLAN_MSDPS Paket B) — tests below
+// pass their own verified_at relative to "now" (mocked via vi.setSystemTime).
+vi.mock("@/lib/config", () => ({ getConfig: async () => 7 }));
+
+import { verifySlotAction, cancelVerifiedSlotAction } from "../actions";
 
 function fd(fields: Record<string, string>): FormData {
   const f = new FormData();
@@ -169,6 +173,61 @@ describe("verifySlotAction — guard umum", () => {
 
   it("ditolak untuk slot masa depan", async () => {
     currentAdmin = mockAdmin(makeSlot({ schedule_date: "2026-09-21" }));
+    const result = await verifySlotAction(fd({ slot_id: "1", mode: "sesuai_rencana" }));
+    expect(result.ok).toBe(false);
+  });
+});
+
+describe("verifySlotAction / cancelVerifiedSlotAction — koreksi slot auto_sistem (PLAN_MSDPS Paket B, Q5)", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("CM boleh mengoreksi slot auto_sistem ke jam baru dalam jendela koreksi", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-09-20T10:00:00.000Z")); // 5 hari setelah auto-verify
+    currentAdmin = mockAdmin(makeSlot({
+      status: "done", actual_time_source: "auto_sistem",
+      actual_start: null, actual_end: null, verified_at: "2026-09-15T00:00:00.000Z",
+    }));
+    const result = await verifySlotAction(
+      fd({ slot_id: "1", mode: "jam_baru", actual_start: "19:10", actual_end: "21:05" })
+    );
+    expect(result.ok).toBe(true);
+    expect(updatePayloads[0]).toMatchObject({ actual_time_source: "input_manual", actual_start: "19:10" });
+  });
+
+  it("ditolak setelah jendela koreksi (7 hari) lewat", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-09-25T00:00:00.000Z")); // 10 hari setelah auto-verify
+    currentAdmin = mockAdmin(makeSlot({
+      status: "done", actual_time_source: "auto_sistem", verified_at: "2026-09-15T00:00:00.000Z",
+    }));
+    const result = await verifySlotAction(
+      fd({ slot_id: "1", mode: "jam_baru", actual_start: "19:10", actual_end: "21:05" })
+    );
+    expect(result.ok).toBe(false);
+    expect(result.ok === false && result.error).toContain("Masa koreksi");
+    expect(updatePayloads).toHaveLength(0);
+  });
+
+  it("CM boleh menandai slot auto_sistem 'Tidak Jadi Live' dalam jendela koreksi", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-09-20T10:00:00.000Z"));
+    currentAdmin = mockAdmin(makeSlot({
+      status: "done", actual_time_source: "auto_sistem", verified_at: "2026-09-15T00:00:00.000Z",
+    }));
+    const result = await cancelVerifiedSlotAction(fd({ slot_id: "1", cancel_reason: "Ternyata batal, baru ketahuan sekarang" }));
+    expect(result.ok).toBe(true);
+    expect(updatePayloads[0]).toMatchObject({ status: "cancelled" });
+  });
+
+  it("slot verifikasi MANUAL (bukan auto_sistem) tetap terkunci selamanya, tidak ada jendela koreksi", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-09-16T00:00:00.000Z")); // 1 hari saja setelah verifikasi manual
+    currentAdmin = mockAdmin(makeSlot({
+      status: "done", actual_time_source: "input_manual", verified_at: "2026-09-15T00:00:00.000Z",
+    }));
     const result = await verifySlotAction(fd({ slot_id: "1", mode: "sesuai_rencana" }));
     expect(result.ok).toBe(false);
   });

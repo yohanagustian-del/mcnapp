@@ -250,6 +250,14 @@ export function CompactScheduleList({
                     <td className="px-3 py-2">
                       <div className="flex flex-wrap gap-1">
                         {flags.isDone && <span className="text-green-600">✓ done</span>}
+                        {r.slot.actual_time_source === "auto_sistem" && (
+                          <span
+                            className="rounded bg-slate-200 px-1 text-[10px] text-slate-600"
+                            title="Diverifikasi otomatis sistem — asumsi live sesuai jadwal, jam aktual belum dikonfirmasi CM."
+                          >
+                            Auto (asumsi live)
+                          </span>
+                        )}
                         {flags.isCancelled && (
                           <span className="text-red-600" title={r.slot.cancel_reason ?? ""}>
                             ✗ tidak jadi

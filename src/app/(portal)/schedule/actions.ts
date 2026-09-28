@@ -8,6 +8,8 @@ import { genId } from "@/lib/utils/id";
 import { buildCopiedSlots } from "@/lib/schedule/copy-week";
 import { searchShopSummary } from "@/lib/deals/shop-search";
 import { assertCreatorInScope } from "@/lib/schedule/scope";
+import { canReviseAutoVerified } from "@/lib/schedule/auto-verify";
+import { getConfig } from "@/lib/config";
 import { todayWib } from "@/lib/utils/date";
 import type {
   AdsPayer,
@@ -452,7 +454,14 @@ export async function verifySlotAction(formData: FormData): Promise<ScheduleActi
     if (befErr) throw new Error(`Gagal membaca slot: ${befErr.message}`);
     if (!before) throw new Error("Slot tidak ditemukan.");
     if (before.status !== "scheduled" && before.status !== "tentative") {
-      throw new Error("Hanya slot berstatus scheduled/tentative yang dapat diverifikasi.");
+      const correctionDays = await getConfig<number>("m13.auto_verify_correction_days").catch(() => 7);
+      if (!canReviseAutoVerified(before, correctionDays, new Date().toISOString())) {
+        throw new Error(
+          before.status === "done" && before.actual_time_source === "auto_sistem"
+            ? `Masa koreksi slot auto-verifikasi (${correctionDays} hari) sudah lewat — terkunci.`
+            : "Hanya slot berstatus scheduled/tentative yang dapat diverifikasi."
+        );
+      }
     }
     const todayIso = todayWib();
     if (before.schedule_date > todayIso) {
@@ -555,7 +564,14 @@ export async function cancelVerifiedSlotAction(formData: FormData): Promise<Sche
     if (befErr) throw new Error(`Gagal membaca slot: ${befErr.message}`);
     if (!before) throw new Error("Slot tidak ditemukan.");
     if (before.status !== "scheduled" && before.status !== "tentative") {
-      throw new Error("Hanya slot berstatus scheduled/tentative yang dapat diverifikasi.");
+      const correctionDays = await getConfig<number>("m13.auto_verify_correction_days").catch(() => 7);
+      if (!canReviseAutoVerified(before, correctionDays, new Date().toISOString())) {
+        throw new Error(
+          before.status === "done" && before.actual_time_source === "auto_sistem"
+            ? `Masa koreksi slot auto-verifikasi (${correctionDays} hari) sudah lewat — terkunci.`
+            : "Hanya slot berstatus scheduled/tentative yang dapat diverifikasi."
+        );
+      }
     }
     const todayIso = todayWib();
     if (before.schedule_date > todayIso) {

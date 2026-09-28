@@ -106,6 +106,14 @@ function SlotBlock({
         {liveBadge && (
           <span className="rounded bg-emerald-100 px-1 text-[10px] text-emerald-700">📊 {liveBadge}</span>
         )}
+        {slot.actual_time_source === "auto_sistem" && (
+          <span
+            className="rounded bg-slate-200 px-1 text-[10px] text-slate-600"
+            title="Diverifikasi otomatis sistem — jam aktual belum dikonfirmasi CM, ini asumsi live sesuai jadwal."
+          >
+            Auto (asumsi live)
+          </span>
+        )}
       </div>
     </div>
   );
