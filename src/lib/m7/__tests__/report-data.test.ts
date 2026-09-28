@@ -289,8 +289,24 @@ describe("buildSlotLiveReportData", () => {
       id: 77, schedule_date: "2026-09-17", brand_name: "OMG Oh My Glam",
       planned_start: "09:00", planned_end: "11:00",
       actual_start: "08:54", actual_end: "10:54", status: "done",
+      actual_time_source: null, fokus_produk_live: null,
     });
     expect(result.creator.id).toBe("CRT-001");
+  });
+
+  it("membawa actual_time_source & fokus_produk_live saat kolomnya terisi (Paket A)", async () => {
+    const sbWithFocus = mockSupabase({
+      live_schedule_slots: {
+        data: { ...SLOT, actual_time_source: "sesuai_rencana", fokus_produk_live: "Serum Niacinamide" },
+      },
+      creators: { data: CREATOR },
+      project_live_sessions: { data: [SESSION] },
+      project_live_intervals: { data: [] },
+      project_live_session_products: { data: [] },
+    });
+    const result = await buildSlotLiveReportData(sbWithFocus, 77);
+    expect(result.slot?.actual_time_source).toBe("sesuai_rencana");
+    expect(result.slot?.fokus_produk_live).toBe("Serum Niacinamide");
   });
 
   it("angka diambil dari sesi slot, dan kolom khas project diisi netral", async () => {

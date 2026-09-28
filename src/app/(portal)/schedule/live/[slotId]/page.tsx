@@ -4,6 +4,7 @@ import { requireMember, hasPermission } from "@/lib/rbac";
 import { createClient } from "@/lib/supabase/server";
 import { slotUploadEligibility } from "@/lib/schedule/live-report";
 import type { SlotStatus } from "@/lib/schedule/types";
+import { todayWib } from "@/lib/utils/date";
 import { SlotLiveUploadForm } from "./slot-live-upload-form";
 import { SlotSessionPanel, type SlotSessionRow } from "./slot-session-panel";
 
@@ -12,6 +13,12 @@ export const dynamic = "force-dynamic";
 const STATUS_LABELS: Record<string, string> = {
   scheduled: "Terjadwal", tentative: "Tentatif", off: "OFF", done: "Selesai (terverifikasi)",
   cancelled: "Tidak jadi live",
+};
+
+const ACTUAL_SOURCE_LABELS: Record<string, string> = {
+  sesuai_rencana: "sesuai rencana",
+  input_manual: "jam baru",
+  auto_sistem: "auto, asumsi live",
 };
 
 const rupiah = (n: number) => `Rp${Math.round(n).toLocaleString("id-ID")}`;
@@ -49,7 +56,7 @@ export default async function SlotLivePage({ params }: { params: Promise<{ slotI
   const supabase = await createClient();
   const { data: slot } = await supabase
     .from("live_schedule_slots")
-    .select("id, creator_id, schedule_date, start_time, end_time, actual_start, actual_end, status, brand_name, cancel_reason, product_set_title, fokus_produk, creators(name, username, owner_cpm_id)")
+    .select("id, creator_id, schedule_date, start_time, end_time, actual_start, actual_end, actual_time_source, status, brand_name, cancel_reason, product_set_title, fokus_produk, fokus_produk_live, creators(name, username, owner_cpm_id)")
     .eq("id", slotId)
     .maybeSingle();
   if (!slot) notFound();
@@ -65,7 +72,7 @@ export default async function SlotLivePage({ params }: { params: Promise<{ slotI
     );
   }
 
-  const today = new Date().toISOString().slice(0, 10);
+  const today = todayWib();
   const eligibility = slotUploadEligibility(
     { status: slot.status as SlotStatus, schedule_date: slot.schedule_date as string },
     today
@@ -132,12 +139,16 @@ export default async function SlotLivePage({ params }: { params: Promise<{ slotI
         <Info
           label="Jam aktual (verifikasi)"
           value={slot.actual_start && slot.actual_end
-            ? `${(slot.actual_start as string).slice(0, 5)}–${(slot.actual_end as string).slice(0, 5)}`
+            ? `${(slot.actual_start as string).slice(0, 5)}–${(slot.actual_end as string).slice(0, 5)}${
+                ACTUAL_SOURCE_LABELS[slot.actual_time_source as string] ? ` (${ACTUAL_SOURCE_LABELS[slot.actual_time_source as string]})` : ""
+              }`
             : "—"}
         />
         <Info label="Brand" value={(slot.brand_name as string | null)?.trim() || "Organik"} />
         <Info label="Status slot" value={STATUS_LABELS[slot.status as string] ?? (slot.status as string)} />
         <Info label="Set produk" value={(slot.product_set_title as string | null)?.trim() || "—"} />
+        <Info label="Fokus Produk (rencana)" value={(slot.fokus_produk as string | null)?.trim() || "—"} />
+        <Info label="Fokus Produk (realisasi)" value={(slot.fokus_produk_live as string | null)?.trim() || "—"} />
         <Info label="GMV sesi tercatat" value={rows.length > 0 ? rupiah(countableGmv) : "—"} />
       </section>
 

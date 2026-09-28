@@ -4,6 +4,8 @@
 export type SlotStatus = "scheduled" | "tentative" | "off" | "done" | "cancelled";
 export type DealsBy = "bd" | "cm" | "creator";
 export type AdsPayer = "brand" | "mea" | "invoicing_mea" | "organik";
+/** How actual_start/actual_end were set (PLAN_MSDPS Paket A/B, migration 0073/0076). */
+export type ActualTimeSource = "sesuai_rencana" | "input_manual" | "auto_sistem";
 
 /** A row as returned by `select * from live_schedule_slots` (snake_case). */
 export interface LiveScheduleSlot {
@@ -33,6 +35,10 @@ export interface LiveScheduleSlot {
   fokus_produk: string | null;
   actual_start: string | null;
   actual_end: string | null;
+  /** How actual_start/actual_end were set; null for slots not yet verified or verified before migration 0073. */
+  actual_time_source: ActualTimeSource | null;
+  /** Focus product/promo actually used during the live, filled at verification (separate from the plan's fokus_produk). */
+  fokus_produk_live: string | null;
   verified_by: string | null;
   verified_at: string | null;
   created_by: string;

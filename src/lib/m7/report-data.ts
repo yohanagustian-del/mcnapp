@@ -103,6 +103,10 @@ export interface ProjectReportData {
     actual_start: string | null;
     actual_end: string | null;
     status: string;
+    /** How actual_start/end were set — null for slots verified before Paket A. */
+    actual_time_source: string | null;
+    /** Focus product/promo actually used, filled at verification (may differ from the plan's fokus_produk). */
+    fokus_produk_live: string | null;
   };
   creator: { id: string; name: string; username: string | null; level: number | null; niche: string | null };
   target: { personal_gmv: number; project_gmv: number };
@@ -433,7 +437,9 @@ export async function buildSlotLiveReportData(
 ): Promise<ProjectReportData> {
   const { data: slot } = await supabase
     .from("live_schedule_slots")
-    .select("id, creator_id, schedule_date, start_time, end_time, actual_start, actual_end, brand_name, status")
+    .select(
+      "id, creator_id, schedule_date, start_time, end_time, actual_start, actual_end, brand_name, status, actual_time_source, fokus_produk_live"
+    )
     .eq("id", slotId)
     .maybeSingle();
   if (!slot) throw new Error("Slot jadwal tidak ditemukan");
@@ -468,6 +474,8 @@ export async function buildSlotLiveReportData(
       actual_start: (slot.actual_start as string | null)?.slice(0, 5) ?? null,
       actual_end: (slot.actual_end as string | null)?.slice(0, 5) ?? null,
       status: slot.status as string,
+      actual_time_source: (slot.actual_time_source as string | null) ?? null,
+      fokus_produk_live: (slot.fokus_produk_live as string | null) ?? null,
     },
     creator: { id: creator.id, name: creator.name, username: creator.username ?? null, level: creator.level, niche: creator.niche },
     target: { personal_gmv: 0, project_gmv: 0 },

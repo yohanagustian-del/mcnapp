@@ -1,6 +1,7 @@
 import { requireMember, hasPermission } from "@/lib/rbac";
 import { createClient } from "@/lib/supabase/server";
 import { getWeekStart, getWeekDays, formatDayLabel, prevWeek, nextWeek } from "@/lib/schedule/week";
+import { todayWib } from "@/lib/utils/date";
 import { buildWeekMatrix } from "@/lib/schedule/matrix";
 import { summarizeSlotLive, type SlotLiveSummary } from "@/lib/schedule/live-report";
 import type { LiveScheduleSlot } from "@/lib/schedule/types";
@@ -41,10 +42,6 @@ interface FullCreatorRow {
   jenis_creator: string | null;
   live_roster: boolean;
   team_members: { name?: string } | null;
-}
-
-function todayIso(): string {
-  return new Date().toISOString().slice(0, 10);
 }
 
 /**
@@ -97,7 +94,7 @@ export default async function SchedulePage({
     weekParam && DATE_RE.test(weekParam) ? weekParam : getWeekStart(new Date());
   const days = getWeekDays(weekStart);
   const weekEnd = days[6];
-  const today = todayIso();
+  const today = todayWib();
 
   const supabase = await createClient();
 
