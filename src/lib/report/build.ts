@@ -18,6 +18,8 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { fetchAll } from "@/lib/supabase/fetch-all";
 import { shapeLive } from "@/lib/m7/report-data";
+import { DEFAULT_CONTRACT_ALERT_DAYS, type ContractAlertDays } from "@/lib/creators/contract";
+import { todayWib } from "@/lib/utils/date";
 import { computeDelta, periodBounds, type PeriodType } from "./aggregate";
 import {
   sessionTimeline, summarizeLiveSessions, toLiveSession, topSessionProducts,
@@ -230,6 +232,8 @@ export interface BuildReportInput {
   periodStart: string;
   rules?: ReportRules;
   benchmarks?: LiveBenchmarks;
+  /** Ambang "segera habis"/"mendesak" untuk contractAlert (app_config m8.contract_alert_days). */
+  alertDays?: ContractAlertDays;
 }
 
 interface CreatorRow {
@@ -256,6 +260,7 @@ export async function buildCreatorReportData(
 ): Promise<ReportDataV2> {
   const rules = input.rules ?? DEFAULT_REPORT_RULES;
   const benchmarks = input.benchmarks ?? { default: DEFAULT_BENCHMARK };
+  const alertDays = input.alertDays ?? DEFAULT_CONTRACT_ALERT_DAYS;
   const bounds = periodBounds(input.periodType, input.periodStart);
 
   const { data: creatorRow } = await supabase
@@ -382,9 +387,9 @@ export async function buildCreatorReportData(
   const benchmarkPeer = await buildPeerBenchmark(supabase, creator, bounds.start, bounds.end);
 
   // ===== Kontrak & link leakage (dipermukakan, bukan dihitung ulang) =====
-  const today = new Date().toISOString().slice(0, 10);
+  const today = todayWib();
   const contractAlert =
-    creator.contract_end_date && creator.contract_end_date <= addDays(today, 30)
+    creator.contract_end_date && creator.contract_end_date <= addDays(today, alertDays.warning)
       ? { contract_end_date: creator.contract_end_date, expired: creator.contract_end_date < today }
       : null;
   const { data: linkStatus } = await supabase

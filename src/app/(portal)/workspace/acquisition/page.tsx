@@ -1,6 +1,8 @@
 import { requireMember, hasPermission } from "@/lib/rbac";
 import { createClient } from "@/lib/supabase/server";
+import Link from "next/link";
 import { getProjectRequirements } from "@/lib/m7/requirements";
+import { countExpiringContracts } from "@/lib/creators/contract-alerts";
 import { ProjectRequirementsPanel } from "@/components/project-requirements-panel";
 import {
   markHandoffDone,
@@ -53,6 +55,10 @@ export default async function AcquisitionWorkspacePage() {
   const member = await requireMember();
   const canRecord = hasPermission("m8.acquisition", member.role);
   const canPay = hasPermission("m8.referral_pay", member.role);
+  const canRenew = hasPermission("creators.contract_renew", member.role);
+  const expiringContracts = canRenew
+    ? await countExpiringContracts(member.role === "cpm" ? member.id : null)
+    : 0;
 
   const supabase = await createClient();
   const [{ data: acquisitions }, { data: referrals }, { data: creators }, { data: cmMembers }] = await Promise.all([
@@ -104,6 +110,21 @@ export default async function AcquisitionWorkspacePage() {
       </div>
 
       <ProjectRequirementsPanel requirements={projectReqs} focus="creator" />
+
+      {canRenew && (
+        <Link
+          href="/workspace/acquisition/perpanjangan"
+          className={`block rounded-lg border p-4 hover:bg-slate-50 ${
+            expiringContracts > 0 ? "border-red-200 bg-red-50" : "border-slate-200 bg-white"
+          }`}
+        >
+          <p className="text-xs uppercase text-slate-500">Kontrak Segera Habis</p>
+          <p className={`mt-1 text-2xl font-semibold ${expiringContracts > 0 ? "text-red-700" : ""}`}>
+            {expiringContracts} kreator
+          </p>
+          <p className="text-sm text-slate-500">Lihat & perpanjang di Perpanjangan Kreator →</p>
+        </Link>
+      )}
 
       {/* ===== §2C.1 metrik closing ===== */}
       <section className="grid gap-4 sm:grid-cols-3">

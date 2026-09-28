@@ -7,6 +7,7 @@ import { useCreatorFilter } from "@/components/creator-filter";
 import { MAX_BULK_DELETE } from "@/lib/creators/delete";
 import { creatorClassLabel } from "@/lib/creators/creator-class";
 import { estimateLabel, levelMismatch } from "@/lib/creators/affiliate-level";
+import { contractDays, contractRemaining, type ContractAlertDays } from "@/lib/creators/contract";
 import { updateRateCard } from "./actions";
 import { CreatorEditButton, type EditCmOption } from "./creator-edit-button";
 import { CreatorDeleteDialog, type DeleteTarget } from "./creator-delete-dialog";
@@ -66,36 +67,6 @@ function formatShare(v: number | null | undefined): string {
   return `${Number(pct.toFixed(1))}%`;
 }
 
-/**
- * Sisa kontrak dalam hari, atau null kalau salah satu tanggal belum terisi.
- * Dipisah dari label supaya pengurutan kolom "Sisa Kontrak" memakai angka
- * (bukan teks "habis 3 hr lalu" yang urutannya tidak bermakna).
- */
-function contractDays(join: string | null, end: string | null, nowMs: number): number | null {
-  if (!join || !end) return null;
-  const days = Math.ceil((new Date(end).getTime() - nowMs) / 86_400_000);
-  return Number.isFinite(days) ? days : null;
-}
-
-/**
- * Sisa kontrak per hari ini (computed, tidak disimpan). `nowMs` comes from the server
- * render so SSR and hydration agree on the day count.
- *
- * Butuh join_date DAN contract_end_date terisi: kontrak tanpa salah satu tanggal =
- * data belum lengkap, jadi ditampilkan "—" daripada hitungan yang menyesatkan.
- */
-function contractRemaining(
-  join: string | null,
-  end: string | null,
-  nowMs: number
-): { label: string; danger: boolean } {
-  const days = contractDays(join, end, nowMs);
-  if (days === null) return { label: "—", danger: false };
-  if (days < 0) return { label: `habis ${-days} hr lalu`, danger: true };
-  if (days <= 60) return { label: `${days} hari`, danger: days <= 30 };
-  return { label: `${Math.floor(days / 30)} bln ${days % 30} hr`, danger: false };
-}
-
 /** Suffix jumlah follower yang lazim ditulis manual di sheet. */
 const FOLLOWER_MULTIPLIER: Record<string, number> = {
   k: 1e3, rb: 1e3, ribu: 1e3, m: 1e6, jt: 1e6, juta: 1e6,
@@ -151,6 +122,7 @@ type SortValue = string | number | null;
 interface CellContext {
   nowMs: number;
   canUpload: boolean;
+  alertDays: ContractAlertDays;
 }
 
 interface TableColumn {
@@ -179,7 +151,7 @@ interface TableColumn {
    * kelas/estimasi, sisa kontrak, niche gabungan) — supaya CSV terbaca sama seperti
    * yang ditampilkan tabel, bukan angka mentah.
    */
-  csvValue?: (c: CreatorTableRow, nowMs: number) => string;
+  csvValue?: (c: CreatorTableRow, nowMs: number, alertDays: ContractAlertDays) => string;
 }
 
 /**
@@ -357,9 +329,9 @@ const COLUMNS: TableColumn[] = [
     label: "Sisa Kontrak",
     compact: true,
     value: (c, nowMs) => contractDays(c.join_date, c.contract_end_date, nowMs),
-    csvValue: (c, nowMs) => contractRemaining(c.join_date, c.contract_end_date, nowMs).label,
+    csvValue: (c, nowMs, alertDays) => contractRemaining(c.join_date, c.contract_end_date, nowMs, alertDays).label,
     cell: (c, ctx) => {
-      const r = contractRemaining(c.join_date, c.contract_end_date, ctx.nowMs);
+      const r = contractRemaining(c.join_date, c.contract_end_date, ctx.nowMs, ctx.alertDays);
       return <span className={r.danger ? "font-medium text-red-600" : undefined}>{r.label}</span>;
     },
   },
@@ -430,6 +402,7 @@ function compareRows(
 export function CreatorsTable({
   rows,
   nowMs,
+  alertDays,
   canUpload,
   canEdit,
   canDelete,
@@ -442,6 +415,8 @@ export function CreatorsTable({
 }: {
   rows: CreatorTableRow[];
   nowMs: number;
+  /** Ambang "Sisa Kontrak" (app_config m8.contract_alert_days) — CLAUDE.md: jangan hardcode. */
+  alertDays: ContractAlertDays;
   canUpload: boolean;
   canEdit: boolean;
   canDelete: boolean;
@@ -575,7 +550,7 @@ export function CreatorsTable({
       const row: Record<string, string> = {};
       for (const col of visibleColumns) {
         row[col.label] = col.csvValue
-          ? col.csvValue(c, nowMs)
+          ? col.csvValue(c, nowMs, alertDays)
           : String(normalizeSortValue(col.value ? col.value(c, nowMs) : null) ?? "—");
       }
       return row;
@@ -589,14 +564,14 @@ export function CreatorsTable({
     a.download = `kreator_${new Date().toISOString().slice(0, 10)}.csv`;
     a.click();
     URL.revokeObjectURL(url);
-  }, [sortedRows, visibleColumns, nowMs]);
+  }, [sortedRows, visibleColumns, nowMs, alertDays]);
 
   const showActions = canEdit || canDelete || canRequestCm;
   const requestedIds = useMemo(() => new Set(requestedCreatorIds ?? []), [requestedCreatorIds]);
 
   /** Kolom data terlihat + kolom centang + kolom Aksi — dipakai colSpan baris "kosong". */
   const colCount = visibleColumns.length + (canDelete ? 1 : 0) + (showActions ? 1 : 0);
-  const cellCtx: CellContext = { nowMs, canUpload };
+  const cellCtx: CellContext = { nowMs, canUpload, alertDays };
 
   const toggleOne = useCallback((id: string) => {
     setSelected((prev) => {

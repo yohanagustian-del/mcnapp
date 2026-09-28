@@ -1,5 +1,6 @@
 import { requireMember, NAV_ITEMS, NAV_GROUPS, canAccessNav, hasPermission } from "@/lib/rbac";
 import { countPendingCmRequests } from "@/lib/creators/cm-requests";
+import { countExpiringContracts } from "@/lib/creators/contract-alerts";
 import { loadPicTapScheduleAlert } from "@/lib/schedule/pic-tap-alerts";
 import { PortalSidebar, type SidebarGroup } from "@/components/portal-sidebar";
 
@@ -45,6 +46,12 @@ export default async function PortalLayout({ children }: { children: React.React
         (picTapSchedule.shopNames.length > 5 ? `, +${picTapSchedule.shopNames.length - 5} lainnya` : "")
       : undefined;
 
+  // Badge "Perpanjangan Kreator" (Paket D, R5): kontrak habis atau ≤ ambang danger.
+  // CPM hanya melihat kreator miliknya sendiri, sama seperti halamannya.
+  const expiringContracts = hasPermission("creators.contract_renew", member.role)
+    ? await countExpiringContracts(member.role === "cpm" ? member.id : null)
+    : 0;
+
   // Pengelompokan menu per divisi. Filter RBAC sudah dilakukan di atas, jadi grup
   // yang seluruh itemnya tidak boleh diakses role ini tidak ikut dirender.
   const groups: SidebarGroup[] = NAV_GROUPS.map((group) => ({
@@ -59,13 +66,17 @@ export default async function PortalLayout({ children }: { children: React.React
             ? pendingCmRequests
             : item.href === "/schedule"
               ? picTapSchedule.count
-              : 0,
+              : item.href === "/workspace/acquisition/perpanjangan"
+                ? expiringContracts
+                : 0,
         badgeTitle:
           item.href === "/creators"
             ? `${pendingCmRequests} request penugasan CM menunggu keputusan Anda`
             : item.href === "/schedule"
               ? picTapTitle
-              : undefined,
+              : item.href === "/workspace/acquisition/perpanjangan"
+                ? `${expiringContracts} kreator kontraknya sudah habis atau segera habis`
+                : undefined,
       })),
   })).filter((group) => group.items.length > 0);
 

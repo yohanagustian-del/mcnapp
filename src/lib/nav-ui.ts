@@ -38,6 +38,9 @@ export const NAV_ICON_PATHS: Record<string, string> = {
   "/workspace/external":
     "M12 3a9 9 0 100 18 9 9 0 000-18zM3 12h18M12 3c2.5 3 2.5 15 0 18M12 3c-2.5 3-2.5 15 0 18",
   "/workspace/acquisition": "M11 18a7 7 0 100-14 7 7 0 000 14zM20 20l-4-4M11 8v6M8 11h6",
+  // Perpanjangan Kreator: dua panah melingkar (perpanjang/renew).
+  "/workspace/acquisition/perpanjangan":
+    "M4 4v6h6M20 20v-6h-6M5.5 15a7 7 0 0011.3 3l3.2-3M18.5 9a7 7 0 00-11.3-3l-3.2 3",
   "/ingest": "M12 16V4m0 0L8 8m4-4l4 4M4 17v3h16v-3",
   "/link-leakage": "M10 13a5 5 0 007 0l3-3a5 5 0 00-7-7l-1 1M14 11a5 5 0 00-7 0l-3 3a5 5 0 007 7l1-1",
   "/tim": "M17 20v-2a4 4 0 00-4-4H6a4 4 0 00-4 4v2M9.5 6.5a3 3 0 106 0 3 3 0 00-6 0M22 20v-2a4 4 0 00-3-3.87",

@@ -6,6 +6,7 @@ import { writeAudit } from "@/lib/audit";
 import { getConfig } from "@/lib/config";
 import { requirePermission } from "@/lib/rbac";
 import { fetchAll } from "@/lib/supabase/fetch-all";
+import { renewCreatorContract } from "@/lib/creators/contract-renewal";
 import { genId } from "@/lib/utils/id";
 import { parseRupiah } from "@/lib/utils/rupiah";
 
@@ -480,23 +481,36 @@ export async function registerCreator(
       };
     } else if (existing.contract_end_date != null && String(existing.contract_end_date) < today) {
       // ---- RENEWAL (perpanjangan): kontrak sudah habis → pakai baris & id yang sama. ----
-      const before = {
-        status: existing.status, join_date: existing.join_date,
-        contract_end_date: existing.contract_end_date, commission_share: existing.commission_share,
-      };
-      // Drop empty optional fields so a blank renewal form doesn't erase existing
-      // master data (same rule as uploadCreators). Required fields are never null.
-      const renewal: Record<string, unknown> = {
-        status: "binding", commission_share: commissionShare, ...payload,
-      };
+      // contract_end_date/status ditulis lewat renewCreatorContract() (CLAUDE.md #4,
+      // migrasi 0075) — SATU-SATUNYA jalan, supaya riwayat creator_contract_periods
+      // selalu lengkap, bukan cuma untuk jalur /workspace/acquisition/perpanjangan.
+      // Status dipaksa 'binding' di sini (bukan default nonaktif→aktif engine) — perilaku
+      // lama registerCreator dipertahankan.
+      const renewed = await renewCreatorContract(admin, {
+        creatorId: existing.id,
+        startDate: joinDate,
+        endDate: contractEndDate,
+        notes: "Registrasi ulang via form Akuisisi (re-register username, kontrak lama habis).",
+        actorId: actor.id,
+        kind: "perpanjangan",
+        status: "binding",
+      });
+      if (!renewed.ok) return { status: "error", message: renewed.error };
+
+      // Sisa field master data (nama, telepon, followers, dst) — kosong tidak menimpa
+      // data lama (sama seperti uploadCreators). join_date/contract_end_date/status
+      // sudah ditulis engine di atas, jangan ditulis dua kali.
+      const before = { join_date: existing.join_date, commission_share: existing.commission_share };
+      const { join_date: _jd, contract_end_date: _ced, ...masterFields } = payload;
+      const renewal: Record<string, unknown> = { commission_share: commissionShare, ...masterFields };
       for (const k of Object.keys(renewal)) if (renewal[k] === null) delete renewal[k];
       const { error } = await admin.from("creators").update(renewal).eq("id", existing.id);
-      if (error) return { status: "error", message: `Gagal memperpanjang creator: ${error.message}` };
+      if (error) return { status: "error", message: `Gagal memperbarui data creator: ${error.message}` };
 
       await writeAudit({
         actorId: actor.id, action: "m8.creator_reregister", entityType: "creators",
         entityId: existing.id, before,
-        after: { id: existing.id, ...renewal },
+        after: { id: existing.id, join_date: joinDate, contract_end_date: contractEndDate, ...renewal },
         type: "auto",
       });
       result = {
