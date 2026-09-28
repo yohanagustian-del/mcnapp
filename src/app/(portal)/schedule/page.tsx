@@ -1,5 +1,6 @@
 import { requireMember, hasPermission } from "@/lib/rbac";
 import { createClient } from "@/lib/supabase/server";
+import { getConfig } from "@/lib/config";
 import { getWeekStart, getWeekDays, formatDayLabel, prevWeek, nextWeek } from "@/lib/schedule/week";
 import { todayWib } from "@/lib/utils/date";
 import { buildWeekMatrix } from "@/lib/schedule/matrix";
@@ -230,11 +231,18 @@ export default async function SchedulePage({
   let verifyRows: VerifyRow[] = [];
   let overdueRows: VerifyRow[] = [];
   if (canVerify && rosterCreatorIds.length > 0) {
+    // PLAN_MSDPS Paket B (B-03): batas bawah supaya backlog lama (yang seharusnya
+    // sudah auto-verified oleh run_m13_auto_verify(), migrasi 0076) tidak lagi
+    // menghabiskan limit(300) dan mendorong slot hari ini keluar dari daftar —
+    // pola sama A-00 (jam selesai WIB, +1 hari buffer, bukan tanggal UTC server).
+    const autoVerifyHours = await getConfig<number>("m13.auto_verify_hours").catch(() => 24);
+    const lowerBoundIso = new Date(Date.now() - (autoVerifyHours + 24) * 3_600_000).toISOString().slice(0, 10);
     const { data: pendingSlots } = await supabase
       .from("live_schedule_slots")
       .select("*")
       .in("creator_id", rosterCreatorIds)
       .in("status", ["scheduled", "tentative"])
+      .gte("schedule_date", lowerBoundIso)
       .lte("schedule_date", today)
       .order("schedule_date", { ascending: true })
       .limit(300);
