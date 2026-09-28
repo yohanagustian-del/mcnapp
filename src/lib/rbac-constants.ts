@@ -208,6 +208,11 @@ export const PERMISSIONS: Record<string, Role[]> = {
   "m6.run": [...MANAGEMENT_ROLES, "bizdev_lead", "bizdev"],
   // M7 §2.7: buat/edit project & kelola peserta/man power = management + lead terkait + PM (campaign_ops)
   "m7.manage": [...MANAGEMENT_ROLES, "cm_lead", "bizdev_lead", "acquisition_lead", "campaign_ops"],
+  // M7 report insight (Special Project): editing/finalizing narasi report dibuka untuk
+  // SEMUA role staff (permintaan user 2026-09-28) — beda dari m7.manage (yang tetap
+  // membatasi buat/edit project & man power). od_viewer sengaja dikecualikan: read-only
+  // lintas divisi, ditolak di setiap mutasi by design (lihat catatan di bawah).
+  "m7.report_insight_edit": ROLES.filter((role) => role !== "od_viewer"),
   // M7: input metrik harian (ads/komisi manual — GMV sendiri upload-only sejak v2 B5)
   // — pengelola project + finance (dimensi biaya/ads)
   "m7.metrics": [...MANAGEMENT_ROLES, "cm_lead", "bizdev_lead", "acquisition_lead", "campaign_ops", "finance"],

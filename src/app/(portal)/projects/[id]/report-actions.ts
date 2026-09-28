@@ -141,9 +141,17 @@ export async function generateProjectReports(formData: FormData): Promise<void> 
  * Finalize (PR-15/R26): hanya satu FINAL per (project, creator) — final
  * sebelumnya (kalau ada, dari generate-ulang setelah sempat difinalkan)
  * dihapus dulu supaya index unique partial-nya tidak bentrok.
+ *
+ * Sejak 2026-09-28: report yang SUDAH final tetap bisa dibuka lagi untuk
+ * menyunting insight lalu di-final-kan ulang (tombol yang sama) — permintaan
+ * user agar tim tidak terkunci pada finalisasi pertama. Saat report itu
+ * sendiri yang sudah final, baris ini di-update in place (tidak ada baris
+ * "final sebelumnya" lain untuk dihapus); jalur hapus-final-lama tetap
+ * dipakai untuk kasus draft baru (dari regenerasi) yang mau menggantikan
+ * final lama.
  */
 export async function finalizeProjectReport(formData: FormData): Promise<void> {
-  const actor = await requirePermission("m7.manage");
+  const actor = await requirePermission("m7.report_insight_edit");
   const reportId = Number(formData.get("report_id"));
   const insightFinal = String(formData.get("insight_final") ?? "").trim();
   if (!reportId) throw new Error("Report tidak valid");
@@ -151,18 +159,23 @@ export async function finalizeProjectReport(formData: FormData): Promise<void> {
   const admin = createAdminClient();
   const { data: report } = await admin
     .from("creator_reports")
-    .select("id, project_id, creator_id, status, insight_draft")
+    .select("id, project_id, creator_id, status, insight_draft, insight_final")
     .eq("id", reportId).maybeSingle();
   if (!report) throw new Error("Report tidak ditemukan");
   if (!report.project_id) throw new Error("Report ini bukan report project");
-  if (report.status === "final") throw new Error("Report sudah final");
 
-  const { data: previousFinal } = await admin
-    .from("creator_reports").select("id")
-    .eq("project_id", report.project_id).eq("creator_id", report.creator_id).eq("status", "final")
-    .maybeSingle();
-  if (previousFinal) {
-    await admin.from("creator_reports").delete().eq("id", previousFinal.id);
+  const wasFinal = report.status === "final";
+  let replacedPreviousFinal = false;
+
+  if (!wasFinal) {
+    const { data: previousFinal } = await admin
+      .from("creator_reports").select("id")
+      .eq("project_id", report.project_id).eq("creator_id", report.creator_id).eq("status", "final")
+      .maybeSingle();
+    if (previousFinal) {
+      await admin.from("creator_reports").delete().eq("id", previousFinal.id);
+      replacedPreviousFinal = true;
+    }
   }
 
   const { error } = await admin
@@ -172,9 +185,10 @@ export async function finalizeProjectReport(formData: FormData): Promise<void> {
   if (error) throw new Error(`Gagal finalisasi: ${error.message}`);
 
   await writeAudit({
-    actorId: actor.id, action: "m7.report_finalize", entityType: "creator_reports", entityId: String(reportId),
-    before: { status: report.status },
-    after: { status: "final", replaced_previous_final: Boolean(previousFinal) },
+    actorId: actor.id, action: wasFinal ? "m7.report_insight_edit" : "m7.report_finalize",
+    entityType: "creator_reports", entityId: String(reportId),
+    before: { status: report.status, insight_final: report.insight_final },
+    after: { status: "final", insight_final: insightFinal || report.insight_draft, replaced_previous_final: replacedPreviousFinal },
     type: "auto",
   });
 

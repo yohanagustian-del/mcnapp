@@ -21,7 +21,11 @@ export default async function ProjectReportPage({
   if (!Number.isInteger(projectId)) notFound();
 
   const member = await requireMember();
-  const canFinalize = hasPermission("m7.manage", member.role);
+  // Dibuka untuk semua role staff (bukan cuma m7.manage) — permintaan user
+  // 2026-09-28: menyunting insight report project bukan aksi berisiko yang
+  // butuh dibatasi ke pengelola project saja (beda dari m7.manage yang
+  // mengatur buat/edit project & man power).
+  const canEditInsight = hasPermission("m7.report_insight_edit", member.role);
 
   const supabase = await createClient();
   const { data: reports } = await supabase
@@ -49,16 +53,19 @@ export default async function ProjectReportPage({
         <ProjectReportView data={data} insight={insight} status={report.status as "draft" | "final"} audience="team" />
       </div>
 
-      {canFinalize && report.status === "draft" && (
+      {canEditInsight && (
         <form action={finalizeProjectReport} className="mt-4 space-y-2 rounded-lg border border-slate-200 bg-white p-4">
           <input type="hidden" name="report_id" value={report.id} />
-          <label className="block text-sm font-medium">Edit insight sebelum finalisasi (opsional)</label>
+          <label className="block text-sm font-medium">
+            {report.status === "final" ? "Edit insight (report sudah final)" : "Edit insight sebelum finalisasi (opsional)"}
+          </label>
           <textarea
-            name="insight_final" rows={5} defaultValue={report.insight_draft ?? ""}
+            name="insight_final" rows={5}
+            defaultValue={(report.status === "final" ? report.insight_final : report.insight_draft) ?? ""}
             className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
           />
           <button type="submit" className="rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-700">
-            Finalkan Report
+            {report.status === "final" ? "Simpan & Final Lagi" : "Finalkan Report"}
           </button>
         </form>
       )}
