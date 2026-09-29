@@ -4,8 +4,7 @@ Untuk semua tim: Akuisisi, CM/CPM, BizDev, Campaign/External, Creator Support, F
 Management. Alamat aplikasi: **https://app.meamcn.com** — semua halaman di bawah ditulis
 sebagai alamat lengkap supaya bisa langsung diklik/disalin.
 
-Dokumen ini disusun dari kode dan `docs/BUILD_PLAN.md` per 29 Sep 2026. Bagian bertanda
-**[ISI]** = belum terdokumentasi di repo, perlu dilengkapi tim yang memegang aksesnya.
+Dokumen ini disusun dari kode dan `docs/BUILD_PLAN.md` per 29 Sep 2026.
 
 ---
 
@@ -110,7 +109,7 @@ Akuisisi, CM, dan Management boleh memperpanjang (CM/CPM hanya untuk kreator di 
    - CM Lead/Management: pilih CM lalu assign langsung.
    - CPM: centang lalu **Ajukan diri sebagai CM** (diputuskan CM Lead/Management, CPM tidak bisa assign diri sendiri).
 3. **TikTok** — form upload 2 file (MCN wajib, TAP disarankan).
-4. **Shopee** — form upload 1 file (bagian §3.1 di bawah).
+4. **Shopee** — kotak *Tutorial: Upload Conversion Report Shopee* (bisa dilipat) dan form upload 1 file (bagian §3.1 di bawah).
 5. **Kalender Cakupan Minggu (W1–W5)** — 3 bulan terakhir.
 6. **Riwayat Batch** — 10 baris per halaman, ada paginasi.
 
@@ -119,8 +118,7 @@ Jika role Anda tidak punya izin, form diganti tulisan *"Role Anda tidak memiliki
 ### 3.1 Mengunggah file Shopee — langkah demi langkah
 
 **Langkah 1 — Ambil file.**
-Export **Conversion Report** dari Shopee Affiliate (akun MCN/SAP). Satu CSV gabungan MCN + SAP.
-Menu persis di Shopee Affiliate: **[ISI — belum terdokumentasi di repo]**.
+Siapkan **Conversion Report** dari Shopee Affiliate (akun MCN/SAP): satu CSV gabungan MCN + SAP.
 Filter tanggal export **sesuai satu window saja** (lihat tabel di bawah).
 
 | Window | Tanggal |
@@ -302,7 +300,6 @@ Kreator hanya melihat data miliknya sendiri (dijaga di database, bukan cuma tamp
 | Creator Product Match, Produk TAP, rekomendasi produk | TikTok saja | Conversion Report Shopee tak punya harga/qty per item, jadi segmen harga tidak bisa dihitung aman |
 | Top produk per kreator Shopee | Belum ada | Alasan sama |
 | Upload harian product/Shopee untuk Special Project (Fase 1B) | Belum dibangun | Menunggu sampel file |
-| Panduan export Shopee Affiliate di halaman `/ingest` | Belum ada | Halaman hanya berisi tutorial TikTok Partner Center; usulan: tambahkan kotak tutorial Shopee di sana setelah langkah menu Shopee ([ISI]) dikonfirmasi |
 | Penandatanganan e-sign via provider | Alur status jalan, API provider belum | Provider (Privy/Mekari Sign) belum dipilih |
 
 ---
