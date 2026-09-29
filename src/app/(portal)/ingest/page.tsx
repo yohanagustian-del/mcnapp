@@ -219,6 +219,54 @@ export default async function IngestPage() {
       )}
 
       <h2 className="mt-8 text-lg font-medium">Shopee</h2>
+
+      <details className="mt-2 max-w-2xl rounded-lg border border-orange-200 bg-orange-50/60 p-4" open>
+        <summary className="cursor-pointer text-sm font-semibold text-orange-900">
+          📋 Tutorial: Upload Conversion Report Shopee
+        </summary>
+        <ol className="mt-3 list-inside list-decimal space-y-2 text-sm text-slate-700">
+          <li>
+            Siapkan <strong>satu file CSV Conversion Report Shopee</strong> (gabungan MCN + SAP).
+            Filter tanggalnya hanya untuk <strong>satu window mingguan</strong>:
+            <ul className="mt-1 list-inside list-disc space-y-0.5 pl-4 text-slate-600">
+              <li>W1 = tanggal 1-7</li>
+              <li>W2 = tanggal 8-14</li>
+              <li>W3 = tanggal 15-21</li>
+              <li>W4 = tanggal 22-28</li>
+              <li>W5 = tanggal 29-akhir bulan</li>
+            </ul>
+          </li>
+          <li>
+            Pastikan kolom ini ada: <strong>Status Pesanan</strong>,{" "}
+            <strong>Waktu Pesanan Selesai</strong>, <strong>Username Affiliate</strong>,{" "}
+            <strong>ID Produk</strong>, <strong>ID Toko</strong>,{" "}
+            <strong>Total Pembelian yang Dibuat(Rp)</strong>, dan <strong>Platform</strong>. Kolom
+            Kategori L1/L2 dipakai untuk niche kreator.
+          </li>
+          <li>
+            Pilih file di form Shopee di bawah, lalu klik <strong>Proses Upload Mingguan</strong>.
+            Jangan tutup tab sampai kotak hijau hasil muncul.
+          </li>
+          <li>
+            Baca hasilnya: periode, jumlah baris Selesai, jumlah creator, dan GMV total. Cek juga
+            daftar baris yang dilewati.
+          </li>
+          <li>
+            Kreator Shopee baru dibuat otomatis sebagai <strong>prospek</strong> tanpa CM. Assign
+            (CM Lead) atau ajukan diri sebagai CM (CPM) lewat panel <strong>Kreator tanpa CM</strong>{" "}
+            di atas.
+          </li>
+          <li>
+            Cek <strong>Kalender Cakupan Minggu</strong> di bawah: sel window tersebut harus hijau.
+          </li>
+        </ol>
+        <p className="mt-3 rounded-md border border-amber-300 bg-amber-100 p-3 text-xs font-medium text-amber-900">
+          ⚠ Hanya pesanan berstatus <strong>Selesai</strong> yang dihitung. Jika file memuat lebih
+          dari satu window (atau lintas bulan), seluruh file <strong>ditolak</strong> — export ulang
+          per window. Upload ulang untuk window yang sama akan menimpa hasil lama, jadi aman untuk
+          koreksi.
+        </p>
+      </details>
       {canRun ? (
         <div className="mt-2 max-w-2xl">
           <ShopeeIngestForm />
