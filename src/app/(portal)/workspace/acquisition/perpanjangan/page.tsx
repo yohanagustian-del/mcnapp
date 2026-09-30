@@ -75,7 +75,7 @@ export default async function PerpanjanganKreatorPage() {
         habis, kuning = ≤{alertDays.warning} hari.
       </p>
       <div className="mt-4">
-        <PerpanjanganTable rows={rows} />
+        <PerpanjanganTable rows={rows} alertDays={alertDays} />
       </div>
     </div>
   );

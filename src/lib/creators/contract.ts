@@ -52,3 +52,20 @@ export function contractBucket(days: number | null, alertDays: ContractAlertDays
   if (days <= alertDays.warning) return "warning";
   return "ok";
 }
+
+/**
+ * Tailwind classes for a contract bucket: danger/expired → red, warning → yellow.
+ * Shared by /creators ("Sisa Kontrak"), Perpanjangan Kreator and CM Workspace so the
+ * colour rule lives in one place. `row` is the row highlight (urgent buckets only).
+ */
+export function contractBucketTone(bucket: ContractBucket): { text: string; row: string } {
+  switch (bucket) {
+    case "expired":
+    case "danger":
+      return { text: "font-medium text-red-600", row: "bg-red-50/40" };
+    case "warning":
+      return { text: "font-medium text-amber-600", row: "" };
+    default:
+      return { text: "", row: "" };
+  }
+}

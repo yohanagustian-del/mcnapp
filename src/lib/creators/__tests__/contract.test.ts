@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { contractBucket, contractDays, contractRemaining, type ContractAlertDays } from "../contract";
+import {
+  contractBucket,
+  contractBucketTone,
+  contractDays,
+  contractRemaining,
+  type ContractAlertDays,
+} from "../contract";
 
 const ALERT: ContractAlertDays = { warning: 60, danger: 30 };
 const DAY_MS = 86_400_000;
@@ -59,5 +65,17 @@ describe("contractBucket", () => {
     expect(contractBucket(30, ALERT)).toBe("danger");
     expect(contractBucket(45, ALERT)).toBe("warning");
     expect(contractBucket(61, ALERT)).toBe("ok");
+  });
+});
+
+describe("contractBucketTone", () => {
+  it("merah untuk expired/danger, kuning untuk warning, polos selainnya", () => {
+    expect(contractBucketTone("expired").text).toContain("text-red-600");
+    expect(contractBucketTone("danger").text).toContain("text-red-600");
+    expect(contractBucketTone("danger").row).toContain("bg-red-50");
+    expect(contractBucketTone("warning").text).toContain("text-amber-600");
+    expect(contractBucketTone("warning").row).toBe("");
+    expect(contractBucketTone("ok")).toEqual({ text: "", row: "" });
+    expect(contractBucketTone("unknown")).toEqual({ text: "", row: "" });
   });
 });
