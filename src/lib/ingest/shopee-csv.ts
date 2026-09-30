@@ -19,7 +19,7 @@ import { parseRupiah } from "@/lib/utils/rupiah";
 /** Normalized (parseSheet/parseCsv already does trim→lowercase→spaces→"_") Shopee headers this module reads. */
 export const SHOPEE_COLUMNS = {
   orderStatus: "status_pesanan",
-  completedAt: "waktu_pesanan_selesai",
+  orderedAt: "waktu_pesanan_dibuat",
   affiliateName: "nama_affiliate",
   affiliateUsername: "username_affiliate",
   productId: "id_produk",
@@ -34,14 +34,14 @@ export const SHOPEE_COLUMNS = {
 
 export const SHOPEE_REQUIRED_HEADERS = [
   SHOPEE_COLUMNS.orderStatus,
-  SHOPEE_COLUMNS.completedAt,
+  SHOPEE_COLUMNS.orderedAt,
   SHOPEE_COLUMNS.affiliateUsername,
   SHOPEE_COLUMNS.gmv,
 ];
 
 /** One usable row from the Shopee Conversion Report — only rows with Status Pesanan = "Selesai" survive parseShopeeFile. */
 export interface ShopeeRow {
-  completedDate: string; // "YYYY-MM-DD" — date part of Waktu Pesanan Selesai
+  orderDate: string; // "YYYY-MM-DD" — date part of Waktu Pesanan Dibuat (window reference)
   affiliateName: string;
   affiliateUsername: string;
   productId: string;
@@ -69,7 +69,7 @@ export interface ShopeeParseResult {
   rawHeadersFound: string[];
 }
 
-/** "Waktu Pesanan Selesai" is "YYYY-MM-DD HH:MM:SS" — take the date part only. */
+/** "Waktu Pesanan Dibuat" is "YYYY-MM-DD HH:MM:SS" — take the date part only. */
 function dateOnly(raw: string): string | null {
   const s = raw.trim();
   const m = s.match(/^(\d{4}-\d{2}-\d{2})/);
@@ -88,7 +88,7 @@ function platformBucket(platform: string): "live" | "video" | "other" {
  * Parses the Shopee Conversion Report CSV (BOM-tolerant, comma-delimited —
  * parseSheet/parseCsv already strips BOM via Papaparse and normalizes headers).
  * Skips the leading "Summary"/"Ringkasan" totals row (isSummaryRow convention)
- * and any row missing product/shop identity or an unreadable completed date.
+ * and any row missing product/shop identity or an unreadable order date.
  * Only "Selesai" rows are returned in `rows`; other statuses are counted in
  * `rowsNonCompleted` (CLAUDE.md task rule #1 — Pembatalan/Sedang Diproses/dll
  * never contribute to GMV).
@@ -119,9 +119,9 @@ export async function parseShopeeFile(file: File): Promise<ShopeeParseResult> {
       continue;
     }
 
-    const completedDate = dateOnly(r[SHOPEE_COLUMNS.completedAt] ?? "");
-    if (!completedDate) {
-      skipped.push({ row: rowNum, reason: "Waktu Pesanan Selesai tidak terbaca (baris Selesai)" });
+    const orderDate = dateOnly(r[SHOPEE_COLUMNS.orderedAt] ?? "");
+    if (!orderDate) {
+      skipped.push({ row: rowNum, reason: "Waktu Pesanan Dibuat tidak terbaca (baris Selesai)" });
       continue;
     }
 
@@ -134,7 +134,7 @@ export async function parseShopeeFile(file: File): Promise<ShopeeParseResult> {
     const platform = (r[SHOPEE_COLUMNS.platform] ?? "").trim();
 
     rows.push({
-      completedDate,
+      orderDate,
       affiliateName: (r[SHOPEE_COLUMNS.affiliateName] ?? "").trim() || username,
       affiliateUsername: username,
       productId,
@@ -178,10 +178,13 @@ function pad2(n: number): string {
 }
 
 /**
- * Validates that every "Waktu Pesanan Selesai" date across all Selesai rows
- * falls within exactly ONE W1-W5 window (CLAUDE.md task rule #2 — the reference
- * date is completedDate, unlike the TikTok MCN report whose Date column is
- * already a pre-computed window range). Distinct from validateW1W5Period
+ * Validates that every "Waktu Pesanan Dibuat" date across all Selesai rows
+ * falls within exactly ONE W1-W5 window. The reference date is orderDate
+ * (decision 2026-09-30, replacing Waktu Pesanan Selesai): Shopee Affiliate
+ * filters the export by order-created date, so an order placed on the 7th but
+ * completed on the 13th must still land in W1 — keying on the completion date
+ * made every real export span several windows. Unlike the TikTok MCN report
+ * whose Date column is already a pre-computed window range. Distinct from validateW1W5Period
  * (src/lib/utils/date.ts), which validates an ALREADY-KNOWN [start,end] window
  * pair — here we must first DERIVE whether the scattered dates in the file
  * collapse into one window, so a bespoke check is needed. On success, returns
@@ -195,7 +198,7 @@ export function validateSingleShopeeWindow(rows: ShopeeRow[]): ShopeeWindowCheck
     return { valid: false, reason: "Tidak ada baris berstatus Selesai pada file ini." };
   }
 
-  const distinctDates = [...new Set(rows.map((r) => r.completedDate))].sort();
+  const distinctDates = [...new Set(rows.map((r) => r.orderDate))].sort();
   const windowsTouched = new Set<string>();
   let refYear = 0;
   let refMonth = 0;
@@ -216,14 +219,15 @@ export function validateSingleShopeeWindow(rows: ShopeeRow[]): ShopeeWindowCheck
 
   const schemeHint =
     "Skema yang benar: W1=1-7, W2=8-14, W3=15-21, W4=22-28, W5=29-akhir bulan (bulan Februari non-kabisat tidak punya W5). " +
-    "Semua baris berstatus Selesai harus berada dalam SATU window W1-W5 yang sama.";
+    "Semua baris berstatus Selesai harus punya Waktu Pesanan Dibuat dalam SATU window W1-W5 yang sama " +
+    "(filter tanggal export Shopee = tanggal pesanan dibuat).";
 
   if (windowsTouched.size > 1) {
     const windowList = [...windowsTouched].sort().join(", ");
     return {
       valid: false,
       reason:
-        `Baris berstatus Selesai mencakup rentang tanggal ${distinctDates[0]} s/d ${distinctDates[distinctDates.length - 1]}, ` +
+        `Waktu Pesanan Dibuat baris berstatus Selesai mencakup rentang ${distinctDates[0]} s/d ${distinctDates[distinctDates.length - 1]}, ` +
         `menyentuh lebih dari satu window: ${windowList}. ${schemeHint}`,
     };
   }

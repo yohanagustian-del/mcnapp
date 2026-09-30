@@ -16,6 +16,7 @@ const HEADER =
 /** Minimal row matching the real Shopee Conversion Report column count/order (only the columns this parser reads carry meaningful values). */
 function row(opts: {
   status?: string;
+  orderedAt?: string;
   completedAt?: string;
   affiliateName?: string;
   username?: string;
@@ -29,12 +30,12 @@ function row(opts: {
   platform?: string;
 }): string {
   const {
-    status = "Selesai", completedAt = "2026-07-03 12:00:00", affiliateName = "Nama Affiliate",
+    status = "Selesai", orderedAt = "2026-07-03 11:00:00", completedAt = "2026-07-03 12:00:00", affiliateName = "Nama Affiliate",
     username = "affuser", productId = "111", productName = "Produk A", shopId = "999",
     shopName = "Toko A", cat1 = "Cat1", cat2 = "Cat2", gmv = "100000", platform = "Shopeelive-Shopee",
   } = opts;
   return [
-    "ORDER1", status, "AFF1", "2026-07-03 11:00:00", completedAt, "2026-07-03 10:00:00",
+    "ORDER1", status, "AFF1", orderedAt, completedAt, "2026-07-03 10:00:00",
     affiliateName, username, "1082254", shopName, shopId, "Shopee Mall", productId, productName,
     "VAR1", "Produk", "", cat1, cat2, "SubCat", "1", "50000", "Promo MCN", "Pemilik", "COMM1",
     gmv, "0", "Selesai", "", "Pesanan Langsung", "Baru", "", "", "", "", "", platform,
@@ -77,10 +78,25 @@ describe("parseShopeeFile", () => {
     expect(rows[0].gmv).toBe(119200);
   });
 
-  it("takes only the date part of Waktu Pesanan Selesai", async () => {
-    const csv = buildCsv([row({ completedAt: "2026-07-03 23:59:59" })]);
+  it("takes only the date part of Waktu Pesanan Dibuat", async () => {
+    const csv = buildCsv([row({ orderedAt: "2026-07-03 23:59:59" })]);
     const { rows } = await parseShopeeFile(csvFile(csv));
-    expect(rows[0].completedDate).toBe("2026-07-03");
+    expect(rows[0].orderDate).toBe("2026-07-03");
+  });
+
+  it("keys the window on Waktu Pesanan Dibuat, not Waktu Pesanan Selesai", async () => {
+    // Real export filtered by order date 1-7: orders created in W1 complete days/weeks later.
+    const csv = buildCsv([
+      row({ orderedAt: "2026-09-01 08:00:00", completedAt: "2026-09-02 10:00:00" }),
+      row({ orderedAt: "2026-09-07 23:59:58", completedAt: "2026-09-13 17:33:41" }),
+      row({ orderedAt: "2026-09-05 12:00:00", completedAt: "2026-09-30 09:00:00" }),
+    ]);
+    const { rows } = await parseShopeeFile(csvFile(csv));
+    expect(rows.map((r) => r.orderDate)).toEqual(["2026-09-01", "2026-09-07", "2026-09-05"]);
+    const result = validateSingleShopeeWindow(rows);
+    expect(result.valid).toBe(true);
+    expect(result.periodStart).toBe("2026-09-01");
+    expect(result.periodEnd).toBe("2026-09-07");
   });
 
   it("skips rows with missing product/shop id even when Selesai", async () => {
@@ -107,7 +123,7 @@ describe("parseShopeeFile", () => {
 describe("validateSingleShopeeWindow", () => {
   it("accepts all Selesai rows within one W1-W5 window (happy path)", () => {
     const rows = [
-      { completedDate: "2026-07-01" }, { completedDate: "2026-07-04" }, { completedDate: "2026-07-07" },
+      { orderDate: "2026-07-01" }, { orderDate: "2026-07-04" }, { orderDate: "2026-07-07" },
     ] as Parameters<typeof validateSingleShopeeWindow>[0];
     const result = validateSingleShopeeWindow(rows);
     expect(result.valid).toBe(true);
@@ -117,8 +133,8 @@ describe("validateSingleShopeeWindow", () => {
 
   it("rejects when Selesai rows cross two windows within the same month", () => {
     const rows = [
-      { completedDate: "2026-07-07" }, // W1
-      { completedDate: "2026-07-08" }, // W2
+      { orderDate: "2026-07-07" }, // W1
+      { orderDate: "2026-07-08" }, // W2
     ] as Parameters<typeof validateSingleShopeeWindow>[0];
     const result = validateSingleShopeeWindow(rows);
     expect(result.valid).toBe(false);
@@ -127,8 +143,8 @@ describe("validateSingleShopeeWindow", () => {
 
   it("rejects when Selesai rows cross a month boundary (real sample file scenario: 28 Jun-4 Jul)", () => {
     const rows = [
-      { completedDate: "2026-06-29" }, // June W5
-      { completedDate: "2026-07-04" }, // July W1
+      { orderDate: "2026-06-29" }, // June W5
+      { orderDate: "2026-07-04" }, // July W1
     ] as Parameters<typeof validateSingleShopeeWindow>[0];
     const result = validateSingleShopeeWindow(rows);
     expect(result.valid).toBe(false);
@@ -144,7 +160,7 @@ describe("validateSingleShopeeWindow", () => {
   it("returns window boundaries, not the min/max actual dates found", () => {
     // Actual dates only span 2-4 July but the WINDOW (W1) is 1-7.
     const rows = [
-      { completedDate: "2026-07-02" }, { completedDate: "2026-07-04" },
+      { orderDate: "2026-07-02" }, { orderDate: "2026-07-04" },
     ] as Parameters<typeof validateSingleShopeeWindow>[0];
     const result = validateSingleShopeeWindow(rows);
     expect(result.valid).toBe(true);
