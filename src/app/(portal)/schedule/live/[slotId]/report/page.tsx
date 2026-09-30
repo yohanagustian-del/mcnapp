@@ -48,7 +48,7 @@ export default async function SlotLiveReportPage({ params }: { params: Promise<{
 
   const data = report.data_json as unknown as ProjectReportData;
   const insight = report.status === "final" ? (report.insight_final ?? report.insight_draft) : report.insight_draft;
-  const canFinalize = hasPermission("reports.finalize", member.role) && report.status === "draft";
+  const canFinalize = hasPermission("reports.finalize", member.role);
 
   return (
     <div>
@@ -58,7 +58,7 @@ export default async function SlotLiveReportPage({ params }: { params: Promise<{
       <div className="mt-3">
         <ProjectReportView data={data} insight={insight} status={report.status as "draft" | "final"} audience="team" />
       </div>
-      {canFinalize && <SlotFinalizeForm reportId={report.id as number} insightDraft={report.insight_draft} />}
+      {canFinalize && <SlotFinalizeForm reportId={report.id as number} insightDraft={report.status === "final" ? (report.insight_final ?? report.insight_draft) : report.insight_draft} isFinal={report.status === "final"} />}
     </div>
   );
 }

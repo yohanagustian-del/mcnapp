@@ -9,7 +9,7 @@ import { finalizeSlotReport } from "../actions";
  * dikunci, dan kreator bisa membacanya di portal. Narasi ditulis MANUSIA —
  * angka & catatan performa di report sudah deterministik (0 token AI).
  */
-export function SlotFinalizeForm({ reportId, insightDraft }: { reportId: number; insightDraft: string | null }) {
+export function SlotFinalizeForm({ reportId, insightDraft, isFinal = false }: { reportId: number; insightDraft: string | null; isFinal?: boolean }) {
   const router = useRouter();
   const [text, setText] = useState(insightDraft ?? "");
   const [error, setError] = useState<string | null>(null);
@@ -40,11 +40,11 @@ export function SlotFinalizeForm({ reportId, insightDraft }: { reportId: number;
       {error && <p className="text-sm text-red-700">{error}</p>}
       <button type="button" onClick={onSubmit} disabled={pending}
         className="rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-700 disabled:opacity-50">
-        {pending ? "Menyimpan…" : "Finalkan Report"}
+        {pending ? "Menyimpan…" : isFinal ? "Simpan Perubahan" : "Finalkan Report"}
       </button>
       <p className="text-xs text-slate-400">
-        Setelah final, report muncul di portal kreator dan tidak bisa diubah lagi (hanya angkanya yang
-        bisa disegarkan kalau ada sesi baru).
+        Setelah final, report muncul di portal kreator. Catatan tim tetap bisa diedit dan disimpan ulang;
+        angkanya bisa disegarkan kalau ada sesi baru.
       </p>
     </div>
   );
