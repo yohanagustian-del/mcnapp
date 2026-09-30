@@ -100,6 +100,8 @@ export async function buildProjectOverviewReport(
     ["Status Tracking", tracking.status],
     ["Run-rate Proyeksi Akhir Project", rupiah(tracking.runRateProjection)],
     ["Hari Berjalan / Total Hari", `${tracking.daysElapsed} / ${tracking.totalDays}`],
+    ["GMV Gap", tracking.gmvGapToTarget > 0 ? rupiah(tracking.gmvGapToTarget) : "Tercapai"],
+    ["Sisa Hari", tracking.daysRemaining],
     [],
     ["Total Ads Spend", rupiah(cumAds)],
     ["Total MEA Revenue", rupiah(cumMea)],
@@ -127,14 +129,14 @@ export async function buildProjectOverviewReport(
   creatorSheet["!cols"] = creatorHeader.map((h) => ({ wch: Math.max(14, h.length + 4) }));
   XLSX.utils.book_append_sheet(wb, creatorSheet, "Performa per Kreator");
 
-  const dailyHeader = ["Tanggal", "Hari ke-", "GMV Aktual", "Kumulatif Aktual", "Kumulatif Target", "Gap", "Ads Spend", "MEA Revenue"];
+  const dailyHeader = ["Tanggal", "Hari ke-", "GMV Aktual", "Ads Spend", "MEA Revenue"];
   const adsByDate = new Map((metrics ?? []).map((m) => [m.date, { ads: m.ads_spend, mea: m.mea_revenue }]));
   const dailySheet = XLSX.utils.aoa_to_sheet([
     dailyHeader,
     ...tracking.points.map((pt) => {
       const m = adsByDate.get(pt.date);
       return [
-        pt.date, pt.dayIndex, rupiah(pt.gmvActual), rupiah(pt.cumActual), rupiah(pt.cumTarget), rupiah(pt.gap),
+        pt.date, pt.dayIndex, rupiah(pt.gmvActual),
         m?.ads === null || m?.ads === undefined ? "" : rupiah(Number(m.ads)),
         m?.mea === null || m?.mea === undefined ? "" : rupiah(Number(m.mea)),
       ];

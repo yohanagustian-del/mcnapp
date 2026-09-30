@@ -52,6 +52,12 @@ export interface TrackingSummary {
   runRateProjection: number;
   status: TrackStatus;
   achievementPct: number; // cumActual / targetGmv
+  /** Project GMV target (whole period), echoed so the UI reads every number from here. */
+  targetGmv: number;
+  /** GMV still missing to reach the full-period target: max(targetGmv − cumActual, 0). */
+  gmvGapToTarget: number;
+  /** Days left in the project period after asOf: max(totalDays − daysElapsed, 0). */
+  daysRemaining: number;
 }
 
 const dayDiff = (a: string, b: string) =>
@@ -121,6 +127,9 @@ export function trackDaily(
     runRateProjection,
     status,
     achievementPct: targetGmv > 0 ? cumActual / targetGmv : 0,
+    targetGmv,
+    gmvGapToTarget: Math.max(targetGmv - cumActual, 0),
+    daysRemaining: Math.max(totalDays - daysElapsed, 0),
   };
 }
 
