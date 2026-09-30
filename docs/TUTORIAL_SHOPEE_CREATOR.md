@@ -129,14 +129,14 @@ Filter tanggal export **sesuai satu window saja** (lihat tabel di bawah).
 | W4 | 22–28 |
 | W5 | 29–akhir bulan |
 
-Yang dipakai untuk menentukan window adalah kolom **Waktu Pesanan Selesai**, bukan tanggal order.
+Yang dipakai untuk menentukan window adalah kolom **Waktu Pesanan Dibuat** (tanggal order) — sama dengan filter tanggal export di Shopee Affiliate. Pesanan yang dibuat 1–7 lalu baru Selesai tanggal 13 tetap masuk W1. Pesanan yang saat export masih *Sedang Diproses* belum dihitung; upload ulang window yang sama nanti untuk melengkapinya (hasil lama ditimpa).
 
 **Langkah 2 — Cek kolom di CSV** (nama kolom Indonesia, BOM boleh):
 
 | Kolom | Wajib | Dipakai untuk |
 |---|---|---|
 | Status Pesanan | Ya | Hanya nilai `Selesai` yang dihitung |
-| Waktu Pesanan Selesai | Ya | Menentukan window W1–W5 |
+| Waktu Pesanan Dibuat | Ya | Menentukan window W1–W5 |
 | Username Affiliate | Ya | Mencocokkan ke kreator Shopee |
 | Total Pembelian yang Dibuat(Rp) | Ya | GMV |
 | ID Produk, ID Toko | Ya utk baris Selesai | Baris tanpa ini dilewati |
@@ -184,10 +184,10 @@ Kolom *Campaign Type* dan *Partner Promo* sengaja diabaikan.
 |---|---|---|
 | *File Shopee kosong atau tidak terbaca…* | File kosong/rusak/bukan Conversion Report | Export ulang dari Shopee |
 | *Tidak ada baris berstatus Selesai pada file ini.* | Semua pesanan belum Selesai atau salah rentang | Ganti rentang tanggal export |
-| Ditolak: baris menyentuh lebih dari satu window | Export melintasi W1–W5 | Export ulang per window, atau pecah filenya |
+| Ditolak: baris menyentuh lebih dari satu window | Tanggal pesanan dibuat di export melintasi W1–W5 | Export ulang per window, atau pecah filenya |
 | Banyak baris "ID Produk / ID Toko kosong" | Baris Selesai tanpa ID | Cek export; baris itu tidak masuk GMV |
 | "Username Affiliate kosong" | Kolom kosong | Cek export |
-| "Waktu Pesanan Selesai tidak terbaca" | Format tanggal bukan `YYYY-MM-DD HH:MM:SS` | Jangan buka & simpan ulang di Excel yang mengubah format |
+| "Waktu Pesanan Dibuat tidak terbaca" | Format tanggal bukan `YYYY-MM-DD HH:MM:SS` | Jangan buka & simpan ulang di Excel yang mengubah format |
 | Tombol tidak bisa diklik / izin ditolak | Role tanpa `ingest.run` | Minta CM/Management yang upload |
 | GMV kreator tak berubah | Kreator dibuat platform TikTok padahal Shopee | Cek kolom Platform di `/creators/{id}`; bila salah, edit lewat tombol edit kreator (Management/CM/Akuisisi/Creator Support) |
 

@@ -238,7 +238,7 @@ export default async function IngestPage() {
           </li>
           <li>
             Pastikan kolom ini ada: <strong>Status Pesanan</strong>,{" "}
-            <strong>Waktu Pesanan Selesai</strong>, <strong>Username Affiliate</strong>,{" "}
+            <strong>Waktu Pesanan Dibuat</strong>, <strong>Username Affiliate</strong>,{" "}
             <strong>ID Produk</strong>, <strong>ID Toko</strong>,{" "}
             <strong>Total Pembelian yang Dibuat(Rp)</strong>, dan <strong>Platform</strong>. Kolom
             Kategori L1/L2 dipakai untuk niche kreator.

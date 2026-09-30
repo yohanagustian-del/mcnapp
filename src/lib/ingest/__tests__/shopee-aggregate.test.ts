@@ -4,7 +4,7 @@ import type { ShopeeRow } from "../shopee-csv";
 
 function shopeeRow(overrides: Partial<ShopeeRow> = {}): ShopeeRow {
   return {
-    completedDate: "2026-07-03",
+    orderDate: "2026-07-03",
     affiliateName: "Affiliate A",
     affiliateUsername: "CRT-001", // resolved id, per aggregate.ts convention
     productId: "P1",

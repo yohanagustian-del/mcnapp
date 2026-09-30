@@ -40,7 +40,7 @@ async function fileHash(file: File): Promise<string> {
  * mirroring src/lib/ingest/run.ts's TikTok pipeline shape:
  *   1. Parse the single combined Conversion Report CSV; keep only Status
  *      Pesanan = "Selesai" rows (task rule #1).
- *   2. Derive the window from Waktu Pesanan Selesai across all Selesai rows —
+ *   2. Derive the window from Waktu Pesanan Dibuat across all Selesai rows —
  *      reject if they touch more than one W1-W5 window or cross a month
  *      boundary (task rule #2). periodStart/periodEnd = the window's canonical
  *      boundary dates (not the min/max actual dates found).
