@@ -5,7 +5,7 @@ import type { RunShopeeIngestResult } from "@/lib/ingest/shopee-run";
 import { uploadIngestFile } from "@/lib/ingest/upload-client";
 import { runShopeeIngestFromStorageAction } from "./shopee-actions";
 
-const FILE_ACCEPT = ".csv,text/csv";
+const FILE_ACCEPT = ".csv,.zip,text/csv,application/zip";
 
 /** Shopee card upload form (Lane 1) — satu slot file: Conversion Report gabungan MCN + SAP. */
 export function ShopeeIngestForm() {
@@ -24,7 +24,7 @@ export function ShopeeIngestForm() {
     }
     startTransition(async () => {
       try {
-        setStage("Mengunggah file ke storage…");
+        setStage("Mengompres & mengunggah file ke storage…");
         const ref = await uploadIngestFile(file, "shopee");
         setStage("Memproses agregat di server…");
         const res = await runShopeeIngestFromStorageAction(ref);

@@ -1,7 +1,7 @@
 "use client";
 
 import { createClient } from "@/lib/supabase/client";
-import { INGEST_BUCKET, type IngestObjectRef } from "./storage";
+import { INGEST_BUCKET, INGEST_MAX_OBJECT_BYTES, type IngestObjectRef } from "./bucket";
 
 /**
  * Client-side direct-to-Storage upload for weekly platform files. The browser
@@ -14,6 +14,13 @@ import { INGEST_BUCKET, type IngestObjectRef } from "./storage";
  * Objects are namespaced under the caller's uid folder (RLS in migration 0026
  * only lets an authenticated user write inside `${uid}/`). A random uuid per
  * upload avoids collisions between concurrent uploads / retries.
+ *
+ * CSVs are gzip-compressed in the browser first (native CompressionStream,
+ * streamed — no full copy on the main thread): a Shopee Conversion Report
+ * shrinks ~3x, so a 120-200MB export uploads as ~40-65MB, well under the bucket
+ * limit and much faster on a slow connection. downloadIngestFile inflates it
+ * back by magic bytes; the ref keeps the ORIGINAL name. .xlsx/.zip are already
+ * compressed and go up as-is.
  */
 export async function uploadIngestFile(file: File, kind: string): Promise<IngestObjectRef> {
   const supabase = createClient();
@@ -24,11 +31,25 @@ export async function uploadIngestFile(file: File, kind: string): Promise<Ingest
   }
 
   const ext = file.name.includes(".") ? file.name.slice(file.name.lastIndexOf(".")) : "";
-  const path = `${uid}/${crypto.randomUUID()}-${kind}${ext}`;
+  const gzip = ext.toLowerCase() === ".csv" && typeof CompressionStream !== "undefined";
+  const body: Blob = gzip
+    ? await new Response(file.stream().pipeThrough(new CompressionStream("gzip"))).blob()
+    : file;
+  if (body.size > INGEST_MAX_OBJECT_BYTES) {
+    const mb = (n: number) => Math.round(n / (1024 * 1024));
+    throw new Error(
+      `File ${file.name} terlalu besar (${mb(body.size)} MB${gzip ? " setelah dikompres" : ""}; ` +
+        `maksimum ${mb(INGEST_MAX_OBJECT_BYTES)} MB). Pecah export per rentang tanggal yang lebih pendek.`
+    );
+  }
+  const path = `${uid}/${crypto.randomUUID()}-${kind}${ext}${gzip ? ".gz" : ""}`;
 
   const { error } = await supabase.storage
     .from(INGEST_BUCKET)
-    .upload(path, file, { upsert: false, contentType: file.type || "application/octet-stream" });
+    .upload(path, body, {
+      upsert: false,
+      contentType: gzip ? "application/gzip" : file.type || "application/octet-stream",
+    });
   if (error) {
     throw new Error(`Gagal mengunggah file ${file.name} ke storage: ${error.message}`);
   }

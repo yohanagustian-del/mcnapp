@@ -1,3 +1,7 @@
+import { Readable } from "node:stream";
+import type { ReadableStream as NodeWebReadableStream } from "node:stream/web";
+import Papa from "papaparse";
+import { normalizeHeader } from "@/lib/utils/csv";
 import { parseSheet } from "@/lib/utils/sheet";
 import { parseRupiah } from "@/lib/utils/rupiah";
 
@@ -85,69 +89,130 @@ function platformBucket(platform: string): "live" | "video" | "other" {
 }
 
 /**
- * Parses the Shopee Conversion Report CSV (BOM-tolerant, comma-delimited —
- * parseSheet/parseCsv already strips BOM via Papaparse and normalizes headers).
+ * Parses the Shopee Conversion Report CSV (BOM-tolerant, comma-delimited).
  * Skips the leading "Summary"/"Ringkasan" totals row (isSummaryRow convention)
  * and any row missing product/shop identity or an unreadable order date.
  * Only "Selesai" rows are returned in `rows`; other statuses are counted in
  * `rowsNonCompleted` (CLAUDE.md task rule #1 — Pembatalan/Sedang Diproses/dll
  * never contribute to GMV).
+ *
+ * CSV is parsed STREAMING (Papa step over file.stream()), one row at a time,
+ * keeping only the slim ShopeeRow: exports reach 120-200MB (~350k lines x ~57
+ * columns), and materializing the text + every raw 57-column row object (the
+ * parseSheet path) peaked at ~3.2GB for 200MB — past the serverless function
+ * memory. Non-CSV files (.xlsx) still go through parseSheet.
  */
 export async function parseShopeeFile(file: File): Promise<ShopeeParseResult> {
-  const { rows: raw, errors } = await parseSheet(file, SHOPEE_REQUIRED_HEADERS);
-  const skipped: SkippedShopeeRow[] = errors.map((e) => ({ row: -1, reason: e }));
-  const rawHeadersFound = raw.length > 0 ? Object.keys(raw[0]) : [];
+  const skipped: SkippedShopeeRow[] = [];
   const rows: ShopeeRow[] = [];
+  let rawHeadersFound: string[] = [];
   let rowsNonCompleted = 0;
 
-  for (const [i, r] of raw.entries()) {
-    const rowNum = i + 2;
+  // Values Papa hands back are V8 substrings that pin the whole chunk they were
+  // cut from, so keeping ~350k rows would retain the entire file text. intern()
+  // copies each distinct value once (Buffer round-trip = a fresh flat string)
+  // and shares it — product/shop/creator/category values repeat heavily.
+  const pool = new Map<string, string>();
+  const intern = (v: string): string => {
+    const hit = pool.get(v);
+    if (hit !== undefined) return hit;
+    const fresh = Buffer.from(v, "utf8").toString("utf8");
+    pool.set(fresh, fresh);
+    return fresh;
+  };
+  const opt = (v: string | undefined): string | null => {
+    const t = v?.trim();
+    return t ? intern(t) : null;
+  };
+
+  const consume = (r: Record<string, string>, rowNum: number) => {
     // "Summary"/"Ringkasan" leading totals row (same convention as isSummaryRow,
     // checked inline since this row also usually fails the status check below).
     const status = (r[SHOPEE_COLUMNS.orderStatus] ?? "").trim();
-    if (["summary", "ringkasan"].includes(status.toLowerCase())) continue;
+    if (["summary", "ringkasan"].includes(status.toLowerCase())) return;
 
     if (status !== "Selesai") {
       rowsNonCompleted++;
-      continue;
+      return;
     }
 
     const productId = (r[SHOPEE_COLUMNS.productId] ?? "").trim();
     const shopId = (r[SHOPEE_COLUMNS.shopId] ?? "").trim();
     if (!productId || !shopId) {
       skipped.push({ row: rowNum, reason: "ID Produk / ID Toko kosong (baris Selesai)" });
-      continue;
+      return;
     }
 
     const orderDate = dateOnly(r[SHOPEE_COLUMNS.orderedAt] ?? "");
     if (!orderDate) {
       skipped.push({ row: rowNum, reason: "Waktu Pesanan Dibuat tidak terbaca (baris Selesai)" });
-      continue;
+      return;
     }
 
     const username = (r[SHOPEE_COLUMNS.affiliateUsername] ?? "").trim();
     if (!username) {
       skipped.push({ row: rowNum, reason: "Username Affiliate kosong (baris Selesai)" });
-      continue;
+      return;
     }
 
     const platform = (r[SHOPEE_COLUMNS.platform] ?? "").trim();
 
     rows.push({
-      orderDate,
-      affiliateName: (r[SHOPEE_COLUMNS.affiliateName] ?? "").trim() || username,
-      affiliateUsername: username,
-      productId,
-      productName: r[SHOPEE_COLUMNS.productName]?.trim() || null,
-      shopId,
-      shopName: r[SHOPEE_COLUMNS.shopName]?.trim() || null,
-      level1Category: r[SHOPEE_COLUMNS.cat1]?.trim() || null,
-      level2Category: r[SHOPEE_COLUMNS.cat2]?.trim() || null,
+      orderDate: intern(orderDate),
+      affiliateName: intern((r[SHOPEE_COLUMNS.affiliateName] ?? "").trim() || username),
+      affiliateUsername: intern(username),
+      productId: intern(productId),
+      productName: opt(r[SHOPEE_COLUMNS.productName]),
+      shopId: intern(shopId),
+      shopName: opt(r[SHOPEE_COLUMNS.shopName]),
+      level1Category: opt(r[SHOPEE_COLUMNS.cat1]),
+      level2Category: opt(r[SHOPEE_COLUMNS.cat2]),
       gmv: parseRupiah(r[SHOPEE_COLUMNS.gmv]) ?? 0,
-      platform,
+      platform: intern(platform),
       bucket: platformBucket(platform),
     });
+  };
+
+  if (!/\.csv$/i.test(file.name)) {
+    const { rows: raw, errors } = await parseSheet(file, SHOPEE_REQUIRED_HEADERS);
+    skipped.push(...errors.map((e) => ({ row: -1, reason: e })));
+    rawHeadersFound = raw.length > 0 ? Object.keys(raw[0]) : [];
+    for (const [i, r] of raw.entries()) consume(r, i + 2);
+    return { rows, rowsNonCompleted, skipped, rawHeadersFound };
   }
+
+  await new Promise<void>((resolve, reject) => {
+    let dataRow = 0;
+    let headerChecked = false;
+    // setEncoding: StringDecoder keeps multi-byte UTF-8 chars intact across chunk
+    // boundaries. The BOM survives into the first header, which normalizeHeader's
+    // trim() strips (U+FEFF is whitespace to String.prototype.trim).
+    const input = Readable.fromWeb(file.stream() as unknown as NodeWebReadableStream<Uint8Array>);
+    input.setEncoding("utf8");
+    input.on("error", reject);
+    Papa.parse<Record<string, string>>(input as unknown as Papa.LocalFile, {
+      header: true,
+      skipEmptyLines: "greedy",
+      transformHeader: normalizeHeader,
+      step: (result, parser) => {
+        if (!headerChecked) {
+          headerChecked = true;
+          rawHeadersFound = result.meta.fields ?? [];
+          if (!SHOPEE_REQUIRED_HEADERS.some((h) => rawHeadersFound.includes(h))) {
+            skipped.push({ row: -1, reason: `Header wajib tidak ditemukan (${SHOPEE_REQUIRED_HEADERS.join(", ")})` });
+            rawHeadersFound = [];
+            parser.abort();
+            return;
+          }
+        }
+        dataRow++;
+        for (const e of result.errors) skipped.push({ row: -1, reason: `Baris ${e.row ?? dataRow - 1}: ${e.message}` });
+        consume(result.data, dataRow + 1);
+      },
+      complete: () => resolve(),
+      error: (err: Error) => reject(err),
+    });
+  });
 
   return { rows, rowsNonCompleted, skipped, rawHeadersFound };
 }

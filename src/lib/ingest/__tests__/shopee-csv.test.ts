@@ -99,6 +99,27 @@ describe("parseShopeeFile", () => {
     expect(result.periodEnd).toBe("2026-09-07");
   });
 
+  it("streams a large file intact: every row, multi-byte names across chunk boundaries", async () => {
+    // ~5MB: far past Node's 64KB stream chunks, so rows and UTF-8 chars get split mid-chunk.
+    const name = "Kalung Liontin — Émile ✓ 日本 ".repeat(8).trim();
+    const lines = Array.from({ length: 20_000 }, (_, i) =>
+      row({ productId: String(1000 + i), productName: name, gmv: "Rp1.000" })
+    );
+    const { rows, skipped } = await parseShopeeFile(csvFile(buildCsv(lines)));
+    expect(skipped).toEqual([]);
+    expect(rows).toHaveLength(20_000);
+    expect(rows.every((r) => r.productName === name)).toBe(true);
+    expect(rows[19_999].productId).toBe("20999");
+    expect(rows.reduce((a, r) => a + r.gmv, 0)).toBe(20_000_000);
+  });
+
+  it("reports unrecognized headers instead of silently returning nothing", async () => {
+    const { rows, skipped, rawHeadersFound } = await parseShopeeFile(csvFile("foo,bar\n1,2\n"));
+    expect(rows).toHaveLength(0);
+    expect(rawHeadersFound).toEqual([]);
+    expect(skipped[0].reason).toMatch(/Header wajib tidak ditemukan/);
+  });
+
   it("skips rows with missing product/shop id even when Selesai", async () => {
     const csv = buildCsv([row({ productId: "" })]);
     const { rows, skipped } = await parseShopeeFile(csvFile(csv));
