@@ -15,7 +15,9 @@ import {
 import { MANPOWER_ROLES, PROJECT_TYPES } from "@/lib/m7/project-type";
 import { suggestParticipantTargetGmv } from "@/lib/m7/participant-target";
 import { generateProjectReports } from "./report-actions";
-import { PortalInviteButton } from "./portal-invite-button";
+import { PortalInviteButton } from "@/components/portal-invite-button";
+import { loadPortalStatus } from "@/lib/portal/invite";
+import { isCreatorInScope } from "@/lib/schedule/scope";
 import { ParticipantForm, type CreatorUsernameOption } from "./participant-form";
 import { DailyMetricsTable, type DailyMetricRow } from "./daily-metrics-table";
 import { CreatorPerformanceTable, type CreatorPerformanceRow } from "./creator-performance-table";
@@ -44,7 +46,7 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
   const member = await requireMember();
   const canManage = hasPermission("m7.manage", member.role);
   const canMetrics = hasPermission("m7.metrics", member.role);
-  const canInvitePortal = hasPermission("m7.curate", member.role);
+  const canInvitePortal = hasPermission("m9.invite", member.role);
   const canDecideJoin = hasPermission("m9.project_join_decide", member.role);
 
   const supabase = await createClient();
@@ -190,11 +192,10 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
   });
 
   // Status akun portal per peserta (R36) — creator_users belum tentu ada untuk semua.
-  const participantCreatorIds = (participants ?? []).map((p) => p.creator_id);
-  const { data: portalAccountRows } = participantCreatorIds.length
-    ? await supabase.from("creator_users").select("creator_id, status").in("creator_id", participantCreatorIds)
-    : { data: [] as { creator_id: string; status: string }[] };
-  const portalStatusByCreator = new Map((portalAccountRows ?? []).map((r) => [r.creator_id, r.status]));
+  // Service-role read inside loadPortalStatus: RLS cu_self_read hides every row from staff.
+  const portalStatusByCreator = canInvitePortal
+    ? await loadPortalStatus((participants ?? []).map((p) => p.creator_id))
+    : {};
 
   // Status report peserta (§3.3): per creator, prefer 'final' kalau ada draft+final.
   const { data: reportRows } = await supabase
@@ -648,7 +649,9 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {(participants ?? []).map((p) => {
-                  const c = p.creators as unknown as { name: string; username: string | null } | null;
+                  const c = p.creators as unknown as {
+                    name: string; username: string | null; owner_cpm_id: string | null;
+                  } | null;
                   const reportStatus = reportStatusByCreator.get(p.creator_id);
                   return (
                   <tr key={p.creator_id}>
@@ -682,10 +685,15 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
                     </td>
                     {canInvitePortal && (
                       <td className="px-4 py-2">
-                        <PortalInviteButton
-                          creatorId={p.creator_id}
-                          existingStatus={portalStatusByCreator.get(p.creator_id) ?? null}
-                        />
+                        {/* CPM: invite only own creators (same rule the action enforces). */}
+                        {isCreatorInScope(member, c?.owner_cpm_id) ? (
+                          <PortalInviteButton
+                            creatorId={p.creator_id}
+                            existingStatus={portalStatusByCreator[p.creator_id] ?? null}
+                          />
+                        ) : (
+                          <span className="text-xs text-slate-400">—</span>
+                        )}
                       </td>
                     )}
                   </tr>

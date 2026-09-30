@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { ROLES, PERMISSIONS, hasPermission, MANAGEMENT_ROLES, ADS_ROLES, type Role } from "@/lib/rbac";
+import { isCreatorInScope } from "@/lib/schedule/scope";
 
 describe("Phase 5.0 — RBAC foundation", () => {
   it("registers the new internal roles", () => {
@@ -67,6 +68,33 @@ describe("Phase 5.0 — RBAC foundation", () => {
     for (const role of MANAGEMENT_ROLES.filter((r) => r !== "director") as Role[]) {
       expect(hasPermission("m12.set_policy", role)).toBe(false);
       expect(hasPermission("m12.purge_manual", role)).toBe(false);
+    }
+  });
+});
+
+// T2 — Creator Portal invite: CM + Acquisition (+ management), CPM scoped to own creators.
+describe("m9.invite — undangan Creator Portal", () => {
+  it("allowed for CM & Acquisition roles (and management)", () => {
+    for (const role of ["cpm", "cm_lead", "acquisition_spec", "acquisition_lead", ...MANAGEMENT_ROLES] as Role[]) {
+      expect(hasPermission("m9.invite", role)).toBe(true);
+    }
+  });
+
+  it("denied for bizdev and finance", () => {
+    for (const role of ["bizdev", "finance"] as Role[]) {
+      expect(hasPermission("m9.invite", role)).toBe(false);
+    }
+  });
+
+  // isCreatorInScope is the pure rule assertCreatorInScope enforces.
+  it("CPM is scoped to own creators; other permitted roles have full scope", () => {
+    const cpm = { id: "cpm-1", role: "cpm" as Role };
+    expect(isCreatorInScope(cpm, "cpm-1")).toBe(true);
+    expect(isCreatorInScope(cpm, "cpm-2")).toBe(false);
+    expect(isCreatorInScope(cpm, null)).toBe(false);
+    for (const role of ["cm_lead", "acquisition_spec", "acquisition_lead", "director"] as Role[]) {
+      expect(isCreatorInScope({ id: "x", role }, "cpm-2")).toBe(true);
+      expect(isCreatorInScope({ id: "x", role }, null)).toBe(true);
     }
   });
 });

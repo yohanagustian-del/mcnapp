@@ -278,8 +278,9 @@ export const PERMISSIONS: Record<string, Role[]> = {
   // Ambil snapshot quartal: Director
   "m3.snapshot": ["director"] as Role[],
   // ===== M9 Creator Portal (§2.8) =====
-  // Invite/suspend creator accounts: CM Lead/CPM (invite at binding) + Director/Head/SPV.
-  "m9.invite": [...MANAGEMENT_ROLES, "cm_lead", "cpm"],
+  // Invite creator accounts (lib/portal/invite.ts): management + CM + Acquisition.
+  // cpm is limited to own creators via assertCreatorInScope in the server action.
+  "m9.invite": [...MANAGEMENT_ROLES, ...CM_ROLES, ...ACQUISITION_ROLES],
   // Reply to + close complaints: CPM (own creator) + CM Lead/Director. Body stays immutable (trigger).
   "m9.complaint_manage": [...MANAGEMENT_ROLES, ...CM_ROLES],
   // Decide project join requests: management + relevant leads + PM (campaign_ops).

@@ -1,5 +1,5 @@
 import { notFound } from "next/navigation";
-import { requireMember } from "@/lib/rbac";
+import { requireMember, hasPermission } from "@/lib/rbac";
 import { createClient } from "@/lib/supabase/server";
 import { creatorSegmentMap, type CreatorSegmentRow } from "@/lib/m10/match";
 import type { PriceSegment } from "@/lib/projection/gmv";
@@ -10,6 +10,9 @@ import {
 } from "@/lib/m8/weekly-growth";
 import { buildCreatorProductMatch } from "@/lib/product-match/data";
 import { ProductMatchView } from "@/components/product-match-view";
+import { PortalInviteButton } from "@/components/portal-invite-button";
+import { loadPortalStatus } from "@/lib/portal/invite";
+import { isCreatorInScope } from "@/lib/schedule/scope";
 import { WeeklyGmvChart } from "./weekly-gmv-chart";
 
 export const dynamic = "force-dynamic";
@@ -40,7 +43,7 @@ export default async function CreatorDetailPage({
   params: Promise<{ id: string }>;
   searchParams: Promise<{ bulan?: string }>;
 }) {
-  await requireMember();
+  const member = await requireMember();
   const { id } = await params;
   const { bulan: bulanParam } = await searchParams;
 
@@ -48,12 +51,18 @@ export default async function CreatorDetailPage({
   const { data: creator } = await supabase
     .from("creators")
     .select(
-      "id, name, username, platform, jenis_creator, level, niche, top_niches, status, gmv, gmv_live, gmv_video, commission_share, followers"
+      "id, name, username, platform, jenis_creator, level, niche, top_niches, status, gmv, gmv_live, gmv_video, commission_share, followers, owner_cpm_id"
     )
     .eq("id", id)
     .maybeSingle();
 
   if (!creator) notFound();
+
+  // Creator Portal status + invite (R36): m9.invite holders, CPM only for own creators
+  // (the invite action enforces the same rule server-side).
+  const canInvitePortal =
+    hasPermission("m9.invite", member.role) && isCreatorInScope(member, creator.owner_cpm_id);
+  const portalStatus = canInvitePortal ? ((await loadPortalStatus([creator.id]))[creator.id] ?? null) : null;
 
   // ===== Pertumbuhan GMV Mingguan (W1-W5) — pemilih bulan =====
   // All periods for this creator (only needed to list available months + build
@@ -126,13 +135,21 @@ export default async function CreatorDetailPage({
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-semibold">{creator.name}</h1>
-        <p className="mt-1 text-sm text-slate-500">
-          {creator.username ? `@${creator.username} · ` : ""}
-          {creator.platform ?? "—"} · {creator.jenis_creator ?? "—"} · Level {creator.level ?? "—"} ·{" "}
-          {creator.status}
-        </p>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-semibold">{creator.name}</h1>
+          <p className="mt-1 text-sm text-slate-500">
+            {creator.username ? `@${creator.username} · ` : ""}
+            {creator.platform ?? "—"} · {creator.jenis_creator ?? "—"} · Level {creator.level ?? "—"} ·{" "}
+            {creator.status}
+          </p>
+        </div>
+        {canInvitePortal && (
+          <div className="rounded-lg border border-slate-200 bg-white px-3 py-2">
+            <p className="mb-1 text-xs uppercase text-slate-500">Akun Portal</p>
+            <PortalInviteButton creatorId={creator.id} existingStatus={portalStatus} />
+          </div>
+        )}
       </div>
 
       <section className="grid grid-cols-2 gap-3 md:grid-cols-4">
