@@ -296,12 +296,25 @@ export async function finalizeSlotReport(formData: FormData): Promise<SimpleResu
 
     const { data: report } = await admin
       .from("creator_reports")
-      .select("id, schedule_slot_id, creator_id, status, insight_draft")
+      .select("id, schedule_slot_id, creator_id, status, insight_draft, insight_final")
       .eq("id", reportId).maybeSingle();
     if (!report) throw new Error("Report tidak ditemukan");
     if (!report.schedule_slot_id) throw new Error("Report ini bukan report slot Jadwal Live");
-    if (report.status === "final") throw new Error("Report sudah final");
     await assertCreatorInScope(admin, actor, report.creator_id);
+
+    // Report sudah final → hanya menyimpan ulang narasi tim (status & finalizer tetap).
+    if (report.status === "final") {
+      const { error: resaveError } = await admin
+        .from("creator_reports").update({ insight_final: insightFinal || report.insight_draft }).eq("id", reportId);
+      if (resaveError) throw new Error(`Gagal menyimpan: ${resaveError.message}`);
+      await writeAudit({
+        actorId: actor.id, action: "schedule.report_finalize", entityType: "creator_reports", entityId: String(reportId),
+        before: { status: "final", insight_final: report.insight_final ?? null }, after: { status: "final", resaved: true },
+        type: "auto",
+      });
+      revalidateSlot(report.schedule_slot_id);
+      return { ok: true };
+    }
 
     const { data: previousFinal } = await admin
       .from("creator_reports").select("id")
