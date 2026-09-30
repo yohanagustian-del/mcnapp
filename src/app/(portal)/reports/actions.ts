@@ -179,7 +179,7 @@ const editSchema = z.object({
  * Sunting TEKS report v2 (tombol "Edit Report"). Hanya teks — ringkasan,
  * judul/isi insight box, dan rekomendasi; angka tidak pernah bisa disunting
  * (kalau angkanya salah, datanya yang diperbaiki lalu report di-generate ulang).
- * Hanya saat draft: report final terkunci.
+ * Boleh juga setelah final (koreksi teks); tiap simpan tercatat di audit_logs.
  */
 export async function saveReportEdits(
   _prev: ReportActionState | null,
@@ -257,7 +257,7 @@ export async function resetReportSection(
   return { ok: true, message: "Kembali ke teks otomatis." };
 }
 
-/** Gerbang bersama saveReportEdits/resetReportSection: draft, v2, dan dalam scope CPM. */
+/** Gerbang bersama saveReportEdits/resetReportSection: v2, dan dalam scope CPM. */
 async function loadEditableReport(
   reportId: number,
   actor: TeamMember
@@ -269,7 +269,6 @@ async function loadEditableReport(
     .eq("id", reportId)
     .maybeSingle();
   if (!report) return { edits: null, error: `Report #${reportId} tidak ditemukan` };
-  if (report.status === "final") return { edits: null, error: "Report sudah final — teksnya terkunci." };
   if (!isReportV2(report.data_json)) {
     return { edits: null, error: "Report versi lama tidak bisa disunting per bagian — generate ulang dulu." };
   }
@@ -297,11 +296,10 @@ export async function finalizeReport(
   const supabase = await createClient();
   const { data: report } = await supabase
     .from("creator_reports")
-    .select("id, status, insight_draft, creator_id, creators(owner_cpm_id)")
+    .select("id, status, insight_draft, insight_final, creator_id, creators(owner_cpm_id)")
     .eq("id", reportId)
     .maybeSingle();
   if (!report) return { ok: false, message: `Report #${reportId} tidak ditemukan` };
-  if (report.status === "final") return { ok: false, message: "Report sudah final." };
   await assertCreatorScope(actor, (report.creators as unknown as { owner_cpm_id: string | null } | null)?.owner_cpm_id ?? null);
 
   const admin = createAdminClient();
@@ -310,7 +308,8 @@ export async function finalizeReport(
     .update({
       status: "final",
       insight_final: insightFinal || report.insight_draft,
-      finalized_by: actor.id,
+      // Simpan ulang setelah final tidak mengganti siapa yang pertama memfinalisasi.
+      ...(report.status === "final" ? {} : { finalized_by: actor.id }),
     })
     .eq("id", reportId);
   if (error) return { ok: false, message: `Gagal finalisasi: ${error.message}` };
@@ -320,14 +319,16 @@ export async function finalizeReport(
     action: "report.finalize",
     entityType: "creator_reports",
     entityId: String(reportId),
-    before: { status: report.status },
-    after: { status: "final", edited: insightFinal !== "" && insightFinal !== report.insight_draft },
+    before: { status: report.status, insight_final: report.insight_final ?? null },
+    after: { status: "final", resaved: report.status === "final", edited: insightFinal !== "" && insightFinal !== report.insight_draft },
     type: "auto",
   });
 
   revalidatePath("/reports");
   revalidatePath(`/reports/${reportId}`);
-  return { ok: true, message: `Report #${reportId} difinalisasi. Siap di-export (print → PDF).`, reportId };
+  return { ok: true, message: report.status === "final"
+      ? `Perubahan report #${reportId} tersimpan.`
+      : `Report #${reportId} difinalisasi. Siap di-export (print → PDF).`, reportId };
 }
 
 function addDays(iso: string, days: number): string {

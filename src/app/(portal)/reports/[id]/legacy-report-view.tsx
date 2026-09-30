@@ -41,7 +41,7 @@ const num = (n: number | null | undefined) =>
 const pct = (n: number | null | undefined, digits = 1) =>
   n === null || n === undefined ? "—" : `${(n * 100).toFixed(digits)}%`;
 
-export function LegacyReportView({ report, canFinalize }: { report: LegacyReportRow; canFinalize: boolean }) {
+export function LegacyReportView({ report, canFinalize, canEdit = canFinalize }: { report: LegacyReportRow; canFinalize: boolean; canEdit?: boolean }) {
   const d = report.data_json as LegacyReportDataJson | null;
 
   const metricRows: { label: string; key: keyof DerivedMetrics; fmt: (n: number | null) => string }[] = [
@@ -163,14 +163,18 @@ export function LegacyReportView({ report, canFinalize }: { report: LegacyReport
 
       <div className="mt-6 rounded-lg border border-slate-200 bg-white p-4">
         <h2 className="text-sm font-semibold uppercase text-slate-500">Insight</h2>
-        {report.status === "final" ? (
+        {canFinalize || (canEdit && report.status === "final") ? (
+          <div className="mt-2">
+            <FinalizeForm
+              reportId={report.id}
+              insightDraft={report.status === "final" ? (report.insight_final ?? report.insight_draft) : report.insight_draft}
+              isFinal={report.status === "final"}
+            />
+          </div>
+        ) : report.status === "final" ? (
           <p className="mt-2 whitespace-pre-wrap text-sm">
             {report.insight_final ?? report.insight_draft ?? "Report data-only (tanpa insight — delta di bawah threshold)."}
           </p>
-        ) : canFinalize ? (
-          <div className="mt-2">
-            <FinalizeForm reportId={report.id} insightDraft={report.insight_draft} />
-          </div>
         ) : (
           <p className="mt-2 whitespace-pre-wrap text-sm">
             {report.insight_draft ?? "Report data-only (tanpa insight — delta di bawah threshold)."}

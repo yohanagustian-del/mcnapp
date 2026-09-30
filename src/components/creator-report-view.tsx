@@ -294,7 +294,7 @@ export function CreatorReportView({
   data: ReportDataV2;
   edits: ReportEdits | null;
   status: "draft" | "final";
-  /** true = tim boleh menyunting teks (izin reports.finalize, report masih draft). */
+  /** true = tim boleh menyunting teks (izin reports.finalize; draft maupun final). */
   editable?: boolean;
   audience?: "creator" | "team";
   reportId: number;

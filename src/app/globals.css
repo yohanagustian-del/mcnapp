@@ -9,3 +9,14 @@ body {
   background: var(--background);
   color: var(--foreground);
 }
+
+/* Print / PDF: pertahankan warna latar & teks persis seperti di layar. */
+@media print {
+  * {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+  body {
+    background: #fff;
+  }
+}
