@@ -13,7 +13,10 @@ import {
   type BdOpportunityShop, type CreatorLeakRollup, type LeakComputeResult, type MasterShopEntry,
 } from "./leak-compute";
 import { parseMasterShopFile } from "./master-shop-file";
-import { pruneLeakExports, writeLeakExports, type LeakExportFile } from "./leak-export";
+import {
+  buildBdCsv, buildDetailCsv, buildSummaryCsv, pruneLeakExports, writeLeakExports,
+  type LeakExportFile, type LeakExportKind,
+} from "./leak-export";
 
 /**
  * M4 weekly link-leakage analysis — orchestrator (deterministic, 0 token AI).
@@ -616,4 +619,138 @@ export async function runLeakAnalysisFromFiles(
     origin: input.origin ?? "link_leakage",
     skipped: [...mcnParsed.skipped, ...tapParsed.skipped],
   });
+}
+
+/** Satu CSV hasil analisa custom — isi dikirim inline ke browser, tidak pernah disimpan di server. */
+export interface CustomLeakFile {
+  kind: LeakExportKind;
+  label: string;
+  filename: string;
+  rows: number;
+  csv: string;
+}
+
+export interface CustomLeakResult {
+  /** Bentuk sama dengan hasil analisa biasa; creatorId = nama kreator (tidak ada resolve ke DB). */
+  result: LeakAnalysisResult;
+  files: CustomLeakFile[];
+}
+
+/**
+ * Analisa kebocoran CUSTOM DATE — sekali pakai, tanpa jejak di database.
+ *
+ * Periode file boleh tanggal berapa pun (tidak diwajibkan W1-W5 / mulai tanggal 1),
+ * tapi harus di dalam satu file MCN yang kolom Date-nya terbaca. Pipeline hitungnya
+ * SAMA (computeLeak + ambang app_config), bedanya HANYA persistensi: TIDAK menulis
+ * creator_link_status, leak_week_summary, bd_leads, platform_alerts, kreator prospek
+ * baru, maupun backup CSV di Storage. CSV dikembalikan inline supaya browser
+ * langsung mengunduhnya; file upload transien dihapus oleh caller. Satu baris
+ * audit_logs saja (metadata, tanpa data mentah). 0 token AI.
+ */
+export async function runLeakAnalysisCustom(input: {
+  mcnFile: File;
+  tapFile: File;
+  masterFile?: File | null;
+  actorId: string;
+}): Promise<CustomLeakResult> {
+  const admin = createAdminClient();
+  const mcnParsed = await parseMcnFile(input.mcnFile);
+  const tapParsed = await parseTapFile(input.tapFile);
+  if (mcnParsed.rows.length === 0) {
+    throw new Error("File MCN tidak berisi baris data yang valid — analisa dibatalkan.");
+  }
+  if (tapParsed.rows.length === 0) {
+    throw new Error(
+      "File TAP (via agency link) wajib untuk analisa kebocoran: tanpa TAP, seluruh GMV di shop " +
+        "ber-deal akan terlihat 100% bocor. Upload file TAP periode yang sama."
+    );
+  }
+  const period = derivePeriod(mcnParsed.rows);
+  if (!period) {
+    throw new Error(
+      "Kolom Date tidak terbaca di file MCN — pastikan file export platform asli (kolom Date berisi rentang seperti 2026-07-01-2026-07-07)."
+    );
+  }
+  const { periodStart, periodEnd } = period;
+  if (periodEnd < periodStart) throw new Error("Periode file tidak valid (tanggal akhir sebelum tanggal mulai).");
+
+  const [sebagian, total] = await Promise.all([
+    getConfig<number>("m4.bocor_sebagian"),
+    getConfig<number>("m4.bocor_total"),
+  ]);
+  const masterInfo = await buildMaster(admin, input.masterFile);
+  const computed = computeLeak({
+    mcnRows: mcnParsed.rows,
+    tapRows: tapParsed.rows,
+    master: masterInfo.master,
+    week: periodStart,
+    thresholds: { sebagian, total },
+  });
+
+  const label = `${periodStart}_${periodEnd}`;
+  const files: CustomLeakFile[] = [
+    {
+      kind: "summary", label: "Ringkasan per kreator", filename: `leak-custom_${label}_ringkasan.csv`,
+      rows: computed.creators.length, csv: buildSummaryCsv(label, computed.creators),
+    },
+    {
+      kind: "detail", label: "Detail produk bocor", filename: `leak-custom_${label}_detail.csv`,
+      rows: computed.detail.length, csv: buildDetailCsv(label, computed.detail),
+    },
+    {
+      kind: "bd", label: "Peluang BD (shop non-deal)", filename: `leak-custom_${label}_bd.csv`,
+      rows: computed.bdShops.length, csv: buildBdCsv(label, computed.bdShops),
+    },
+  ];
+
+  await writeAudit({
+    actorId: input.actorId,
+    action: "m4.leak_compute_custom",
+    entityType: "creator_link_status",
+    entityId: label,
+    after: {
+      period: { start: periodStart, end: periodEnd },
+      creators_count: computed.creators.length,
+      totals: computed.totals,
+      persisted: false,
+    },
+    type: "auto",
+  });
+
+  return {
+    files,
+    result: {
+      week: periodStart,
+      periodStart,
+      periodEnd,
+      masterSource: masterInfo.source,
+      masterShops: masterInfo.count,
+      partneredShops: computed.partneredShopIds.length,
+      creators: computed.creators.map((c) => ({
+        creatorId: c.creatorName,
+        creatorName: c.creatorName,
+        createdProspect: false,
+        linkStatus: c.linkStatus,
+        leakRatio: c.leakRatio,
+        leakRatioShopBasis: c.leakRatioShopBasis,
+        gmvBocor: c.gmvBocor,
+        gmvBocorShopBasis: c.gmvBocorShopBasis,
+        gmvAffiliateTotal: c.gmvAffiliateTotal,
+        gmvTap: c.gmvTap,
+        gmvDealTotal: c.gmvDealTotal,
+        bdOpportunityGmv: c.bdOpportunityGmv,
+        directGmv: c.directGmv,
+        effectiveness: c.effectiveness,
+      })),
+      totals: computed.totals,
+      bdShopsTop: computed.bdShops.slice(0, 10),
+      bdLeadsNew: 0,
+      bdLeadsUpdated: 0,
+      detailRows: computed.detail.length,
+      alerts: { bocor: 0, dealExpiring: 0, dealExpired: 0 },
+      exports: [],
+      warnings: [...masterInfo.warnings, ...computed.warnings],
+      skipped: [...mcnParsed.skipped, ...tapParsed.skipped],
+    },
+  };
 }

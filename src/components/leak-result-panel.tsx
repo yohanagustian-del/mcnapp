@@ -29,12 +29,22 @@ const rupiah = (n: number | null | undefined) =>
   n === null || n === undefined ? "—" : `Rp${Math.round(n).toLocaleString("id-ID")}`;
 const pct = (n: number | null) => (n === null ? "—" : `${(n * 100).toFixed(1)}%`);
 
-export function LeakResultPanel({ result }: { result: LeakAnalysisResult }) {
+export function LeakResultPanel({
+  result, oneShot = false, children,
+}: {
+  result: LeakAnalysisResult;
+  /** Analisa custom date: tidak ada yang disimpan (tanpa lead/alert/backup). */
+  oneShot?: boolean;
+  /** Tombol unduh sekali pakai (mode oneShot). */
+  children?: React.ReactNode;
+}) {
   const t = result.totals;
   return (
     <div className="mt-4 rounded-md border border-slate-200 bg-white p-4 text-sm">
       <p className="font-medium text-slate-800">
-        Analisa kebocoran selesai — minggu {result.week} ({result.periodStart} s/d {result.periodEnd}).
+        {oneShot
+          ? `Analisa custom date selesai — periode ${result.periodStart} s/d ${result.periodEnd}.`
+          : `Analisa kebocoran selesai — minggu ${result.week} (${result.periodStart} s/d ${result.periodEnd}).`}
       </p>
       <p className="mt-1 text-xs text-slate-500">
         Master shop:{" "}
@@ -56,6 +66,9 @@ export function LeakResultPanel({ result }: { result: LeakAnalysisResult }) {
         <Kpi label="Peluang BD (shop non-deal)" value={rupiah(t.gmvBdOpportunity)} tone="amber" />
       </div>
 
+      {oneShot && children}
+
+      {!oneShot && (
       <div className="mt-3 flex flex-wrap gap-3 text-xs text-slate-600">
         <span>
           Lead BD: <strong>{result.bdLeadsNew}</strong> baru, <strong>{result.bdLeadsUpdated}</strong> diperbarui
@@ -69,6 +82,7 @@ export function LeakResultPanel({ result }: { result: LeakAnalysisResult }) {
           lihat backup CSV)
         </span>
       </div>
+      )}
 
       {result.exports.length > 0 && (
         <div className="mt-3 rounded-md bg-slate-50 p-3">

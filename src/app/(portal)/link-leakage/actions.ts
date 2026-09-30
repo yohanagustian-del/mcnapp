@@ -11,7 +11,9 @@ import { parseShopMasterRows } from "@/lib/m4/master-shop-file";
 import {
   assertValidObjectRef, downloadIngestFile, removeIngestFiles, type IngestObjectRef,
 } from "@/lib/ingest/storage";
-import { runLeakAnalysisFromFiles, type LeakAnalysisResult } from "@/lib/m4/leak-analysis";
+import {
+  runLeakAnalysisCustom, runLeakAnalysisFromFiles, type CustomLeakResult, type LeakAnalysisResult,
+} from "@/lib/m4/leak-analysis";
 import {
   LEAK_DETAIL_CSV_HEADER, LEAK_EXPORT_BUCKET, filterLeakDetailCsv, findLeakDetailExport,
 } from "@/lib/m4/leak-export";
@@ -81,6 +83,52 @@ export async function runLeakAnalysisFromStorageAction(
     revalidatePath("/workspace/cm");
     revalidatePath("/workspace/bizdev");
     return { ok: true, result };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "Terjadi kesalahan tidak terduga." };
+  } finally {
+    if (paths.length > 0) await removeIngestFiles(createAdminClient(), paths);
+  }
+}
+
+export type RunCustomLeakActionResult =
+  | ({ ok: true } & CustomLeakResult)
+  | { ok: false; error: string };
+
+/**
+ * Analisa kebocoran CUSTOM DATE (sekali pakai): periode bebas, TIDAK ada yang
+ * disimpan di database maupun Storage — file upload dihapus di `finally`, hasil
+ * CSV dikirim inline untuk diunduh browser. Lihat runLeakAnalysisCustom.
+ */
+export async function runCustomLeakAnalysisAction(
+  mcnRef: unknown,
+  tapRef: unknown,
+  masterRef?: unknown
+): Promise<RunCustomLeakActionResult> {
+  const paths: string[] = [];
+  try {
+    const actor = await requirePermission("m4.upload");
+
+    assertValidObjectRef(mcnRef, "MCN");
+    const mcn: IngestObjectRef = mcnRef;
+    paths.push(mcn.path);
+    assertValidObjectRef(tapRef, "TAP");
+    const tap: IngestObjectRef = tapRef;
+    paths.push(tap.path);
+    let master: IngestObjectRef | null = null;
+    if (masterRef != null) {
+      assertValidObjectRef(masterRef, "Master Data Shop");
+      master = masterRef;
+      paths.push(master.path);
+    }
+
+    const admin = createAdminClient();
+    const out = await runLeakAnalysisCustom({
+      mcnFile: await downloadIngestFile(admin, mcn),
+      tapFile: await downloadIngestFile(admin, tap),
+      masterFile: master ? await downloadIngestFile(admin, master) : null,
+      actorId: actor.id,
+    });
+    return { ok: true, ...out };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : "Terjadi kesalahan tidak terduga." };
   } finally {
