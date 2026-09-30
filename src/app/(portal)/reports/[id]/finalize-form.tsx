@@ -6,9 +6,11 @@ import { finalizeReport, type ReportActionState } from "../actions";
 export function FinalizeForm({
   reportId,
   insightDraft,
+  isFinal = false,
 }: {
   reportId: number;
   insightDraft: string | null;
+  isFinal?: boolean;
 }) {
   const [state, formAction, pending] = useActionState<ReportActionState | null, FormData>(
     finalizeReport,
@@ -18,7 +20,7 @@ export function FinalizeForm({
   return (
     <form action={formAction} className="print:hidden">
       <input type="hidden" name="report_id" value={reportId} />
-      <label className="mb-1 block text-sm font-medium">Edit insight sebelum finalisasi</label>
+      <label className="mb-1 block text-sm font-medium">{isFinal ? "Edit insight" : "Edit insight sebelum finalisasi"}</label>
       <textarea
         name="insight_final"
         defaultValue={insightDraft ?? ""}
@@ -31,7 +33,7 @@ export function FinalizeForm({
           type="submit" disabled={pending}
           className="rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-700 disabled:opacity-50"
         >
-          {pending ? "Menyimpan..." : "Finalisasi Report"}
+          {pending ? "Menyimpan..." : isFinal ? "Simpan Perubahan" : "Finalisasi Report"}
         </button>
         <button
           type="button"

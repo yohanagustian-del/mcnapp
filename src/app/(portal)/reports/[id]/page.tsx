@@ -35,10 +35,11 @@ export default async function ReportDetailPage({ params }: { params: Promise<{ i
     redirect(`/schedule/live/${report.schedule_slot_id}/report`);
   }
 
-  const canFinalize = hasPermission("reports.finalize", member.role) && report.status === "draft";
+  const canEdit = hasPermission("reports.finalize", member.role);
+  const canFinalize = canEdit && report.status === "draft";
 
   if (!isReportV2(report.data_json)) {
-    return <LegacyReportView report={report as unknown as LegacyReportRow} canFinalize={canFinalize} />;
+    return <LegacyReportView report={report as unknown as LegacyReportRow} canFinalize={canFinalize} canEdit={canEdit} />;
   }
 
   const data = report.data_json as unknown as ReportDataV2;
@@ -56,21 +57,25 @@ export default async function ReportDetailPage({ params }: { params: Promise<{ i
           data={data}
           edits={edits}
           status={report.status as "draft" | "final"}
-          editable={canFinalize}
+          editable={canEdit}
           audience="team"
           reportId={report.id}
         />
       </div>
 
-      {canFinalize && (
+      {canEdit && (
         <div className="mx-auto mt-4 max-w-4xl rounded-lg border border-slate-200 bg-white p-4 print:hidden">
-          <h2 className="text-sm font-semibold uppercase text-slate-500">Finalisasi</h2>
+          <h2 className="text-sm font-semibold uppercase text-slate-500">{report.status === "final" ? "Insight" : "Finalisasi"}</h2>
           <p className="mt-1 text-xs text-slate-400">
-            Setelah final, teks report terkunci dan kreator bisa membacanya di portal. Suntingan teks
-            dilakukan lewat tombol &ldquo;Edit Report&rdquo; di atas.
+            Setelah final, kreator bisa membacanya di portal. Teks report tetap bisa disunting lewat
+            tombol &ldquo;Edit Report&rdquo; di atas, dan insight bisa disimpan ulang di sini.
           </p>
           <div className="mt-2">
-            <FinalizeForm reportId={report.id} insightDraft={report.insight_draft} />
+            <FinalizeForm
+              reportId={report.id}
+              insightDraft={report.status === "final" ? (report.insight_final ?? report.insight_draft) : report.insight_draft}
+              isFinal={report.status === "final"}
+            />
           </div>
         </div>
       )}

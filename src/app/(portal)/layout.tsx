@@ -87,7 +87,7 @@ export default async function PortalLayout({ children }: { children: React.React
         memberName={member.name}
         roleLabel={ROLE_LABELS[member.role] ?? member.role}
       />
-      <main className="min-w-0 flex-1 p-8">{children}</main>
+      <main className="min-w-0 flex-1 p-8 print:p-0">{children}</main>
     </div>
   );
 }

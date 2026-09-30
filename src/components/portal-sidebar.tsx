@@ -97,7 +97,7 @@ export function PortalSidebar({
   return (
     <aside
       data-collapsed={collapsed ? "true" : "false"}
-      className={`flex ${collapsed ? "w-16" : "w-64"} shrink-0 flex-col bg-[#0b1f47] text-white transition-[width] duration-200`}
+      className={`print:hidden flex ${collapsed ? "w-16" : "w-64"} shrink-0 flex-col bg-[#0b1f47] text-white transition-[width] duration-200`}
     >
       <div
         className={`flex items-center gap-2 border-b border-white/10 p-4 ${collapsed ? "justify-center" : "justify-between"}`}
