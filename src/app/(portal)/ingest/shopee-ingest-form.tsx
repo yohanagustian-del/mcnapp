@@ -24,8 +24,7 @@ export function ShopeeIngestForm() {
     }
     startTransition(async () => {
       try {
-        setStage("Mengompres & mengunggah file ke storage…");
-        const ref = await uploadIngestFile(file, "shopee");
+        const ref = await uploadIngestFile(file, "shopee", setStage);
         setStage("Memproses agregat di server…");
         const res = await runShopeeIngestFromStorageAction(ref);
         if (res.ok) {

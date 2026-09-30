@@ -249,9 +249,9 @@ export default async function IngestPage() {
           </li>
           <li>
             Pilih file di form Shopee di bawah, lalu klik <strong>Proses Upload Mingguan</strong>.
-            Jangan tutup tab sampai kotak hijau hasil muncul. File besar (hingga ±200 MB) cukup
-            dipilih apa adanya: CSV <strong>dikompres otomatis</strong> di browser sebelum
-            diunggah, jadi <strong>tidak perlu di-ZIP</strong>. File yang sudah berupa .zip (berisi
+            Jangan tutup tab sampai kotak hijau hasil muncul. File besar (hingga ±400 MB) cukup
+            dipilih apa adanya: CSV <strong>dikompres otomatis</strong> di browser dan diunggah per
+            bagian bila perlu, jadi <strong>tidak perlu di-ZIP atau dipecah manual</strong>. File yang sudah berupa .zip (berisi
             tepat satu CSV) juga diterima.
           </li>
           <li>

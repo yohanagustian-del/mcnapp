@@ -1,7 +1,9 @@
 "use client";
 
 import { createClient } from "@/lib/supabase/client";
-import { INGEST_BUCKET, INGEST_MAX_OBJECT_BYTES, type IngestObjectRef } from "./bucket";
+import {
+  INGEST_BUCKET, INGEST_MAX_OBJECT_BYTES, INGEST_MAX_PARTS, INGEST_PART_BYTES, type IngestObjectRef,
+} from "./bucket";
 
 /**
  * Client-side direct-to-Storage upload for weekly platform files. The browser
@@ -17,12 +19,22 @@ import { INGEST_BUCKET, INGEST_MAX_OBJECT_BYTES, type IngestObjectRef } from "./
  *
  * CSVs are gzip-compressed in the browser first (native CompressionStream,
  * streamed — no full copy on the main thread): a Shopee Conversion Report
- * shrinks ~3x, so a 120-200MB export uploads as ~40-65MB, well under the bucket
- * limit and much faster on a slow connection. downloadIngestFile inflates it
+ * shrinks ~3x, so a 120-200MB export uploads as ~40-65MB — much faster on a
+ * slow connection. downloadIngestFile inflates it
  * back by magic bytes; the ref keeps the ORIGINAL name. .xlsx/.zip are already
  * compressed and go up as-is.
+ *
+ * Anything over INGEST_PART_BYTES is uploaded as consecutive byte-range parts
+ * (Supabase caps one upload at 50MB while the org spend cap is on); the ref
+ * lists them in order and downloadIngestFile joins them. If a part fails, the
+ * parts already uploaded are removed (best-effort) before the error surfaces.
+ * `onProgress` receives an Indonesian status line for the form's button.
  */
-export async function uploadIngestFile(file: File, kind: string): Promise<IngestObjectRef> {
+export async function uploadIngestFile(
+  file: File,
+  kind: string,
+  onProgress?: (stage: string) => void
+): Promise<IngestObjectRef> {
   const supabase = createClient();
   const { data: userData, error: userError } = await supabase.auth.getUser();
   const uid = userData?.user?.id;
@@ -32,27 +44,41 @@ export async function uploadIngestFile(file: File, kind: string): Promise<Ingest
 
   const ext = file.name.includes(".") ? file.name.slice(file.name.lastIndexOf(".")) : "";
   const gzip = ext.toLowerCase() === ".csv" && typeof CompressionStream !== "undefined";
+  if (gzip) onProgress?.("Mengompres file…");
   const body: Blob = gzip
     ? await new Response(file.stream().pipeThrough(new CompressionStream("gzip"))).blob()
     : file;
-  if (body.size > INGEST_MAX_OBJECT_BYTES) {
-    const mb = (n: number) => Math.round(n / (1024 * 1024));
+  const mb = (n: number) => Math.round(n / (1024 * 1024));
+  const partCount = Math.max(1, Math.ceil(body.size / INGEST_PART_BYTES));
+  if (body.size > INGEST_MAX_OBJECT_BYTES || partCount > INGEST_MAX_PARTS) {
     throw new Error(
       `File ${file.name} terlalu besar (${mb(body.size)} MB${gzip ? " setelah dikompres" : ""}; ` +
         `maksimum ${mb(INGEST_MAX_OBJECT_BYTES)} MB). Pecah export per rentang tanggal yang lebih pendek.`
     );
   }
-  const path = `${uid}/${crypto.randomUUID()}-${kind}${ext}${gzip ? ".gz" : ""}`;
 
-  const { error } = await supabase.storage
-    .from(INGEST_BUCKET)
-    .upload(path, body, {
-      upsert: false,
-      contentType: gzip ? "application/gzip" : file.type || "application/octet-stream",
-    });
-  if (error) {
-    throw new Error(`Gagal mengunggah file ${file.name} ke storage: ${error.message}`);
+  const base = `${uid}/${crypto.randomUUID()}-${kind}${ext}${gzip ? ".gz" : ""}`;
+  const paths = partCount === 1
+    ? [base]
+    : Array.from({ length: partCount }, (_, i) => `${base}.part${String(i).padStart(3, "0")}`);
+  const contentType = gzip ? "application/gzip" : file.type || "application/octet-stream";
+  const bucket = supabase.storage.from(INGEST_BUCKET);
+
+  for (const [i, path] of paths.entries()) {
+    onProgress?.(
+      partCount === 1
+        ? "Mengunggah file ke storage…"
+        : `Mengunggah bagian ${i + 1}/${partCount} ke storage…`
+    );
+    const chunk = body.slice(i * INGEST_PART_BYTES, (i + 1) * INGEST_PART_BYTES, contentType);
+    const { error } = await bucket.upload(path, chunk, { upsert: false, contentType });
+    if (error) {
+      if (i > 0) await bucket.remove(paths.slice(0, i)).catch(() => undefined);
+      throw new Error(`Gagal mengunggah file ${file.name} ke storage: ${error.message}`);
+    }
   }
 
-  return { path, name: file.name };
+  return partCount === 1
+    ? { path: base, name: file.name }
+    : { path: paths[0], name: file.name, parts: paths };
 }

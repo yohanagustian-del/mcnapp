@@ -5,7 +5,7 @@ import { requirePermission } from "@/lib/rbac";
 import { runIngest, type RunIngestResult } from "@/lib/ingest/run";
 import { createAdminClient } from "@/lib/supabase/admin";
 import {
-  assertValidObjectRef, downloadIngestFile, removeIngestFiles, type IngestObjectRef,
+  assertValidObjectRef, downloadIngestFile, ingestObjectPaths, removeIngestFiles, type IngestObjectRef,
 } from "@/lib/ingest/storage";
 
 /**
@@ -77,13 +77,13 @@ export async function runIngestFromStorageAction(
 
     assertValidObjectRef(mcnRef, "MCN");
     const mcn: IngestObjectRef = mcnRef;
-    paths.push(mcn.path);
+    paths.push(...ingestObjectPaths(mcn));
 
     let tap: IngestObjectRef | null = null;
     if (tapRef != null) {
       assertValidObjectRef(tapRef, "TAP");
       tap = tapRef;
-      paths.push(tap.path);
+      paths.push(...ingestObjectPaths(tap));
     }
 
     // Optional "Master Data Shop" upload for the leak analysis (artifact's 3rd input).
@@ -91,7 +91,7 @@ export async function runIngestFromStorageAction(
     if (masterRef != null) {
       assertValidObjectRef(masterRef, "Master Data Shop");
       master = masterRef;
-      paths.push(master.path);
+      paths.push(...ingestObjectPaths(master));
     }
 
     const admin = createAdminClient();

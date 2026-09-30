@@ -5,7 +5,7 @@ import { requirePermission } from "@/lib/rbac";
 import { runShopeeIngest, type RunShopeeIngestResult } from "@/lib/ingest/shopee-run";
 import { createAdminClient } from "@/lib/supabase/admin";
 import {
-  assertValidObjectRef, downloadIngestFile, removeIngestFiles, type IngestObjectRef,
+  assertValidObjectRef, downloadIngestFile, ingestObjectPaths, removeIngestFiles, type IngestObjectRef,
 } from "@/lib/ingest/storage";
 
 /**
@@ -61,7 +61,7 @@ export async function runShopeeIngestFromStorageAction(
 
     assertValidObjectRef(fileRef, "Shopee");
     const ref: IngestObjectRef = fileRef;
-    paths.push(ref.path);
+    paths.push(...ingestObjectPaths(ref));
 
     const admin = createAdminClient();
     const file = await downloadIngestFile(admin, ref);

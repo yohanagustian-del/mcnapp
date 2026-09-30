@@ -5,10 +5,13 @@ import { createGunzip } from "node:zlib";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { unzipSync } from "fflate";
 import {
-  INGEST_BUCKET, INGEST_MAX_DECOMPRESSED_BYTES, type IngestObjectRef,
+  INGEST_BUCKET, INGEST_MAX_DECOMPRESSED_BYTES, INGEST_MAX_PARTS, ingestObjectPaths, type IngestObjectRef,
 } from "./bucket";
 
-export { INGEST_BUCKET, INGEST_MAX_OBJECT_BYTES, INGEST_MAX_DECOMPRESSED_BYTES, type IngestObjectRef } from "./bucket";
+export {
+  INGEST_BUCKET, INGEST_MAX_OBJECT_BYTES, INGEST_MAX_DECOMPRESSED_BYTES, INGEST_PART_BYTES, INGEST_MAX_PARTS,
+  ingestObjectPaths, type IngestObjectRef,
+} from "./bucket";
 
 /**
  * Transient bucket for large weekly platform uploads. The browser uploads the
@@ -22,23 +25,34 @@ export { INGEST_BUCKET, INGEST_MAX_OBJECT_BYTES, INGEST_MAX_DECOMPRESSED_BYTES, 
 /** Max object path length we accept from the client (defensive; paths are `${uid}/${uuid}...`). */
 const MAX_PATH_LEN = 512;
 
+function isValidPath(path: unknown): path is string {
+  return (
+    typeof path === "string" && path.length > 0 && path.length <= MAX_PATH_LEN &&
+    !path.includes("..") && !path.startsWith("/")
+  );
+}
+
 /**
  * Validates an object ref that arrived from the (untrusted) client. The path
  * must be a non-empty, reasonably short string with no traversal; the name is
- * only used to reconstruct the File extension. Throws on anything suspicious so
+ * only used to reconstruct the File extension; `parts` (split upload) must list
+ * 1..INGEST_MAX_PARTS valid paths starting with `path`. Throws on anything suspicious so
  * a malformed/hostile ref can never reach `storage.download`.
  */
 export function assertValidObjectRef(ref: unknown, label: string): asserts ref is IngestObjectRef {
   if (!ref || typeof ref !== "object") throw new Error(`Referensi file ${label} tidak valid.`);
-  const { path, name } = ref as Record<string, unknown>;
-  if (typeof path !== "string" || path.length === 0 || path.length > MAX_PATH_LEN) {
-    throw new Error(`Path file ${label} tidak valid.`);
-  }
-  if (path.includes("..") || path.startsWith("/")) {
-    throw new Error(`Path file ${label} tidak valid.`);
-  }
+  const { path, name, parts } = ref as Record<string, unknown>;
+  if (!isValidPath(path)) throw new Error(`Path file ${label} tidak valid.`);
   if (typeof name !== "string" || name.length === 0) {
     throw new Error(`Nama file ${label} tidak valid.`);
+  }
+  if (parts !== undefined) {
+    if (
+      !Array.isArray(parts) || parts.length < 1 || parts.length > INGEST_MAX_PARTS ||
+      parts[0] !== path || !parts.every(isValidPath)
+    ) {
+      throw new Error(`Bagian file ${label} tidak valid.`);
+    }
   }
 }
 
@@ -128,13 +142,20 @@ export async function downloadIngestFile(
   admin: SupabaseClient,
   ref: IngestObjectRef
 ): Promise<File> {
-  const { data, error } = await admin.storage.from(INGEST_BUCKET).download(ref.path);
-  if (error || !data) {
-    throw new Error(
-      `Gagal mengunduh file dari storage (${ref.name}): ${error?.message ?? "objek tidak ditemukan"}. ` +
-        `Coba unggah ulang.`
-    );
+  // A split upload (upload-client.ts) is joined back in order; Blob concatenation
+  // doesn't copy, so this costs no more memory than one big object would.
+  const blobs: Blob[] = [];
+  for (const path of ingestObjectPaths(ref)) {
+    const { data, error } = await admin.storage.from(INGEST_BUCKET).download(path);
+    if (error || !data) {
+      throw new Error(
+        `Gagal mengunduh file dari storage (${ref.name}): ${error?.message ?? "objek tidak ditemukan"}. ` +
+          `Coba unggah ulang.`
+      );
+    }
+    blobs.push(data);
   }
+  const data = blobs.length === 1 ? blobs[0] : new Blob(blobs, { type: blobs[0].type });
   const unpacked = await unpackIngestObject(data, ref.name);
   // Parsers pick the format from the name; the stored type is "application/gzip" for compressed CSVs.
   const type = /\.csv$/i.test(unpacked.name) ? "text/csv" : data.type || "application/octet-stream";

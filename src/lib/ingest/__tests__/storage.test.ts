@@ -3,7 +3,8 @@ import { describe, expect, it, vi } from "vitest";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { zipSync } from "fflate";
 import {
-  assertValidObjectRef, downloadIngestFile, removeIngestFiles, unpackIngestObject, INGEST_BUCKET,
+  assertValidObjectRef, downloadIngestFile, ingestObjectPaths, removeIngestFiles, unpackIngestObject,
+  INGEST_BUCKET, INGEST_MAX_PARTS,
 } from "../storage";
 
 describe("assertValidObjectRef", () => {
@@ -20,6 +21,23 @@ describe("assertValidObjectRef", () => {
     expect(() =>
       assertValidObjectRef({ path: "u/" + "x".repeat(600), name: "a" }, "MCN")
     ).toThrow(/Path/);
+  });
+
+  it("accepts a split ref whose parts start with path, rejects malformed parts", () => {
+    const parts = ["uid/a.csv.gz.part000", "uid/a.csv.gz.part001"];
+    expect(() => assertValidObjectRef({ path: parts[0], name: "a.csv", parts }, "Shopee")).not.toThrow();
+    const bad = (p: unknown) => () => assertValidObjectRef({ path: parts[0], name: "a.csv", parts: p }, "Shopee");
+    expect(bad([parts[1], parts[0]])).toThrow(/Bagian/); // parts[0] must be path
+    expect(bad([parts[0], "../other/x"])).toThrow(/Bagian/);
+    expect(bad([])).toThrow(/Bagian/);
+    expect(bad("uid/a")).toThrow(/Bagian/);
+    expect(bad(Array.from({ length: INGEST_MAX_PARTS + 1 }, (_, i) => (i === 0 ? parts[0] : `uid/p${i}`)))).toThrow(/Bagian/);
+  });
+
+  it("ingestObjectPaths lists every object behind a ref (for cleanup)", () => {
+    expect(ingestObjectPaths({ path: "uid/a.xlsx", name: "a.xlsx" })).toEqual(["uid/a.xlsx"]);
+    expect(ingestObjectPaths({ path: "uid/a.p0", name: "a.csv", parts: ["uid/a.p0", "uid/a.p1"] }))
+      .toEqual(["uid/a.p0", "uid/a.p1"]);
   });
 
   it("rejects a missing/empty name and non-object refs", () => {
@@ -101,6 +119,21 @@ describe("unpackIngestObject / downloadIngestFile decompression", () => {
     const zip = zipSync({ "export/ConversionReport.csv": csvBytes, "__MACOSX/._x.csv": new Uint8Array([1]) });
     const file = await downloadIngestFile(mockAdmin(new Blob([zip])), { path: "uid/x-shopee.zip", name: "arsip.zip" });
     expect(file.name).toBe("ConversionReport.csv");
+    expect(await file.text()).toBe(csv);
+  });
+
+  it("joins a split upload's parts in order before inflating", async () => {
+    const gz = gzipSync(csvBytes);
+    const cuts = [0, 7, Math.floor(gz.length / 2), gz.length]; // odd boundaries, mid-gzip-stream
+    const byPath = new Map(
+      cuts.slice(0, -1).map((c, i) => [`uid/x.csv.gz.part00${i}`, new Blob([gz.subarray(c, cuts[i + 1])])])
+    );
+    const download = vi.fn((path: string) => Promise.resolve({ data: byPath.get(path) ?? null, error: null }));
+    const admin = { storage: { from: () => ({ download }) } } as unknown as SupabaseClient;
+    const parts = [...byPath.keys()];
+    const file = await downloadIngestFile(admin, { path: parts[0], name: "Report.csv", parts });
+    expect(download.mock.calls.map((c) => c[0])).toEqual(parts);
+    expect(file.name).toBe("Report.csv");
     expect(await file.text()).toBe(csv);
   });
 
