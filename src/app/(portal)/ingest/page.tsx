@@ -9,6 +9,10 @@ import { IngestForm } from "./ingest-form";
 import { ShopeeIngestForm } from "./shopee-ingest-form";
 import { BatchHistoryTable, type BatchRow } from "./batch-history-table";
 
+// Server actions on this page (Shopee/TikTok ingest) download, inflate and parse
+// exports up to ~200MB CSV — give them the full Vercel window instead of the default.
+export const maxDuration = 300;
+
 const STATUS_LABELS: Record<string, string> = {
   processed: "Selesai",
   staging: "Diproses",
@@ -245,7 +249,10 @@ export default async function IngestPage() {
           </li>
           <li>
             Pilih file di form Shopee di bawah, lalu klik <strong>Proses Upload Mingguan</strong>.
-            Jangan tutup tab sampai kotak hijau hasil muncul.
+            Jangan tutup tab sampai kotak hijau hasil muncul. File besar (hingga ±400 MB) cukup
+            dipilih apa adanya: CSV <strong>dikompres otomatis</strong> di browser dan diunggah per
+            bagian bila perlu, jadi <strong>tidak perlu di-ZIP atau dipecah manual</strong>. File yang sudah berupa .zip (berisi
+            tepat satu CSV) juga diterima.
           </li>
           <li>
             Baca hasilnya: periode, jumlah baris Selesai, jumlah creator, dan GMV total. Cek juga

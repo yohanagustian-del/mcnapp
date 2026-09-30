@@ -2,6 +2,12 @@
 
 Status per sesi 2026-07-09 (sesi 5, backlog-sweep + audit deploy). Baca ini + `CLAUDE.md` sebelum lanjut.
 
+## ⚡ SESI 2026-09-30 — Upload Shopee besar (120–200MB CSV)
+1. **Browser mengompres CSV (gzip, `CompressionStream`) sebelum upload** (`src/lib/ingest/upload-client.ts`, berlaku untuk SEMUA upload CSV via `uploadIngestFile`, termasuk TikTok & /link-leakage; .xlsx/.zip dikirim apa adanya). Rasio file Shopee nyata ±3,2x (24,7MB → 7,5MB; 200MB → ±61MB). Server mengekstrak by magic bytes di `downloadIngestFile` (`unpackIngestObject`, streaming gunzip, batas hasil ekstrak 400MB). `.zip` berisi TEPAT satu .csv/.xlsx juga diterima (fflate) — tidak perlu di-ZIP, ZIP tidak lebih kecil dari kompresi otomatis.
+2. **Parser Shopee jadi streaming** (`parseShopeeFile`: Papa `step` di atas `file.stream()` + intern string). Terukur di CSV 197MB/345k baris: puncak RSS 3,2GB → ±0,8GB (termasuk overhead vitest), hasil identik dengan parser lama di file user (43.227 Selesai, GMV Rp2.281.346.306,75). `fileHash` ikut streaming; hash tetap atas byte CSV asli (bukan gzip) → batch_id tidak berubah.
+3. Konstanta klien di `src/lib/ingest/bucket.ts` (tanpa import Node); `storage.ts` re-export. `/ingest` kini `maxDuration = 300`.
+4. **Upload dipecah per bagian ≤45MB** (`INGEST_PART_BYTES`): selama spend cap org AKTIF, Supabase membatasi SATU upload 50MB berapa pun "Global file size limit"-nya (user set 500MB, spend cap tetap on — keputusan user 2026-09-30). `IngestObjectRef.parts` = daftar path berurutan, `downloadIngestFile` menggabungnya (Blob concat), cleanup lewat `ingestObjectPaths(ref)` di SEMUA action (ingest, Shopee, link-leakage). Maks 10 bagian / 200MB terkompres. Tanpa migrasi: bucket 100MB (0026) tetap cukup karena tiap bagian ≤45MB. Terukur: CSV 197MB → 2 bagian (45+13MB), puncak RSS ±855MB, ±18,5 detik.
+
 ## ⚡ SESI 2026-09-23 — Creator Product Match, BD Value Predictor v2, Brand Lead Bank, PX catalog (mode full-auto)
 
 Rencana disetujui user sesi ini (dijalankan mode full-auto: 1 tiket = 1 PR, CI hijau → merge →

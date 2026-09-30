@@ -31,8 +31,10 @@ export interface RunShopeeIngestResult {
 
 /** sha256 of the raw file bytes — same provenance convention as the TikTok pipeline (run.ts). */
 async function fileHash(file: File): Promise<string> {
-  const buf = Buffer.from(await file.arrayBuffer());
-  return createHash("sha256").update(buf).digest("hex");
+  // Streamed so a 200MB export isn't copied into one more full-size buffer.
+  const hash = createHash("sha256");
+  for await (const chunk of file.stream() as unknown as AsyncIterable<Uint8Array>) hash.update(chunk);
+  return hash.digest("hex");
 }
 
 /**

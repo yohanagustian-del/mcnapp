@@ -148,7 +148,7 @@ Kolom *Campaign Type* dan *Partner Promo* sengaja diabaikan.
 
 **Langkah 3 — Upload.**
 1. Buka https://app.meamcn.com/ingest, turun ke bagian **Shopee**.
-2. Klik pilih file → pilih CSV (maks 100 MB).
+2. Klik pilih file → pilih CSV apa adanya (hingga ±400 MB). CSV dikompres otomatis di browser (±3x lebih kecil) dan, bila masih besar, diunggah otomatis per bagian (tombol menampilkan *Mengunggah bagian 1/2…*), jadi **tidak perlu di-ZIP atau dipecah manual**. File .zip berisi tepat satu CSV juga diterima, tapi tidak lebih cepat: ukurannya kurang lebih sama dengan hasil kompresi otomatis.
 3. Klik **Proses Upload Mingguan**. Tombol berganti: *Mengunggah file ke storage…* lalu *Memproses agregat di server…*. Jangan tutup tab.
 
 **Langkah 4 — Baca hasil (kotak hijau):**
@@ -183,6 +183,8 @@ Kolom *Campaign Type* dan *Partner Promo* sengaja diabaikan.
 | Pesan / gejala | Penyebab | Solusi |
 |---|---|---|
 | *File Shopee kosong atau tidak terbaca…* | File kosong/rusak/bukan Conversion Report | Export ulang dari Shopee |
+| *File … terlalu besar (… MB setelah dikompres; maksimum 200 MB)* / *terlalu besar setelah diekstrak (maksimum 400 MB)* | Export sangat besar (di atas ±400 MB CSV, atau ZIP/XLSX di atas 200 MB) | Export dengan rentang tanggal lebih pendek, upload terpisah (window berbeda) |
+| *File ZIP … berisi N file data* / *tidak berisi file .csv/.xlsx* | ZIP berisi lebih dari satu file atau kosong | Satu ZIP = satu CSV, atau upload CSV-nya langsung (tidak perlu ZIP) |
 | *Tidak ada baris berstatus Selesai pada file ini.* | Semua pesanan belum Selesai atau salah rentang | Ganti rentang tanggal export |
 | Ditolak: baris menyentuh lebih dari satu window | Tanggal pesanan dibuat di export melintasi W1–W5 | Export ulang per window, atau pecah filenya |
 | Banyak baris "ID Produk / ID Toko kosong" | Baris Selesai tanpa ID | Cek export; baris itu tidak masuk GMV |

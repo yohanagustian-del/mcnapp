@@ -9,7 +9,7 @@ import { fetchAll } from "@/lib/supabase/fetch-all";
 import { COL, parseCount, pick } from "@/lib/platform-csv";
 import { parseShopMasterRows } from "@/lib/m4/master-shop-file";
 import {
-  assertValidObjectRef, downloadIngestFile, removeIngestFiles, type IngestObjectRef,
+  assertValidObjectRef, downloadIngestFile, ingestObjectPaths, removeIngestFiles, type IngestObjectRef,
 } from "@/lib/ingest/storage";
 import {
   runLeakAnalysisCustom, runLeakAnalysisFromFiles, type CustomLeakResult, type LeakAnalysisResult,
@@ -57,17 +57,17 @@ export async function runLeakAnalysisFromStorageAction(
 
     assertValidObjectRef(mcnRef, "MCN");
     const mcn: IngestObjectRef = mcnRef;
-    paths.push(mcn.path);
+    paths.push(...ingestObjectPaths(mcn));
 
     assertValidObjectRef(tapRef, "TAP");
     const tap: IngestObjectRef = tapRef;
-    paths.push(tap.path);
+    paths.push(...ingestObjectPaths(tap));
 
     let master: IngestObjectRef | null = null;
     if (masterRef != null) {
       assertValidObjectRef(masterRef, "Master Data Shop");
       master = masterRef;
-      paths.push(master.path);
+      paths.push(...ingestObjectPaths(master));
     }
 
     const admin = createAdminClient();
@@ -110,15 +110,15 @@ export async function runCustomLeakAnalysisAction(
 
     assertValidObjectRef(mcnRef, "MCN");
     const mcn: IngestObjectRef = mcnRef;
-    paths.push(mcn.path);
+    paths.push(...ingestObjectPaths(mcn));
     assertValidObjectRef(tapRef, "TAP");
     const tap: IngestObjectRef = tapRef;
-    paths.push(tap.path);
+    paths.push(...ingestObjectPaths(tap));
     let master: IngestObjectRef | null = null;
     if (masterRef != null) {
       assertValidObjectRef(masterRef, "Master Data Shop");
       master = masterRef;
-      paths.push(master.path);
+      paths.push(...ingestObjectPaths(master));
     }
 
     const admin = createAdminClient();
