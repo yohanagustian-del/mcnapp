@@ -589,6 +589,7 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
         rows={creatorPerformanceRows}
         projectId={project.id}
         canManage={MANAGEMENT_ROLES.includes(member.role)}
+        canEditNotes={hasPermission("m7.participant_notes", member.role)}
       />
 
       {/* ===== Performa per CM — rollup dari tabel di atas ===== */}

@@ -579,8 +579,8 @@ const ADS_BY_VALUES = ["MEA", "Brand"] as const;
 
 /**
  * Ubah catatan peserta (Analisa, Brand Pairs, Ads By) dari tabel "Performa per
- * Kreator" — SPV/Head/Director saja (requireProjectLead), sejajar dengan
- * updateParticipantTarget. Ketiganya kosong secara default; tim mengisinya kapan
+ * Kreator" — semua role staff (m7.participant_notes). Ads By = satu pilihan
+ * (MEA/Brand) disimpan sebagai array satu elemen. Ketiganya kosong secara default; tim mengisinya kapan
  * saja lewat form edit, tidak wajib. Menerima update SEBAGIAN — hanya field yang
  * memang dikirim (ditandai `analisa`/`brand_pairs` hadir di form, atau
  * `ads_by_touched` untuk Ads By) yang disentuh, supaya tiap kolom bisa disimpan
@@ -588,7 +588,10 @@ const ADS_BY_VALUES = ["MEA", "Brand"] as const;
  */
 export async function updateParticipantNotes(formData: FormData): Promise<AddParticipantResult> {
   try {
-    const actor = await requireProjectLead();
+    const actor = await requireMember();
+    if (!hasPermission("m7.participant_notes", actor.role)) {
+      throw new Error(`Akses ditolak: role ${actor.role} tidak bisa mengubah catatan peserta`);
+    }
     const projectId = Number(formData.get("project_id"));
     const creatorId = String(formData.get("creator_id") ?? "").trim();
     if (!projectId || !creatorId) throw new Error("Project & kreator wajib dikenali");
@@ -603,7 +606,7 @@ export async function updateParticipantNotes(formData: FormData): Promise<AddPar
       updates.brand_pairs = v === "" ? null : v;
     }
     if (formData.has("ads_by_touched")) {
-      const adsBy = formData.getAll("ads_by").map(String);
+      const adsBy = formData.getAll("ads_by").map(String).slice(0, 1);
       for (const v of adsBy) {
         if (!ADS_BY_VALUES.includes(v as (typeof ADS_BY_VALUES)[number])) throw new Error("Pilihan Ads By tidak valid");
       }

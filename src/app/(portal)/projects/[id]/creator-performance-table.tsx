@@ -172,29 +172,26 @@ function InlineTextField({
 }
 
 /**
- * Multi-select "Ads By" — simpan langsung saat pilihan berubah (tanpa tombol Edit
- * terpisah), kosong = belum diisi (default). Kalau gagal simpan, kembalikan ke
- * nilai semula. `ads_by_touched` selalu dikirim supaya server tahu field ini
- * memang disentuh walau hasil akhirnya kosong (bukan sekadar tidak diubah).
+ * Dropdown "Ads By" (MEA / Brand) — simpan langsung saat pilihan berubah, kosong =
+ * belum diisi (default). Gagal simpan → kembali ke nilai semula. `ads_by_touched`
+ * selalu dikirim supaya server tahu field ini disentuh walau hasilnya kosong.
  */
-function AdsByMultiSelect({
+function AdsBySelect({
   projectId, creatorId, initialValue,
 }: {
   projectId: number; creatorId: string; initialValue: string[];
 }) {
-  const [value, setValue] = useState<string[]>(initialValue);
+  const [value, setValue] = useState<string>(initialValue[0] ?? "");
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
 
   return (
     <span className="inline-flex items-center gap-1">
       <select
-        multiple
         value={value}
         disabled={pending}
-        size={2}
         onChange={(e) => {
-          const next = Array.from(e.target.selectedOptions).map((o) => o.value);
+          const next = e.target.value;
           const previous = value;
           setValue(next);
           setError(null);
@@ -202,7 +199,7 @@ function AdsByMultiSelect({
           formData.set("project_id", String(projectId));
           formData.set("creator_id", creatorId);
           formData.set("ads_by_touched", "1");
-          for (const v of next) formData.append("ads_by", v);
+          if (next) formData.append("ads_by", next);
           startTransition(async () => {
             const res = await updateParticipantNotes(formData);
             if (!res.ok) {
@@ -213,6 +210,7 @@ function AdsByMultiSelect({
         }}
         className="min-w-[92px] rounded-md border border-slate-300 px-2 py-1 text-xs disabled:opacity-50"
       >
+        <option value="">—</option>
         {ADS_BY_OPTIONS.map((opt) => (
           <option key={opt} value={opt}>{opt}</option>
         ))}
@@ -258,11 +256,13 @@ function DeleteParticipantButton({ projectId, creatorId, creatorName }: { projec
  * peserta; GMV aktual/item tetap read-only (datanya dari upload, CLAUDE.md #3).
  */
 export function CreatorPerformanceTable({
-  rows, projectId, canManage = false,
+  rows, projectId, canManage = false, canEditNotes = false,
 }: {
   rows: CreatorPerformanceRow[];
   projectId?: number;
   canManage?: boolean;
+  /** Semua role staff: kolom Analisa, Brand Pairs, Ads By. */
+  canEditNotes?: boolean;
 }) {
   const controls = useTableControls<CreatorPerformanceRow>({
     rows,
@@ -272,6 +272,7 @@ export function CreatorPerformanceTable({
   });
   const [editingId, setEditingId] = useState<string | null>(null);
   const showActions = canManage && projectId !== undefined;
+  const showNotes = canEditNotes && projectId !== undefined;
 
   return (
     <div className="mt-2 rounded-lg border border-slate-200 bg-white">
@@ -335,22 +336,22 @@ export function CreatorPerformanceTable({
                 </td>
                 <td className="px-4 py-2">{(r.contribution * 100).toFixed(0)}%</td>
                 <td className="px-4 py-2">
-                  {showActions ? (
+                  {showNotes ? (
                     <InlineTextField projectId={projectId as number} creatorId={r.creatorId} field="analisa" initialValue={r.analisa} />
                   ) : (
                     r.analisa ?? "—"
                   )}
                 </td>
                 <td className="px-4 py-2">
-                  {showActions ? (
+                  {showNotes ? (
                     <InlineTextField projectId={projectId as number} creatorId={r.creatorId} field="brand_pairs" initialValue={r.brandPairs} />
                   ) : (
                     r.brandPairs ?? "—"
                   )}
                 </td>
                 <td className="px-4 py-2">
-                  {showActions ? (
-                    <AdsByMultiSelect projectId={projectId as number} creatorId={r.creatorId} initialValue={r.adsBy} />
+                  {showNotes ? (
+                    <AdsBySelect projectId={projectId as number} creatorId={r.creatorId} initialValue={r.adsBy} />
                   ) : (
                     r.adsBy.length ? r.adsBy.join(", ") : "—"
                   )}

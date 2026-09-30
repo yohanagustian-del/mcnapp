@@ -3,13 +3,25 @@
 import { useState, useTransition } from "react";
 import { uploadIngestFile } from "@/lib/ingest/upload-client";
 import { LeakResultPanel } from "@/components/leak-result-panel";
-import type { LeakAnalysisResult } from "@/lib/m4/leak-analysis";
-import { runLeakAnalysisFromStorageAction } from "./actions";
+import type { CustomLeakFile, LeakAnalysisResult } from "@/lib/m4/leak-analysis";
+import { runCustomLeakAnalysisAction, runLeakAnalysisFromStorageAction } from "./actions";
 
 const FILE_ACCEPT =
   ".xlsx,.xls,.csv,.numbers,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.apple.numbers,text/csv";
 
 type MasterMode = "db" | "file";
+
+/** Unduh CSV dari memori browser — hasil custom date tidak pernah disimpan di server. */
+function downloadCsv(f: CustomLeakFile) {
+  const url = URL.createObjectURL(new Blob([f.csv], { type: "text/csv;charset=utf-8" }));
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = f.filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
 
 /**
  * Analisa kebocoran link agency DI PLATFORM (menggantikan artifak HTML eksternal).
@@ -24,12 +36,15 @@ export function LeakAnalysisForm() {
   const [result, setResult] = useState<LeakAnalysisResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [masterMode, setMasterMode] = useState<MasterMode>("db");
+  const [customDate, setCustomDate] = useState(false);
+  const [customFiles, setCustomFiles] = useState<CustomLeakFile[] | null>(null);
   const [stage, setStage] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
 
   function onSubmit(formData: FormData) {
     setError(null);
     setResult(null);
+    setCustomFiles(null);
 
     const mcnRaw = formData.get("mcn_file");
     const tapRaw = formData.get("tap_file");
@@ -60,9 +75,17 @@ export function LeakAnalysisForm() {
         const masterRef = masterFile ? await uploadIngestFile(masterFile, "leak-master") : null;
 
         setStage("Menghitung kebocoran di server…");
-        const res = await runLeakAnalysisFromStorageAction(mcnRef, tapRef, masterRef);
-        if (res.ok) setResult(res.result);
-        else setError(res.error);
+        if (customDate) {
+          const res = await runCustomLeakAnalysisAction(mcnRef, tapRef, masterRef);
+          if (res.ok) {
+            setResult(res.result);
+            setCustomFiles(res.files);
+          } else setError(res.error);
+        } else {
+          const res = await runLeakAnalysisFromStorageAction(mcnRef, tapRef, masterRef);
+          if (res.ok) setResult(res.result);
+          else setError(res.error);
+        }
       } catch (e) {
         setError(e instanceof Error ? e.message : "Terjadi kesalahan tidak terduga saat mengunggah.");
       } finally {
@@ -92,6 +115,26 @@ export function LeakAnalysisForm() {
             className="mt-1 text-sm file:mr-3 file:rounded-md file:border-0 file:bg-slate-100 file:px-3 file:py-2 file:text-sm"
           />
         </div>
+
+        <label
+          className={`flex cursor-pointer items-start gap-2 rounded-md border p-3 text-sm ${
+            customDate ? "border-amber-300 bg-amber-50" : "border-slate-200"
+          }`}
+        >
+          <input
+            type="checkbox" checked={customDate} onChange={(e) => setCustomDate(e.target.checked)}
+            className="mt-1"
+          />
+          <span>
+            <span className="font-medium text-slate-700">Custom date (sekali pakai)</span>
+            <span className="block text-xs text-slate-500">
+              Analisa periode tanggal berapa pun, tanpa syarat W1-W5. Hasilnya <strong>tidak
+              disimpan</strong>: tidak ada rollup, lead, alert, atau backup di database/storage, dan
+              file yang diunggah langsung dihapus dari server. Unduh CSV-nya sebelum menutup
+              halaman — hasil tidak bisa dibuka lagi.
+            </span>
+          </span>
+        </label>
 
         <fieldset className="rounded-md border border-slate-200 p-3">
           <legend className="px-1 text-xs font-medium uppercase tracking-wide text-slate-500">
@@ -136,7 +179,7 @@ export function LeakAnalysisForm() {
           type="submit" disabled={pending}
           className="rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-700 disabled:opacity-50"
         >
-          {pending ? (stage ?? "Memproses...") : "Jalankan Analisa Kebocoran"}
+          {pending ? (stage ?? "Memproses...") : customDate ? "Jalankan Analisa Custom Date" : "Jalankan Analisa Kebocoran"}
         </button>
       </form>
 
@@ -165,7 +208,27 @@ export function LeakAnalysisForm() {
       </p>
 
       {error && <p className="mt-3 rounded-md bg-red-50 p-3 text-sm text-red-700">{error}</p>}
-      {result && <LeakResultPanel result={result} />}
+      {result && (
+        <LeakResultPanel result={result} oneShot={customFiles !== null}>
+          {customFiles && (
+            <div className="mt-3 rounded-md bg-amber-50 p-3">
+              <p className="text-xs font-medium uppercase tracking-wide text-amber-800">
+                Unduh sekarang — tidak disimpan di server
+              </p>
+              <div className="mt-2 flex flex-wrap gap-2">
+                {customFiles.map((f) => (
+                  <button
+                    key={f.kind} type="button" onClick={() => downloadCsv(f)}
+                    className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-100"
+                  >
+                    ⬇ {f.label} ({f.rows.toLocaleString("id-ID")} baris)
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+        </LeakResultPanel>
+      )}
     </div>
   );
 }
