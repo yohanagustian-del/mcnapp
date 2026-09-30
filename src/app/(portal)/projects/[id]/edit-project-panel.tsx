@@ -1,10 +1,8 @@
 "use client";
 
-import { useActionState, useEffect, useState, useTransition } from "react";
+import { useActionState, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { deleteProject, updateProject, type ProjectFormState } from "../actions";
-import { downloadProjectOverviewReport } from "./report-actions";
-import { downloadBase64File, XLSX_MIME } from "@/lib/utils/download";
 
 export interface EditableProject {
   id: number;
@@ -44,8 +42,6 @@ export function EditProjectPanel({
   const router = useRouter();
   const [editOpen, setEditOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
-  const [downloadPending, startDownload] = useTransition();
-  const [downloadError, setDownloadError] = useState<string | null>(null);
 
   const [editState, editAction, editPending] = useActionState<ProjectFormState | null, FormData>(
     updateProject, null
@@ -80,27 +76,6 @@ export function EditProjectPanel({
       >
         Hapus Project
       </button>
-      <span className="inline-flex items-center gap-2">
-        <button
-          type="button"
-          disabled={downloadPending}
-          onClick={() => {
-            setDownloadError(null);
-            startDownload(async () => {
-              try {
-                const { filename, base64 } = await downloadProjectOverviewReport(project.id);
-                downloadBase64File(filename, base64, XLSX_MIME);
-              } catch (e) {
-                setDownloadError(e instanceof Error ? e.message : "Gagal mengunduh report");
-              }
-            });
-          }}
-          className="rounded-md border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
-        >
-          {downloadPending ? "Menyiapkan…" : "Download Report"}
-        </button>
-        {downloadError && <span className="text-xs text-red-600">{downloadError}</span>}
-      </span>
 
       {editOpen && (
         <div

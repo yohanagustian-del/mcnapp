@@ -25,6 +25,7 @@ import { ExternalApplicantPanel, type ExternalApplicantRow } from "../external-a
 import { createAdminClient } from "@/lib/supabase/admin";
 import { ManpowerMemberPicker } from "./manpower-member-picker";
 import { CloseProjectButton } from "./close-project-button";
+import { DownloadReportButton } from "./download-report-button";
 
 const STATUS_LABELS: Record<string, string> = {
   on_track: "On-track", behind: "Behind", ahead: "Ahead",
@@ -343,6 +344,7 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
             projectTypes={PROJECT_TYPES}
           />
         )}
+        {hasPermission("m7.download_report", member.role) && <DownloadReportButton projectId={project.id} />}
       </div>
 
       {canManage && (

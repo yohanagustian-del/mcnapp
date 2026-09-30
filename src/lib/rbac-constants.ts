@@ -211,6 +211,9 @@ export const PERMISSIONS: Record<string, Role[]> = {
   "m6.run": [...MANAGEMENT_ROLES, "bizdev_lead", "bizdev"],
   // M7 §2.7: buat/edit project & kelola peserta/man power = management + lead terkait + PM (campaign_ops)
   "m7.manage": [...MANAGEMENT_ROLES, "cm_lead", "bizdev_lead", "acquisition_lead", "campaign_ops"],
+  // M7: Download Report (.xlsx) di detail Special Project — management + semua lead
+  // (permintaan user 2026-09-30). Hanya baca; tidak mengubah data project.
+  "m7.download_report": [...MANAGEMENT_ROLES, "cm_lead", "bizdev_lead", "acquisition_lead"],
   // M7 report insight (Special Project): editing/finalizing narasi report dibuka untuk
   // SEMUA role staff (permintaan user 2026-09-28) — beda dari m7.manage (yang tetap
   // membatasi buat/edit project & man power). od_viewer sengaja dikecualikan: read-only

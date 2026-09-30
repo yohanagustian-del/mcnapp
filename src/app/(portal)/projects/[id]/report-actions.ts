@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { writeAudit } from "@/lib/audit";
-import { MANAGEMENT_ROLES, requireMember, requirePermission } from "@/lib/rbac";
+import { hasPermission, requireMember, requirePermission } from "@/lib/rbac";
 import { buildProjectReportData } from "@/lib/m7/report-data";
 import { generateInsight, insightAvailable } from "@/lib/report/insight";
 import { buildProjectOverviewReport } from "@/lib/m7/project-report-export";
@@ -199,16 +199,15 @@ export async function finalizeProjectReport(formData: FormData): Promise<void> {
 
 /**
  * Download Report — .xlsx berisi apa yang ada di tab Special Project (ringkasan,
- * Performa per Kreator, Metrik Harian). SPV/Head/Director saja, sejajar dengan
- * tombol "Hapus Project" (di area yang sama, MANAGEMENT_ROLES) — bukan izin
- * m7.manage yang lebih luas.
+ * Performa per Kreator, Metrik Harian). Izin `m7.download_report`: management +
+ * lead (cm_lead, bizdev_lead, acquisition_lead).
  */
 export async function downloadProjectOverviewReport(
   projectId: number
 ): Promise<{ filename: string; base64: string }> {
   const member = await requireMember();
-  if (!MANAGEMENT_ROLES.includes(member.role)) {
-    throw new Error(`Akses ditolak: hanya SPV/Head/Director yang bisa mengunduh report project (role Anda: ${member.role})`);
+  if (!hasPermission("m7.download_report", member.role)) {
+    throw new Error(`Akses ditolak: hanya Director/Head/SPV dan lead (CM, BizDev, Akuisisi) yang bisa mengunduh report project (role Anda: ${member.role})`);
   }
 
   const admin = createAdminClient();
