@@ -18,11 +18,37 @@ export type BrandLeadSource = (typeof BRAND_LEAD_SOURCES)[number];
 export const BRAND_LEAD_PLATFORMS = ["shopee", "tiktok_shop"] as const;
 export type BrandLeadPlatform = (typeof BRAND_LEAD_PLATFORMS)[number];
 
-export const BRAND_LEAD_SUPPORT = ["tap", "ads_support", "hsl", "sample", "rate_card"] as const;
+export const BRAND_LEAD_SUPPORT = ["tap", "ads_support", "hsl", "sample", "rate_card", "flash_sale"] as const;
 export type BrandLeadSupport = (typeof BRAND_LEAD_SUPPORT)[number];
 
 export const BRAND_LEAD_STATUSES = ["baru", "kontak", "nego", "deal", "batal"] as const;
 export type BrandLeadStatus = (typeof BRAND_LEAD_STATUSES)[number];
+
+/** UI labels (Bahasa Indonesia) — shared by the form, the list page and the upload template. */
+export const BRAND_LEAD_SOURCE_LABELS: Record<BrandLeadSource, string> = {
+  matchmaking: "Matchmaking",
+  event: "Event",
+  iklan: "Iklan",
+  rekomendasi: "Rekomendasi",
+  scouting: "Scouting",
+  others: "Lainnya",
+};
+export const BRAND_LEAD_PLATFORM_LABELS: Record<BrandLeadPlatform, string> = { shopee: "Shopee", tiktok_shop: "TikTok Shop" };
+export const BRAND_LEAD_SUPPORT_LABELS: Record<BrandLeadSupport, string> = {
+  tap: "TAP",
+  ads_support: "Ads Support",
+  hsl: "HSL",
+  sample: "Sample",
+  rate_card: "Rate Card",
+  flash_sale: "Flash Sale",
+};
+export const BRAND_LEAD_STATUS_LABELS: Record<BrandLeadStatus, string> = {
+  baru: "Baru",
+  kontak: "Kontak",
+  nego: "Nego",
+  deal: "Deal",
+  batal: "Batal",
+};
 
 /** Teks kosong dari input yang tidak diisi → undefined (pola sama product-card.ts). */
 function blankToUndefined(v: unknown) {
@@ -39,6 +65,9 @@ export function normalizePhoneId(raw: string): string | null {
   if (cleaned.startsWith("62")) return `+${cleaned}`;
   if (cleaned.startsWith("0")) return `+62${cleaned.slice(1)}`;
   if (cleaned.startsWith("+")) return cleaned; // nomor asing — dibiarkan apa adanya, bukan dipaksa +62
+  // No Indonesian mobile prefix starts with 86 once the trunk 0 is dropped (81x-89x
+  // except 86x), so a bare "86 191 …" is a Chinese +86 number, not +6286….
+  if (cleaned.startsWith("86")) return `+${cleaned}`;
   return `+62${cleaned}`;
 }
 
@@ -86,6 +115,9 @@ export const brandLeadSchema = z
     city: optionalText,
     business_category: optionalText,
     store_link: optionalText,
+    bizdev_names: optionalText,
+    brand_group: optionalText,
+    ads_scheme: optionalText,
     platforms: z.array(z.enum(BRAND_LEAD_PLATFORMS)).default([]),
     marketing_budget: rupiahField(),
     target_roas: nonNegativeNumberField,
@@ -103,4 +135,23 @@ export type BrandLeadInput = z.infer<typeof brandLeadSchema>;
 
 export function isEmptyBrandLeadContact(c: BrandLeadContactInput): boolean {
   return isEmptyContact(c);
+}
+
+/** Escape LIKE wildcards so the value matches literally (ILIKE without % = case-insensitive equals). */
+export function escapeLike(value: string): string {
+  return value.replace(/([\\%_])/g, "\\$1");
+}
+
+/**
+ * Search box "Cari Nama Brand" → one ILIKE pattern per word (ANDed by the caller),
+ * so "greney underwear" finds "GRENEY.Underwear.id". LIKE wildcards typed by the
+ * user are escaped; `*` is dropped because PostgREST reads it as a wildcard too.
+ */
+export function brandLeadSearchPatterns(q: string | undefined): string[] {
+  return (q ?? "")
+    .replace(/\*/g, " ")
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 6)
+    .map((word) => `%${escapeLike(word)}%`);
 }

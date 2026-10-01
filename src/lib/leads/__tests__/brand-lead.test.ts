@@ -15,6 +15,10 @@ describe("normalizePhoneId", () => {
     expect(normalizePhoneId("0812-3456-7890")).toBe("+6281234567890");
     expect(normalizePhoneId("0812 3456 7890")).toBe("+6281234567890");
   });
+  it("86… tanpa + = nomor Tiongkok, bukan +6286…", () => {
+    expect(normalizePhoneId("86 191 2055 6687")).toBe("+8619120556687");
+    expect(normalizePhoneId("0861234567")).toBe("+62861234567");
+  });
   it("string tanpa digit -> null", () => {
     expect(normalizePhoneId("abc")).toBeNull();
   });

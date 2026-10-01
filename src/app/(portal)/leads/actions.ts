@@ -18,12 +18,19 @@ export interface LeadFormState {
   fieldErrors?: Record<string, string>;
 }
 
-const MAX_CONTACT_ROWS = 5;
+/** Upper bound on the form's `contact_rows` field, so a forged value can't spin the loop. */
+const MAX_CONTACT_ROWS = 200;
 
-/** Baris-berulang "Data Prospek" — field terindeks contact_{field}_{i}, i=0..4. */
+/**
+ * Baris-berulang "Data Prospek" — field terindeks contact_{field}_{i}. The form
+ * sends how many rows it rendered (`contact_rows`): a bulk-uploaded lead can have
+ * more than the default 5, and updateLead rewrites the list from what is read here.
+ */
 function readContacts(formData: FormData): BrandLeadContactInput[] {
   const contacts: BrandLeadContactInput[] = [];
-  for (let i = 0; i < MAX_CONTACT_ROWS; i++) {
+  const declared = Number(formData.get("contact_rows"));
+  const rows = Number.isInteger(declared) && declared > 0 ? Math.min(declared, MAX_CONTACT_ROWS) : 5;
+  for (let i = 0; i < rows; i++) {
     const row = {
       lead_name: String(formData.get(`contact_name_${i}`) ?? "").trim() || undefined,
       phone: String(formData.get(`contact_phone_${i}`) ?? "").trim() || undefined,
@@ -42,6 +49,9 @@ function readFormInput(formData: FormData): Record<string, unknown> {
     city: String(formData.get("city") ?? "").trim() || undefined,
     business_category: String(formData.get("business_category") ?? "").trim() || undefined,
     store_link: String(formData.get("store_link") ?? "").trim() || undefined,
+    bizdev_names: String(formData.get("bizdev_names") ?? "").trim() || undefined,
+    brand_group: String(formData.get("brand_group") ?? "").trim() || undefined,
+    ads_scheme: String(formData.get("ads_scheme") ?? "").trim() || undefined,
     platforms: formData.getAll("platforms").map(String),
     marketing_budget: formData.get("marketing_budget"),
     target_roas: formData.get("target_roas"),
@@ -81,6 +91,9 @@ export async function createLead(_prev: LeadFormState | null, formData: FormData
       city: d.city ?? null,
       business_category: d.business_category ?? null,
       store_link: d.store_link ?? null,
+      bizdev_names: d.bizdev_names ?? null,
+      brand_group: d.brand_group ?? null,
+      ads_scheme: d.ads_scheme ?? null,
       platforms: d.platforms,
       marketing_budget: d.marketing_budget ?? null,
       target_roas: d.target_roas ?? null,
@@ -161,6 +174,9 @@ export async function updateLead(leadId: string, _prev: LeadFormState | null, fo
       city: d.city ?? null,
       business_category: d.business_category ?? null,
       store_link: d.store_link ?? null,
+      bizdev_names: d.bizdev_names ?? null,
+      brand_group: d.brand_group ?? null,
+      ads_scheme: d.ads_scheme ?? null,
       platforms: d.platforms,
       marketing_budget: d.marketing_budget ?? null,
       target_roas: d.target_roas ?? null,

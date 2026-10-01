@@ -114,6 +114,17 @@ Platform internal MCN MEA (agency creator TikTok/Shopee). Menggabungkan tools te
   role. Kedua tabel WAJIB restrictive deny `is_creator_user()` (pola sama `products_tap`) —
   kalau menambah tabel baru yang tidak untuk kreator, JANGAN lupa policy ini (0067 sempat
   melewatkannya, ditambal 0068).
+- **Brand Lead Bank: search + upload massal** (migrasi 0084, request 2026-10-01). `/leads` bisa
+  dicari per Nama Brand (ILIKE per kata, `brandLeadSearchPatterns`) dan difilter Niche (dropdown dari
+  view `brand_lead_niches`, agregasi SQL). CM (`CM_ROLES`) ikut MELIHAT & mencari; tambah/upload/edit
+  tetap BizDev (`leads.create`/`leads.edit`). Upload massal = SATU importer `uploadBrandLeads`
+  (`leads/bulk-actions.ts`) dengan kolom & parser dari `lib/leads/bulk-upload-spec.ts` (template =
+  `bulk-upload-template.ts`, dijaga test round-trip) — kolom mengikuti spreadsheet matchmaking BizDev
+  (Nama Brand, Bizdev, Niche, Link Toko, Contact PIC, Grup Brand, Sample/Flash Sale/Ads, Ads Brand),
+  sheet itu bisa diupload apa adanya. Tiap baris divalidasi `brandLeadSchema` yang SAMA dengan form.
+  Brand yang sudah ada (`brandLeadKey`, huruf+angka lowercase) TIDAK dibuat dua kali: digabung secara
+  ADITIF (`mergeBrandLead` — kolom kosong diisi, kontak baru ditambah, catatan ditambah baris, tidak
+  ada yang ditimpa, source/status tak disentuh), karena itu boleh tanpa gerbang edit per-baris.
 - **Katalog PX Exchange** (`px_catalog_items`/`px_catalog_pushes`, migrasi 0067) diisi lewat bridge
   masuk `POST /api/bridge/px-catalog` (`docs/BRIDGE_PX_CATALOG_CONTRACT.md`, arah CDPS→MCN,
   kebalikan dari `docs/BRIDGE_PRODUCT_EXCHANGE_CONTRACT.md` yang MCN→CDPS) — snapshot PENUH tiap

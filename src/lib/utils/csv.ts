@@ -3,6 +3,8 @@ import Papa from "papaparse";
 export interface CsvParseResult {
   rows: Record<string, string>[];
   errors: string[];
+  /** parseSheet only: leading rows skipped before the header row (0 = header on row 1). */
+  skippedRows?: number;
 }
 
 /**

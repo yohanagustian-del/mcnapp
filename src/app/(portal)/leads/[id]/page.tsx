@@ -1,6 +1,7 @@
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import Link from "next/link";
-import { requireMember, hasPermission } from "@/lib/rbac";
+import { requireMember, hasPermission, canAccessNav, NAV_ITEMS } from "@/lib/rbac";
+import { BRAND_LEAD_SUPPORT_LABELS, type BrandLeadSupport } from "@/lib/leads/brand-lead";
 import { createClient } from "@/lib/supabase/server";
 import { LeadForm } from "../lead-form";
 import { updateLead } from "../actions";
@@ -8,6 +9,8 @@ import { ConvertToDealForm } from "./convert-form";
 
 export default async function LeadDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const member = await requireMember();
+  const navItem = NAV_ITEMS.find((n) => n.href === "/leads")!;
+  if (!canAccessNav(navItem, member.role)) redirect("/dashboard");
   const { id } = await params;
 
   const supabase = await createClient();
@@ -67,6 +70,9 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
                 city: lead.city,
                 business_category: lead.business_category,
                 store_link: lead.store_link,
+                bizdev_names: lead.bizdev_names,
+                brand_group: lead.brand_group,
+                ads_scheme: lead.ads_scheme,
                 platforms: lead.platforms ?? [],
                 marketing_budget: lead.marketing_budget,
                 target_roas: lead.target_roas,
@@ -79,10 +85,18 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
           ) : (
             <div className="space-y-2 text-sm text-slate-700">
               <p><span className="text-slate-500">Asal:</span> {lead.source}</p>
+              <p><span className="text-slate-500">Niche:</span> {lead.business_category ?? "—"}</p>
+              <p><span className="text-slate-500">Bizdev:</span> {lead.bizdev_names ?? "—"}</p>
               <p><span className="text-slate-500">Kota:</span> {lead.city ?? "—"}</p>
-              <p><span className="text-slate-500">Kategori:</span> {lead.business_category ?? "—"}</p>
+              <p className="break-all"><span className="text-slate-500">Link Toko:</span> {lead.store_link ?? "—"}</p>
+              <p className="break-all"><span className="text-slate-500">Grup Brand:</span> {lead.brand_group ?? "—"}</p>
+              <p>
+                <span className="text-slate-500">Dukungan:</span>{" "}
+                {((lead.brand_support ?? []) as string[]).map((s) => BRAND_LEAD_SUPPORT_LABELS[s as BrandLeadSupport] ?? s).join(", ") || "—"}
+              </p>
+              <p><span className="text-slate-500">Ads Brand:</span> {lead.ads_scheme ?? "—"}</p>
               <p><span className="text-slate-500">Status:</span> {lead.status}</p>
-              <p><span className="text-slate-500">Catatan:</span> {lead.notes ?? "—"}</p>
+              <p className="whitespace-pre-line break-all"><span className="text-slate-500">Catatan:</span> {lead.notes ?? "—"}</p>
               <div>
                 <p className="text-slate-500">Kontak:</p>
                 <ul className="list-inside list-disc">
