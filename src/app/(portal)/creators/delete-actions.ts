@@ -18,7 +18,7 @@ import {
  * Hapus kreator dari master data — satu baris atau banyak baris tercentang.
  *
  * Permanen dan tidak bisa di-undo dari UI, jadi tiga pengaman berlapis:
- *  1. RBAC server-side: `creators.delete` (management saja — lihat lib/rbac.ts),
+ *  1. RBAC server-side: `creators.delete` (management + CM Lead — lihat lib/rbac-constants.ts),
  *     bukan cuma tombolnya disembunyikan. Dicermin oleh RLS di migration 0028.
  *  2. Preflight dependensi: kreator yang masih punya data MATERIAL (kontrak,
  *     report, komisi, request, akun portal, dst) DITOLAK — pakai status

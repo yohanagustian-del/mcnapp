@@ -82,19 +82,19 @@ describe("RBAC creators.delete", () => {
     expect(PERMISSIONS["creators.delete"]).toBeDefined();
   });
 
-  it("hanya management (director/head/spv) yang boleh hapus", () => {
-    for (const role of MANAGEMENT_ROLES) {
+  it("hanya management (director/head/spv) + CM Lead yang boleh hapus", () => {
+    for (const role of [...MANAGEMENT_ROLES, "cm_lead"] as Role[]) {
       expect(hasPermission("creators.delete", role)).toBe(true);
     }
-    const allowed = new Set<Role>(MANAGEMENT_ROLES);
+    const allowed = new Set<Role>([...MANAGEMENT_ROLES, "cm_lead"]);
     for (const role of ROLES) {
       if (!allowed.has(role)) expect(hasPermission("creators.delete", role)).toBe(false);
     }
   });
 
-  /** CM boleh edit master data tapi TIDAK boleh menghapusnya (CLAUDE.md #2). */
-  it("CM & akuisisi bisa edit tapi tidak bisa hapus", () => {
-    for (const role of ["cpm", "cm_lead", "acquisition_spec", "creator_support"] as Role[]) {
+  /** CPM/akuisisi boleh edit master data tapi TIDAK boleh menghapusnya (CLAUDE.md #2). */
+  it("CPM & akuisisi bisa edit tapi tidak bisa hapus", () => {
+    for (const role of ["cpm", "acquisition_spec", "creator_support"] as Role[]) {
       expect(hasPermission("creators.edit", role)).toBe(true);
       expect(hasPermission("creators.delete", role)).toBe(false);
     }
