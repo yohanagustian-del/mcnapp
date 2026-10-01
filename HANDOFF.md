@@ -2,6 +2,14 @@
 
 Status per sesi 2026-07-09 (sesi 5, backlog-sweep + audit deploy). Baca ini + `CLAUDE.md` sebelum lanjut.
 
+## ⚡ SESI 2026-10-01 — Improvement MCN (T1–T8, plan `docs/plans/IMPROVEMENT_MCN_2026-09.md`)
+1. **T1 (#90)** Special Project → Metrik Harian: kolom kumulatif dibuang, tabel ringkas Target GMV | Achieved GMV | GMV Gap | Sisa Hari (`project-target-summary.tsx`, angka dari `trackDaily()`: `targetGmv`, `gmvGapToTarget`, `daysRemaining`).
+2. **T2 (#91)** Undang Portal Kreator: modul bersama `lib/portal/invite.ts` + `components/portal-invite-button.tsx`, gate `m9.invite` (Management + CM + Akuisisi), CPM hanya kreator miliknya (`isCreatorInScope`/`assertCreatorInScope`). Status portal dibaca via `loadPortalStatus()` (admin client) — dulu selalu "belum diundang" karena RLS `cu_self_read`.
+3. **T3 (#92)** Form Perpanjang bersama `components/contract-renew-form.tsx`; bucket kontrak dari `app_config m8.contract_alert_days` + `contractBucketTone()`.
+4. **T4–T7 (#93)** Status kemitraan: migrasi **0083** (`creator_partnership_status`, `creator_partnership_uploads`, seed `m8.partnership_status_labels`, alert_type `partnership_drop`) **SUDAH APPLY** ke staging (`fomlangoiiywhexwoqom`) & production (`bqknstylbpwsnlgnzayw`), `get_advisors` security tanpa temuan baru. Upload Excel di `/creators`; section "Kreator Saya — Kontrak & Status Kemitraan" di CM Workspace; kartu di `/creators/[id]`; kolom + filter di `/creators`.
+5. Catatan drift: constraint `platform_alerts_alert_type_check` di DB punya tipe `partner_*` yang tidak ada di file migrasi mana pun — 0083 menambah `partnership_drop` dengan MEMBACA nilai yang ada, bukan menulis ulang daftar. Setelah 0083 bentuk constraint jadi `= ANY ('{…}'::text[])`; migrasi berikutnya yang menambah tipe harus membaca bentuk itu.
+6. Asumsi A1–A4 plan dipakai jalan; menunggu konfirmasi user.
+
 ## ⚡ SESI 2026-09-30 — Upload Shopee besar (120–200MB CSV)
 1. **Browser mengompres CSV (gzip, `CompressionStream`) sebelum upload** (`src/lib/ingest/upload-client.ts`, berlaku untuk SEMUA upload CSV via `uploadIngestFile`, termasuk TikTok & /link-leakage; .xlsx/.zip dikirim apa adanya). Rasio file Shopee nyata ±3,2x (24,7MB → 7,5MB; 200MB → ±61MB). Server mengekstrak by magic bytes di `downloadIngestFile` (`unpackIngestObject`, streaming gunzip, batas hasil ekstrak 400MB). `.zip` berisi TEPAT satu .csv/.xlsx juga diterima (fflate) — tidak perlu di-ZIP, ZIP tidak lebih kecil dari kompresi otomatis.
 2. **Parser Shopee jadi streaming** (`parseShopeeFile`: Papa `step` di atas `file.stream()` + intern string). Terukur di CSV 197MB/345k baris: puncak RSS 3,2GB → ±0,8GB (termasuk overhead vitest), hasil identik dengan parser lama di file user (43.227 Selesai, GMV Rp2.281.346.306,75). `fileHash` ikut streaming; hash tetap atas byte CSV asli (bukan gzip) → batch_id tidak berubah.
