@@ -1,6 +1,6 @@
 import { createAdminClient } from "@/lib/supabase/admin";
 import { writeAudit } from "@/lib/audit";
-import { resolveCreatorNames } from "@/lib/platform-csv";
+import { resolveCreatorNamesByPlatform } from "@/lib/platform-csv";
 import { validateW1W5Period } from "@/lib/utils/date";
 import type { ArtifactFormat, LeakWeekTotals } from "./leak-artifact";
 import { parseBdOpportunityFile, parseLeakDetailFile } from "./leak-artifact";
@@ -95,7 +95,7 @@ export async function uploadLeakArtifact(
   // ---- 2. Resolve creator usernames → creators.id (auto-create prospek) ----
   // A creator in a CM leak report is by definition already joined with MEA → "aktif".
   const names = detail.creators.map((c) => c.creatorName).filter((n) => n.trim() !== "");
-  const { byName, createdProspects } = await resolveCreatorNames(admin, names, actorId, "aktif");
+  const { byName, createdProspects } = await resolveCreatorNamesByPlatform(admin, names, actorId, "tiktok", "aktif");
   const createdSet = new Set(createdProspects.map((n) => n.toLowerCase()));
 
   const resolvable: Array<(typeof detail.creators)[number] & { creatorId: string }> = [];

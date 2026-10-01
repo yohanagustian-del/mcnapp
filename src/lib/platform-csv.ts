@@ -123,13 +123,22 @@ async function loadCreatorLookup(
   admin: SupabaseClient,
   platform: "tiktok" | "shopee" | null
 ): Promise<Map<string, string>> {
-  const rows = await fetchAll<{ id: string; name: string | null; username: string | null }>(
+  const rows = await fetchAll<{ id: string; name: string | null; username: string | null; platform: string | null }>(
     admin,
     "creators",
-    "id, name, username",
-    (q) => (platform ? q.eq("platform", platform) : q)
+    "id, name, username, platform",
+    // Same platform semantics as creators_username_platform_uidx (0050): a NULL
+    // platform counts as tiktok, so legacy NULL rows stay matchable for TikTok.
+    (q) =>
+      platform === "tiktok" ? q.or("platform.eq.tiktok,platform.is.null")
+        : platform ? q.eq("platform", platform)
+        : q
   );
   const lookup = new Map<string, string>();
+  // Cross-platform (platform=null) lookup: the same handle can exist once per
+  // platform, so order TikTok last — it wins the map deterministically instead
+  // of whichever row the database returned last.
+  if (!platform) rows.sort((a, b) => Number(a.platform !== "shopee") - Number(b.platform !== "shopee"));
   for (const c of rows) {
     if (c.username) lookup.set(String(c.username).toLowerCase(), c.id);
     if (c.name) lookup.set(String(c.name).toLowerCase(), c.id);

@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import {
   deriveJenisCreator, periodRangeByCreator, platformFromReportSource, rankTopNiches, sumBatchPerCreator,
+  resolveCreatorNames,
   resolveCreatorNamesByPlatform,
 } from "../platform-csv";
 
@@ -175,7 +176,7 @@ describe("resolveCreatorNamesByPlatform (Shopee ingest, CLAUDE.md #5)", () => {
    * regardless of the requested .limit().
    */
   function mockAdmin(
-    seedCreators: { id: string; name: string; username: string; platform: string }[],
+    seedCreators: { id: string; name: string; username: string; platform: string | null }[],
     opts: { insertError?: { code: string; message: string } } = {}
   ) {
     const inserted: Record<string, unknown>[] = [];
@@ -183,6 +184,13 @@ describe("resolveCreatorNamesByPlatform (Shopee ingest, CLAUDE.md #5)", () => {
     const build = (rows: typeof seedCreators) => ({
       eq: (column: string, value: unknown) =>
         build(rows.filter((c) => (c as unknown as Record<string, unknown>)[column] === value)),
+      // Only the shape loadCreatorLookup sends: "platform.eq.tiktok,platform.is.null".
+      or: (expr: string) =>
+        build(rows.filter((c) => expr.split(",").some((cond) => {
+          const [col, op, val] = cond.split(".");
+          const v = (c as unknown as Record<string, unknown>)[col];
+          return op === "is" ? v === null : v === val;
+        }))),
       range: (from: number, to: number) =>
         Promise.resolve({ data: rows.slice(from, Math.min(to + 1, from + PAGE)), error: null }),
     });
@@ -212,6 +220,40 @@ describe("resolveCreatorNamesByPlatform (Shopee ingest, CLAUDE.md #5)", () => {
     );
     expect(byName.get("vikahere")).not.toBe("CRT-TIKTOK-1");
     expect(createdProspects).toEqual(["vikahere"]);
+  });
+
+  // Regression (W4 Sep 2026): a Shopee upload created Shopee creators sharing a
+  // handle with TikTok creators; the TikTok ingest then matched the Shopee row and
+  // died flipping its platform on creators_username_platform_uidx.
+  it("TikTok resolution ignores a Shopee twin and keeps the TikTok creator", async () => {
+    const { admin, inserted } = mockAdmin([
+      { id: "CRT-TT", name: "ayrana.id", username: "ayrana.id", platform: "tiktok" },
+      { id: "CRT-SP", name: "ayrana.id", username: "ayrana.id", platform: "shopee" },
+    ]);
+    const { byName, createdProspects } = await resolveCreatorNamesByPlatform(
+      admin, ["ayrana.id"], "actor-1", "tiktok", "aktif"
+    );
+    expect(byName.get("ayrana.id")).toBe("CRT-TT");
+    expect(createdProspects).toEqual([]);
+    expect(inserted).toHaveLength(0);
+  });
+
+  it("TikTok resolution still matches a legacy creator whose platform is NULL (index counts NULL as tiktok)", async () => {
+    const { admin, inserted } = mockAdmin([
+      { id: "CRT-LEGACY", name: "Vika", username: "vikahere", platform: null },
+    ]);
+    const { byName } = await resolveCreatorNamesByPlatform(admin, ["vikahere"], "actor-1", "tiktok", "aktif");
+    expect(byName.get("vikahere")).toBe("CRT-LEGACY");
+    expect(inserted).toHaveLength(0);
+  });
+
+  it("cross-platform resolveCreatorNames prefers the TikTok row when a handle exists on both platforms", async () => {
+    const { admin } = mockAdmin([
+      { id: "CRT-TT", name: "dewiretisni", username: "dewiretisni", platform: "tiktok" },
+      { id: "CRT-SP", name: "dewiretisni", username: "dewiretisni", platform: "shopee" },
+    ]);
+    const { byName } = await resolveCreatorNames(admin, ["dewiretisni"], "actor-1");
+    expect(byName.get("dewiretisni")).toBe("CRT-TT");
   });
 
   it("matches an existing shopee creator by username, case-insensitively", async () => {
