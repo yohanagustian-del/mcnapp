@@ -3,7 +3,7 @@
 import { requirePermission } from "@/lib/rbac";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { writeAudit } from "@/lib/audit";
-import { fetchAll } from "@/lib/supabase/fetch-all";
+import { fetchAll, fetchAllIn } from "@/lib/supabase/fetch-all";
 import { fetchWindowHistory, loadProjectionConfig, windowStart } from "@/lib/projection/project-gmv";
 import type { PriceSegment } from "@/lib/projection/gmv";
 import { averageRoas, type CreatorPoolRow, type DealType, type PredictorResult } from "@/lib/m6/predictor";
@@ -72,11 +72,12 @@ export async function loadPoolForCategory(category: string): Promise<SegmentPool
 
   const creatorIds = [...perCreatorSegment.keys()];
   const creatorRows = creatorIds.length
-    ? await fetchAll<{ id: string; name: string; username: string | null }>(
+    ? await fetchAllIn<{ id: string; name: string; username: string | null }>(
         admin,
         "creators",
         "id, name, username",
-        (q) => q.in("id", creatorIds)
+        "id",
+        creatorIds
       )
     : [];
   const creatorMeta = new Map(creatorRows.map((c) => [c.id, c]));

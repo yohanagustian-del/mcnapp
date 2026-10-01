@@ -1,6 +1,6 @@
 import { requireMember, hasPermission } from "@/lib/rbac";
 import { createClient } from "@/lib/supabase/server";
-import { fetchAll } from "@/lib/supabase/fetch-all";
+import { fetchAll, fetchAllIn } from "@/lib/supabase/fetch-all";
 import { contractDays } from "@/lib/creators/contract";
 import { loadContractAlertDays } from "@/lib/creators/contract-alerts";
 import { PerpanjanganTable, type PerpanjanganRow } from "./perpanjangan-table";
@@ -48,9 +48,7 @@ export default async function PerpanjanganKreatorPage() {
 
   const creatorIds = creators.map((c) => c.id);
   const periods = creatorIds.length
-    ? await fetchAll<PeriodRow>(supabase, "creator_contract_periods", "creator_id", (q) =>
-        q.in("creator_id", creatorIds)
-      )
+    ? await fetchAllIn<PeriodRow>(supabase, "creator_contract_periods", "creator_id", "creator_id", creatorIds)
     : [];
   const priorCounts = new Map<string, number>();
   for (const p of periods) priorCounts.set(p.creator_id, (priorCounts.get(p.creator_id) ?? 0) + 1);
