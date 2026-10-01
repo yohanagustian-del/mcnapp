@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { writeAuditBatch, type AuditEntry } from "@/lib/audit";
 import { requirePermission } from "@/lib/rbac";
+import { isCreatorInScope } from "@/lib/schedule/scope";
 import { fetchAll } from "@/lib/supabase/fetch-all";
 import { parseSheet } from "@/lib/utils/sheet";
 import {
@@ -34,6 +35,8 @@ export interface PartnershipUploadReport {
   alerts: number;
   /** Username (platform) not registered as a creator — skipped, never created (A3). */
   unknownUsernames: string[];
+  /** CPM uploads only: username matched a creator owned by another CM — skipped (A2). */
+  outOfScopeUsernames: string[];
   /** Row-level problems: fatal errors (row skipped) and ignored cells. */
   rowNotes: { rowNumber: number; username: string; message: string }[];
 }
@@ -76,7 +79,7 @@ export async function uploadPartnershipStatus(formData: FormData): Promise<Partn
 
   const report: PartnershipUploadReport = {
     batchId: 0, totalRows: parsed.length, matched: 0, unchanged: 0, changed: 0, alerts: 0,
-    unknownUsernames: [], rowNotes: [],
+    unknownUsernames: [], outOfScopeUsernames: [], rowNotes: [],
   };
 
   const matched: { row: (typeof parsed)[number]; creator: CreatorRef }[] = [];
@@ -91,6 +94,10 @@ export async function uploadPartnershipStatus(formData: FormData): Promise<Partn
     const creator = byKey.get(`${row.platform}:${row.username.toLowerCase()}`);
     if (!creator) {
       report.unknownUsernames.push(`@${row.username} (${row.platform})`);
+      continue;
+    }
+    if (!isCreatorInScope(actor, creator.owner_cpm_id)) {
+      report.outOfScopeUsernames.push(`@${row.username} (${row.platform})`);
       continue;
     }
     matched.push({ row, creator });
@@ -137,7 +144,11 @@ export async function uploadPartnershipStatus(formData: FormData): Promise<Partn
       matched_rows: report.matched, unknown_usernames: report.unknownUsernames.length,
       changed_rows: changes.length,
       alert_rows: changes.filter((c) => c.regression.partnership || c.regression.fee).length,
-      summary: { unknown_usernames: report.unknownUsernames, row_notes: report.rowNotes },
+      summary: {
+        unknown_usernames: report.unknownUsernames,
+        out_of_scope_usernames: report.outOfScopeUsernames,
+        row_notes: report.rowNotes,
+      },
     })
     .select("id")
     .single();
@@ -214,6 +225,7 @@ export async function uploadPartnershipStatus(formData: FormData): Promise<Partn
     after: {
       file_name: file.name, total: report.totalRows, matched: report.matched, changed: changes.length,
       alerts: report.alerts, unknown: report.unknownUsernames.length,
+      out_of_scope: report.outOfScopeUsernames.length,
     },
     type: "auto",
   });

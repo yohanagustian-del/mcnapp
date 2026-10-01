@@ -15,11 +15,16 @@ const STATUS_STYLES: Record<PortalAccountStatus | "none", string> = {
  * Creator Portal account status + invite action (R36). The one UI for every
  * place staff invite creators (project participants, /creators/[id], CM
  * Workspace). Status comes from loadPortalStatus(); gate + scope live in
- * lib/portal/invite.ts — render only for viewers with `m9.invite` and in scope.
+ * lib/portal/invite.ts — render only for viewers with invite rights (portalInviteGate) and in scope.
  */
 export function PortalInviteButton({
-  creatorId, existingStatus,
-}: { creatorId: string; existingStatus: PortalAccountStatus | null }) {
+  creatorId, existingStatus, projectId,
+}: {
+  creatorId: string;
+  existingStatus: PortalAccountStatus | null;
+  /** Set when rendered in a Special Project: lets project-only inviters (Q5) invite participants. */
+  projectId?: string | number;
+}) {
   const [open, setOpen] = useState(false);
   const [email, setEmail] = useState("");
   const [link, setLink] = useState<string | null>(null);
@@ -38,6 +43,7 @@ export function PortalInviteButton({
     const fd = new FormData();
     fd.set("creator_id", creatorId);
     fd.set("email", withEmail);
+    if (projectId !== undefined) fd.set("project_id", String(projectId));
     startTransition(async () => {
       const res = await invitePortalAccount(fd);
       if (res.ok) setLink(res.link);

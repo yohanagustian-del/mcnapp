@@ -331,8 +331,10 @@ export const PERMISSIONS: Record<string, Role[]> = {
   "creators.contract_renew": [...MANAGEMENT_ROLES, ...ACQUISITION_ROLES, ...CM_ROLES],
   // ===== Improvement MCN T5: status kemitraan (Management Partnership / Fee Agreement) =====
   // Upload Excel status (satu-satunya jalur tulis creator_partnership_status, tanpa edit
-  // per baris — Q2). Asumsi A2: Management + CM Lead + Acquisition Lead.
-  "creators.partnership_upload": [...MANAGEMENT_ROLES, "cm_lead", "acquisition_lead"],
+  // per baris — Q2). Keputusan user A2 (2026-10-01): Management + seluruh CM + seluruh
+  // Akuisisi. cpm hanya boleh mengubah kreator miliknya — baris kreator lain dilewati di
+  // uploadPartnershipStatus (isCreatorInScope), bukan ditolak satu file.
+  "creators.partnership_upload": [...MANAGEMENT_ROLES, ...CM_ROLES, ...ACQUISITION_ROLES],
 };
 
 export function canAccessNav(item: NavItem, role: Role): boolean {

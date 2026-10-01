@@ -17,6 +17,7 @@ import { suggestParticipantTargetGmv } from "@/lib/m7/participant-target";
 import { generateProjectReports } from "./report-actions";
 import { PortalInviteButton } from "@/components/portal-invite-button";
 import { loadPortalStatus } from "@/lib/portal/invite";
+import { portalInviteGate } from "@/lib/portal/invite-gate";
 import { isCreatorInScope } from "@/lib/schedule/scope";
 import { ParticipantForm, type CreatorUsernameOption } from "./participant-form";
 import { DailyMetricsTable, type DailyMetricRow } from "./daily-metrics-table";
@@ -47,7 +48,8 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
   const member = await requireMember();
   const canManage = hasPermission("m7.manage", member.role);
   const canMetrics = hasPermission("m7.metrics", member.role);
-  const canInvitePortal = hasPermission("m9.invite", member.role);
+  // m9.invite holders, plus m7.curate-only roles (bizdev, campaign_ops) for participants — Q5.
+  const canInvitePortal = portalInviteGate(member.role) !== null;
   const canDecideJoin = hasPermission("m9.project_join_decide", member.role);
 
   const supabase = await createClient();
@@ -688,6 +690,7 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
                           <PortalInviteButton
                             creatorId={p.creator_id}
                             existingStatus={portalStatusByCreator[p.creator_id] ?? null}
+                            projectId={id}
                           />
                         ) : (
                           <span className="text-xs text-slate-400">—</span>
