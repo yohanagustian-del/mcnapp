@@ -2,7 +2,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { writeAudit } from "@/lib/audit";
 import { getConfig } from "@/lib/config";
-import { resolveCreatorNames } from "@/lib/platform-csv";
+import { resolveCreatorNamesByPlatform } from "@/lib/platform-csv";
 import { fetchAll } from "@/lib/supabase/fetch-all";
 import { validateLeakPeriod, validateW1W5Period } from "@/lib/utils/date";
 import { derivePeriod, parseMcnFile, parseTapFile, type SkippedRow } from "@/lib/ingest/parse";
@@ -491,10 +491,11 @@ export async function runLeakAnalysis(input: RunLeakAnalysisInput): Promise<Leak
 
   // Resolve usernames → creators.id (auto-create as 'aktif': a creator in a CM's
   // weekly leak report is by definition already joined with MEA).
-  const { byName, createdProspects } = await resolveCreatorNames(
+  const { byName, createdProspects } = await resolveCreatorNamesByPlatform(
     admin,
     result.creators.map((c) => c.creatorName),
     actorId,
+    "tiktok",
     "aktif"
   );
   const createdSet = new Set(createdProspects.map((n) => n.toLowerCase()));

@@ -5,7 +5,7 @@ import { writeAudit } from "@/lib/audit";
 import { getConfig } from "@/lib/config";
 import {
   deriveJenisCreator, distinctCreatorNames, platformFromReportSource, rankTopNiches,
-  resolveCreatorNames,
+  resolveCreatorNamesByPlatform,
 } from "@/lib/platform-csv";
 import type { PriceBounds } from "@/lib/projection/gmv";
 import { validateW1W5Period } from "@/lib/utils/date";
@@ -232,8 +232,8 @@ export async function runIngest(input: RunIngestInput): Promise<RunIngestResult>
   // performance report is by definition already joined with MEA (CLAUDE.md #1),
   // so newStatus="aktif" (same convention as /metrics upload).
   const detectedNames = distinctCreatorNames(mcnParsed.rows.map((r) => ({ creator: r.creatorName })));
-  const { byName, createdProspects, failed: failedCreators } = await resolveCreatorNames(
-    admin, detectedNames, actorId, "aktif"
+  const { byName, createdProspects, failed: failedCreators } = await resolveCreatorNamesByPlatform(
+    admin, detectedNames, actorId, "tiktok", "aktif"
   );
   // A creator that could not be created/resolved no longer aborts the upload —
   // it is reported here and only ITS rows are skipped below.

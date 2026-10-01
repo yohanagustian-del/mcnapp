@@ -35,7 +35,7 @@ const resolveCreatorNamesMock = vi.fn(async (_admin: unknown, names: string[]) =
   return { byName, createdProspects: [] as string[] };
 });
 vi.mock("@/lib/platform-csv", () => ({
-  resolveCreatorNames: (...args: unknown[]) =>
+  resolveCreatorNamesByPlatform: (...args: unknown[]) =>
     (resolveCreatorNamesMock as unknown as (...a: unknown[]) => unknown)(...args),
 }));
 
@@ -119,6 +119,8 @@ describe("uploadLeakArtifact — format routing", () => {
     const result = await uploadLeakArtifact({ leakFile: v1File(), actorId: "actor-1" });
 
     expect(result.format).toBe("v1");
+    // TikTok leak report → creators resolved within TikTok only (never a Shopee twin).
+    expect((resolveCreatorNamesMock.mock.calls[0] as unknown[])[3]).toBe("tiktok");
     expect(writeLeakRollupsMock).toHaveBeenCalledTimes(1);
     expect(writeUnknownLeakRollupsMock).not.toHaveBeenCalled();
     expect(result.creators).toHaveLength(1);
