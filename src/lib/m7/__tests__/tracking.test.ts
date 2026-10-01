@@ -64,6 +64,38 @@ describe("trackDaily", () => {
     expect(s.points).toHaveLength(1);
     expect(s.cumActual).toBe(100);
   });
+
+  it("gmvGapToTarget = full-period target minus achieved, floored at 0", () => {
+    const behind = trackDaily(
+      [{ date: "2026-07-01", gmv: 200_000 }, { date: "2026-07-03", gmv: 300_000 }],
+      start, end, 5_500_000, 0.05
+    );
+    expect(behind.targetGmv).toBe(5_500_000);
+    expect(behind.gmvGapToTarget).toBe(5_000_000); // vs full target, not the ramp point
+
+    const reached = trackDaily([{ date: "2026-07-02", gmv: 6_000_000 }], start, end, 5_500_000, 0.05);
+    expect(reached.gmvGapToTarget).toBe(0); // over-achievement never goes negative
+
+    const exact = trackDaily([{ date: "2026-07-02", gmv: 5_500_000 }], start, end, 5_500_000, 0.05);
+    expect(exact.gmvGapToTarget).toBe(0);
+  });
+
+  it("daysRemaining = totalDays − daysElapsed, floored at 0", () => {
+    const mid = trackDaily([], start, end, 1_000_000, 0.05, "ramp", "2026-07-04");
+    expect(mid.daysElapsed).toBe(4);
+    expect(mid.daysRemaining).toBe(6);
+
+    const lastDay = trackDaily([], start, end, 1_000_000, 0.05, "ramp", end);
+    expect(lastDay.daysRemaining).toBe(0);
+
+    const afterEnd = trackDaily([], start, end, 1_000_000, 0.05, "ramp", "2026-07-20");
+    expect(afterEnd.daysElapsed).toBe(10); // clamped to the period
+    expect(afterEnd.daysRemaining).toBe(0);
+
+    const beforeStart = trackDaily([], start, end, 1_000_000, 0.05, "ramp", "2026-06-25");
+    expect(beforeStart.daysElapsed).toBe(1); // clamped to day 1
+    expect(beforeStart.daysRemaining).toBe(9);
+  });
 });
 
 describe("checkProfitability", () => {

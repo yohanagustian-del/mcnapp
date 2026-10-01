@@ -18,6 +18,7 @@ import { generateProjectReports } from "./report-actions";
 import { PortalInviteButton } from "./portal-invite-button";
 import { ParticipantForm, type CreatorUsernameOption } from "./participant-form";
 import { DailyMetricsTable, type DailyMetricRow } from "./daily-metrics-table";
+import { ProjectTargetSummary } from "./project-target-summary";
 import { CreatorPerformanceTable, type CreatorPerformanceRow } from "./creator-performance-table";
 import { CmPerformanceTable, type CmPerformanceRow } from "./cm-performance-table";
 import { JoinRequestPanel, type JoinRequestRow } from "../join-request-panel";
@@ -148,7 +149,6 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
   const cumKomisiCreator = (metrics ?? []).reduce((s, m) => s + Number(m.creator_commission ?? 0), 0);
   const cumLiveGmv = (metrics ?? []).reduce((s, m) => s + Number(m.gmv_live ?? 0), 0);
   const liveContribution = tracking.cumActual > 0 ? cumLiveGmv / tracking.cumActual : 0;
-  const daysRemaining = Math.max(tracking.totalDays - tracking.daysElapsed, 0);
 
   // Live-active helper (PRD §2.3): live GMV ≥ config over the recent ~1 month.
   // Module 0.5 Fase 2: creator_period_summary (satu baris per creator per
@@ -235,7 +235,7 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
     creatorGmv.set(r.creator_id, cur);
   }
 
-  // Baris kedua tabel di bawah dihitung di SERVER (kumulatif/gap dari trackDaily,
+  // Baris kedua tabel di bawah dihitung di SERVER (GMV harian dari trackDaily,
   // % target & kontribusi dari agregat di atas); komponen klien hanya mengurutkan
   // dan memaginasi — CLAUDE.md #4, tidak ada perhitungan ulang di UI.
   const adsByDate = new Map(
@@ -247,9 +247,6 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
       date: pt.date,
       dayIndex: pt.dayIndex,
       gmvActual: pt.gmvActual,
-      cumActual: pt.cumActual,
-      cumTarget: pt.cumTarget,
-      gap: pt.gap,
       adsSpend: m?.ads === null || m?.ads === undefined ? null : Number(m.ads),
       meaRevenue: m?.mea === null || m?.mea === undefined ? null : Number(m.mea),
     };
@@ -532,7 +529,7 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
       <div className="mt-3 grid gap-4 sm:grid-cols-3">
         <div className="rounded-lg border border-slate-200 bg-white p-4">
           <p className="text-xs uppercase text-slate-500">Hari Tersisa</p>
-          <p className="mt-1 text-lg font-semibold">{daysRemaining} hari</p>
+          <p className="mt-1 text-lg font-semibold">{tracking.daysRemaining} hari</p>
           <p className="text-xs text-slate-400">dari total {tracking.totalDays} hari periode project</p>
         </div>
         <div className="rounded-lg border border-slate-200 bg-white p-4">
@@ -549,6 +546,7 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
 
       {/* ===== Daily metrics ===== */}
       <h2 className="mt-8 text-lg font-medium">Metrik Harian</h2>
+      <ProjectTargetSummary tracking={tracking} />
       <p className="mt-1 text-xs text-slate-500">
         Klik judul kolom untuk mengurutkan naik/turun. Baris per halaman bisa diatur 10/20/30.
       </p>
