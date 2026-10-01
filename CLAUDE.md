@@ -125,6 +125,15 @@ Platform internal MCN MEA (agency creator TikTok/Shopee). Menggabungkan tools te
   Brand yang sudah ada (`brandLeadKey`, huruf+angka lowercase) TIDAK dibuat dua kali: digabung secara
   ADITIF (`mergeBrandLead` — kolom kosong diisi, kontak baru ditambah, catatan ditambah baris, tidak
   ada yang ditimpa, source/status tak disentuh), karena itu boleh tanpa gerbang edit per-baris.
+- **Akun Portal Kreator = password sementara UNIK, tidak pernah password default bersama** (keputusan
+  user 2026-10-01, opsi A+B, migrasi 0085). Undangan (`invitePortalAccount`) langsung membuat akun Auth
+  dengan `generateTempPassword()` (`lib/portal/temp-password.ts`), staff mengirimnya lewat WA, dan
+  `requireCreator()` memaksa kreator membuat password sendiri di `/ganti-password` selama
+  `creator_users.must_change_password = true`. Lupa password tanpa email = tombol **Reset Password** staff
+  (`resetPortalPassword`, izin `m9.invite`, CPM hanya kreator miliknya) yang membuat password sementara
+  baru. Password sementara tidak pernah disimpan/di-audit. JANGAN membuat password default yang sama untuk
+  semua kreator atau "lupa password = kembali ke password default": siapa pun yang tahu email kreator
+  bisa masuk ke akunnya.
 - **Katalog PX Exchange** (`px_catalog_items`/`px_catalog_pushes`, migrasi 0067) diisi lewat bridge
   masuk `POST /api/bridge/px-catalog` (`docs/BRIDGE_PX_CATALOG_CONTRACT.md`, arah CDPS→MCN,
   kebalikan dari `docs/BRIDGE_PRODUCT_EXCHANGE_CONTRACT.md` yang MCN→CDPS) — snapshot PENUH tiap

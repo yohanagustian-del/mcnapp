@@ -2,6 +2,7 @@
 
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { writeAudit } from "@/lib/audit";
 import { findEligiblePrincipalByAuthUid } from "@/lib/auth/principal";
 import { validateNewPassword } from "@/lib/auth/password-reset";
@@ -53,6 +54,17 @@ export async function resetPassword(
   const { error: updateError } = await supabase.auth.updateUser({ password: newPassword });
   if (updateError) {
     return { ok: false, error: "Gagal menyimpan password: " + updateError.message };
+  }
+
+  // A creator who chose a password via the email link no longer needs to replace a
+  // staff-issued temporary one (migration 0085) — otherwise the next login would
+  // force a second change.
+  if (principal.kind === "creator_user") {
+    const { error: flagError } = await createAdminClient()
+      .from("creator_users")
+      .update({ must_change_password: false, temp_password_set_at: null })
+      .eq("auth_uid", user.id);
+    if (flagError) console.error("clear must_change_password failed:", flagError.message);
   }
 
   await writeAudit({

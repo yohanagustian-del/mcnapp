@@ -94,7 +94,7 @@ export function CmCreatorStatusTable({
                     </td>
                     <td className="px-3 py-2">
                       {r.portal !== undefined ? (
-                        <PortalInviteButton creatorId={r.id} existingStatus={r.portal} />
+                        <PortalInviteButton creatorId={r.id} existingStatus={r.portal} canReset />
                       ) : (
                         <span className="text-xs text-slate-400">—</span>
                       )}

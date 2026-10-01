@@ -50,6 +50,8 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
   const canMetrics = hasPermission("m7.metrics", member.role);
   // m9.invite holders, plus m7.curate-only roles (bizdev, campaign_ops) for participants — Q5.
   const canInvitePortal = portalInviteGate(member.role) !== null;
+  // Reset Password = m9.invite only; project-only inviters (Q5) can invite, not reset.
+  const canResetPortal = portalInviteGate(member.role) === "any";
   const canDecideJoin = hasPermission("m9.project_join_decide", member.role);
 
   const supabase = await createClient();
@@ -691,6 +693,7 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
                             creatorId={p.creator_id}
                             existingStatus={portalStatusByCreator[p.creator_id] ?? null}
                             projectId={id}
+                            canReset={canResetPortal}
                           />
                         ) : (
                           <span className="text-xs text-slate-400">—</span>
