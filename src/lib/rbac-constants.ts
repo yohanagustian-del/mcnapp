@@ -151,11 +151,12 @@ export const PERMISSIONS: Record<string, Role[]> = {
   // Dimiliki CM (Creator Manager) + management + akuisisi + creator_support — sejajar
   // dengan RLS creators_update (0002). commission_share TETAP read-only (CLAUDE.md #3).
   "creators.edit": [...MANAGEMENT_ROLES, ...CM_ROLES, ...ACQUISITION_ROLES, "creator_support"],
-  // Hapus master data kreator (permanen). SENGAJA management saja — bukan CM /
-  // akuisisi: menghapus kreator berpotensi merugikan (CLAUDE.md #2), dan kreator
-  // yang sudah punya kontrak/report/komisi ditolak di server (lib/creators/delete.ts)
-  // dengan saran memakai status "nonaktif". Dicermin RLS creators_delete (0028).
-  "creators.delete": MANAGEMENT_ROLES,
+  // Hapus master data kreator (permanen). Management + CM Lead (leader TikTok &
+  // Shopee, dibuka 2026-10-01) — BUKAN cpm / akuisisi: menghapus kreator berpotensi
+  // merugikan (CLAUDE.md #2), dan kreator yang sudah punya kontrak/report/komisi
+  // ditolak di server (lib/creators/delete.ts) dengan saran memakai status
+  // "nonaktif". Jejak lengkap di audit_logs. Dicermin RLS creators_delete (0086).
+  "creators.delete": [...MANAGEMENT_ROLES, "cm_lead"],
   // CPM tidak boleh assign kreator ke dirinya sendiri (m8.assign_creator = Director/
   // Head/SPV/CM Lead), jadi jalurnya REQUEST: CM mengajukan, pemegang izin assign yang
   // memutuskan. Mengajukan request tidak mengubah data apa pun — aman untuk semua CM.
