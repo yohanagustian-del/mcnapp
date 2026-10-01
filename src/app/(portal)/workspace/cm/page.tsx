@@ -32,6 +32,17 @@ import { CreatorGrowthPanel, type CreatorGrowthRow } from "./creator-growth-pane
 import { LeakTable, type LeakTableRow } from "./leak-table";
 import { CampaignRequestsTable, type CampaignRequestRow } from "./campaign-requests-table";
 import { CmProductMatchPanel } from "./cm-product-match-panel";
+import { CmCreatorStatusTable, type CmCreatorStatusRow } from "./cm-creator-status-table";
+import {
+  contractBucket,
+  contractDays,
+  contractRemaining,
+  DEFAULT_CONTRACT_ALERT_DAYS,
+} from "@/lib/creators/contract";
+import { loadContractAlertDays } from "@/lib/creators/contract-alerts";
+import { loadPartnershipLabels, loadPartnershipStatus } from "@/lib/creators/partnership";
+import { loadPortalStatus, type PortalAccountStatus } from "@/lib/portal/invite";
+import { isCreatorInScope } from "@/lib/schedule/scope";
 
 export const dynamic = "force-dynamic";
 
@@ -129,7 +140,8 @@ export default async function CmWorkspacePage({
     // "Kategori" di tabel Pertumbuhan GMV Mingguan dan Creator & Growth Mingguan.
     // creators punya dua FK ke team_members (CM + Akuisitor) → embed CM harus
     // menyebut nama constraint-nya, kalau tidak PostgREST menolak sebagai ambigu.
-    .select("id, name, username, level, segment, status, gmv, owner_cpm_id, ads_budget_cap, creator_class, niche, top_niches, team_members!creators_owner_cpm_id_fkey(name)")
+    // platform/join_date/contract_end_date: section Kontrak & Status Kemitraan (T6).
+    .select("id, name, username, platform, level, segment, status, gmv, owner_cpm_id, ads_budget_cap, creator_class, niche, top_niches, join_date, contract_end_date, team_members!creators_owner_cpm_id_fkey(name)")
     .order("gmv", { ascending: false })
     .limit(100);
   if (isCpm) creatorsQuery = creatorsQuery.eq("owner_cpm_id", member.id);
@@ -146,6 +158,53 @@ export default async function CmWorkspacePage({
       null,
   }));
   const creatorIds = creators.map((c) => c.id);
+
+  // ===== Improvement MCN T6 — Kontrak & Status Kemitraan (scope = creators di atas) =====
+  // Sisa kontrak & bucket dari contract.ts + app_config m8.contract_alert_days (bukan 30
+  // di-hardcode); status kemitraan dibaca dari creator_partnership_status (upload Excel T5,
+  // RLS: CPM hanya kreatornya); portal & perpanjang memakai komponen bersama T2/T3.
+  const canInvitePortal = hasPermission("m9.invite", member.role);
+  const canRenewContract = hasPermission("creators.contract_renew", member.role);
+  const [contractAlertDays, partnershipLabels, partnershipById, portalById, { data: partnershipAlertRows }] =
+    await Promise.all([
+      loadContractAlertDays().catch(() => DEFAULT_CONTRACT_ALERT_DAYS),
+      loadPartnershipLabels(),
+      loadPartnershipStatus(supabase, creatorIds),
+      canInvitePortal ? loadPortalStatus(creatorIds) : Promise.resolve({} as Record<string, PortalAccountStatus>),
+      creatorIds.length
+        ? supabase
+            .from("platform_alerts")
+            .select("id, entity_id, message, created_at")
+            .eq("alert_type", "partnership_drop")
+            .eq("resolved", false)
+            .in("entity_id", creatorIds)
+            .order("created_at", { ascending: false })
+            .limit(50)
+        : Promise.resolve({ data: [] as { id: number; entity_id: string; message: string; created_at: string }[] }),
+    ]);
+  const statusNowMs = Date.now();
+  const creatorStatusRows: CmCreatorStatusRow[] = creators.map((c) => {
+    const days = contractDays(c.join_date, c.contract_end_date, statusNowMs);
+    const p = partnershipById.get(c.id);
+    return {
+      id: c.id,
+      name: c.name,
+      username: c.username,
+      platform: c.platform ?? "tiktok",
+      cmName: c.cmName,
+      contractEndDate: c.contract_end_date,
+      contractLabel: contractRemaining(c.join_date, c.contract_end_date, statusNowMs, contractAlertDays).label,
+      bucket: contractBucket(days, contractAlertDays),
+      partnership: p?.partnership_status ?? null,
+      fee: p?.fee_agreement_status ?? null,
+      portal: canInvitePortal && isCreatorInScope(member, c.owner_cpm_id) ? (portalById[c.id] ?? null) : undefined,
+      canRenew: canRenewContract && isCreatorInScope(member, c.owner_cpm_id),
+    };
+  });
+  // Urgent first (expired → danger → warning → rest), then by days left.
+  const bucketOrder: Record<string, number> = { expired: 0, danger: 1, warning: 2, ok: 3, unknown: 4 };
+  creatorStatusRows.sort((a, b) => bucketOrder[a.bucket] - bucketOrder[b.bucket]);
+  const urgentContractCount = creatorStatusRows.filter((r) => r.bucket === "danger" || r.bucket === "expired").length;
 
   // ===== M13 Jadwal Live — compact read-only preview (scope: sama seperti creators di atas) =====
   const todayIso = todayWib();
@@ -529,6 +588,30 @@ export default async function CmWorkspacePage({
           )}
         </>
       )}
+
+      {/* ===== Improvement MCN T6 — Kontrak & Status Kemitraan ===== */}
+      <section>
+        <h2 className="text-lg font-medium">Kreator Saya — Kontrak & Status Kemitraan</h2>
+        <p className="mt-1 text-xs text-slate-500">
+          Merah = kontrak habis atau sisa ≤{contractAlertDays.danger} hari, kuning = ≤{contractAlertDays.warning} hari.
+          Status Management Partnership & Fee Agreement (khusus TikTok) dari upload Excel di menu Kreator.
+        </p>
+        {urgentContractCount > 0 && (
+          <p className="mt-2 rounded-md bg-red-50 p-2 text-sm font-medium text-red-700">
+            {urgentContractCount} kreator kontraknya habis atau tersisa ≤{contractAlertDays.danger} hari — segera perpanjang.
+          </p>
+        )}
+        {(partnershipAlertRows ?? []).length > 0 && (
+          <ul className="mt-2 space-y-1 rounded-md bg-red-50 p-2 text-xs text-red-700">
+            {(partnershipAlertRows ?? []).map((a) => (
+              <li key={a.id}>⚠ {a.message}</li>
+            ))}
+          </ul>
+        )}
+        <div className="mt-3">
+          <CmCreatorStatusTable rows={creatorStatusRows} labels={partnershipLabels} showCm={!isCpm} />
+        </div>
+      </section>
 
       {/* ===== Pertumbuhan GMV Mingguan (W1-W5) — pemilih bulan ===== */}
       <section>
