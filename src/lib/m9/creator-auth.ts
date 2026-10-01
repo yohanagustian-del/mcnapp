@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { creatorPortalAccess } from "@/lib/portal/temp-password";
 
 /**
  * M9 external principal guard. Creators authenticate via their own Supabase Auth session
@@ -24,11 +25,16 @@ export async function requireCreator(): Promise<CreatorSession> {
   const admin = createAdminClient();
   const { data: cu } = await admin
     .from("creator_users")
-    .select("id, creator_id, email, status")
+    .select("id, creator_id, email, status, must_change_password")
     .eq("auth_uid", user.id)
     .maybeSingle();
 
-  if (!cu || cu.status !== "active") {
+  const access = creatorPortalAccess(cu);
+  // Logged in with a staff-issued temporary password (invite or Reset Password,
+  // migration 0085): nothing in the portal opens until the creator sets their own.
+  if (access === "change_password") redirect("/ganti-password");
+
+  if (!cu || access === "reject") {
     // Not an active creator — check if this auth user is actually a team member
     // hitting a portal page, so they bounce to the internal dashboard instead of
     // seeing a "not registered as creator" error. Lookup only runs in this failure path.

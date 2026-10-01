@@ -26,6 +26,12 @@ export default async function ForgotPasswordPage({
         )}
 
         <ForgotPasswordForm />
+
+        <p className="mt-4 rounded-md bg-slate-50 p-3 text-xs text-slate-600">
+          <span className="font-medium">Kreator:</span> tidak menerima email, atau emailnya sudah tidak aktif? Hubungi
+          CM kamu dan minta <span className="font-medium">Reset Password</span>. CM akan mengirim password sementara
+          lewat WhatsApp, lalu kamu diminta membuat password baru saat login.
+        </p>
       </div>
     </main>
   );

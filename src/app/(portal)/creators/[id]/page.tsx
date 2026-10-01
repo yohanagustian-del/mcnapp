@@ -172,7 +172,7 @@ export default async function CreatorDetailPage({
         {canInvitePortal && (
           <div className="rounded-lg border border-slate-200 bg-white px-3 py-2">
             <p className="mb-1 text-xs uppercase text-slate-500">Akun Portal</p>
-            <PortalInviteButton creatorId={creator.id} existingStatus={portalStatus} />
+            <PortalInviteButton creatorId={creator.id} existingStatus={portalStatus} canReset />
           </div>
         )}
       </div>

@@ -2,6 +2,11 @@
 
 Status per sesi 2026-07-09 (sesi 5, backlog-sweep + audit deploy). Baca ini + `CLAUDE.md` sebelum lanjut.
 
+## ⚡ SESI 2026-10-01 — Portal Kreator: password sementara + Reset Password (opsi A+B)
+1. User meminta password default "@Mcnmea" untuk semua kreator + lupa password otomatis kembali ke "@Mcnmea". Ditolak karena siapa pun yang tahu email kreator bisa masuk ke akunnya; user memilih pengganti A+B (lihat CLAUDE.md #9).
+2. Migrasi **0085** (`creator_users.must_change_password`, `temp_password_set_at`). Undangan tidak lagi memakai link `/aktivasi` (halaman itu tetap ada untuk token lama). Tombol: **Undang ke Portal → Buat Akun & Password**, **Buat Password Baru** (status Diundang), **Reset Password** (status Aktif, `m9.invite`).
+3. Kreator yang reset lewat email (`/auth/reset-password`) otomatis terbebas dari wajib ganti password.
+
 ## ⚡ SESI 2026-10-01 — Brand Lead Bank: search Nama Brand/Niche + upload massal
 1. Migrasi **0084** (`brand_leads.bizdev_names/brand_group/ads_scheme`, `brand_support` + `flash_sale`, view `brand_lead_niches` security_invoker) **SUDAH APPLY** ke staging (`fomlangoiiywhexwoqom`) & production (`bqknstylbpwsnlgnzayw`), diverifikasi SQL, `get_advisors` security tanpa temuan baru.
 2. `/leads`: search Nama Brand + filter Niche + kolom Contact PIC/Bizdev/Dukungan/Ads Brand; tombol "Upload Massal" (template .xlsx, atau spreadsheet matchmaking BizDev langsung). Lihat CLAUDE.md #9.
