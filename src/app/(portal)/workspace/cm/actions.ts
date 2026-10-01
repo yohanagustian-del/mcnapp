@@ -5,7 +5,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { writeAudit } from "@/lib/audit";
 import { getConfig } from "@/lib/config";
 import { requirePermission, type TeamMember } from "@/lib/rbac";
-import { fetchAll } from "@/lib/supabase/fetch-all";
+import { fetchAll, fetchAllIn } from "@/lib/supabase/fetch-all";
 import { genId } from "@/lib/utils/id";
 import { parseRupiah } from "@/lib/utils/rupiah";
 import { adsNeedsDirectorApproval, isPerfDrop, latestTwoPeriods, type PeriodSummaryPoint } from "@/lib/m8/routing";
@@ -145,10 +145,10 @@ export async function refreshGrowthAlerts(formData: FormData): Promise<void> {
   if (creators.length === 0) { revalidatePath("/workspace/cm"); return; }
 
   const ids = creators.map((c) => c.id);
-  const rows = await fetchAll<{ creator_id: string; period_start: string; period_end: string; upload_batch: string; affiliate_gmv: number | null; created_at: string }>(
+  const rows = await fetchAllIn<{ creator_id: string; period_start: string; period_end: string; upload_batch: string; affiliate_gmv: number | null; created_at: string }>(
     admin, "creator_period_summary",
     "creator_id, period_start, period_end, upload_batch, affiliate_gmv, created_at",
-    (q) => q.in("creator_id", ids));
+    "creator_id", ids);
 
   // Group per creator; latestTwoPeriods dedupes multi-batch periods (latest
   // batch by created_at wins) and returns the two most recent periods.

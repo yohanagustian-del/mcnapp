@@ -1,6 +1,6 @@
 import { requireMember, hasPermission, ACQUISITION_ROLES } from "@/lib/rbac";
 import { createClient } from "@/lib/supabase/server";
-import { fetchAll } from "@/lib/supabase/fetch-all";
+import { fetchAll, fetchAllIn } from "@/lib/supabase/fetch-all";
 import { getConfig } from "@/lib/config";
 import { gmvLevelEstimate, type AffiliateLevelRule } from "@/lib/creators/affiliate-level";
 import { loadContractAlertDays } from "@/lib/creators/contract-alerts";
@@ -81,11 +81,13 @@ export default async function CreatorsPage() {
   }
   const creatorIds = creators.map((c) => c.id);
   const mtdRows = creatorIds.length
-    ? await fetchAll<PeriodMtdRow>(
+    ? await fetchAllIn<PeriodMtdRow>(
         supabase,
         "creator_period_summary",
         "creator_id, period_start, affiliate_gmv, created_at",
-        (q) => q.in("creator_id", creatorIds).gte("period_start", monthStartIso)
+        "creator_id",
+        creatorIds,
+        (q) => q.gte("period_start", monthStartIso)
       )
     : [];
   // Dedup batch re-upload: per (creator, period_start), baris created_at terbaru menang.
