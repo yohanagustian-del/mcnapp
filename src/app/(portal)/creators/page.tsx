@@ -12,6 +12,8 @@ import { CreatorsWithoutCmAlert } from "@/components/creators-without-cm-alert";
 import { uploadCreators } from "./actions";
 import { CreatorsTable, type CreatorTableRow } from "./creators-table";
 import { CreatorImportPanel } from "./creator-import-panel";
+import { PartnershipUploadPanel } from "./partnership-upload-panel";
+import { loadLastPartnershipUpload } from "@/lib/creators/partnership";
 import { CreatorCreateDialog } from "./creator-create-dialog";
 import { CmRequestsPanel } from "./cm-requests-panel";
 
@@ -35,6 +37,7 @@ type CreatorRow = Omit<CreatorTableRow, "cmName" | "acquisitorName"> & {
 export default async function CreatorsPage() {
   const member = await requireMember();
   const canUpload = hasPermission("creators.bulk_upload", member.role);
+  const canUploadPartnership = hasPermission("creators.partnership_upload", member.role);
   const canEdit = hasPermission("creators.edit", member.role);
   const canDelete = hasPermission("creators.delete", member.role);
   const canAssignCm = hasPermission("m8.assign_creator", member.role);
@@ -45,6 +48,7 @@ export default async function CreatorsPage() {
   const alertDays = await loadContractAlertDays();
 
   const supabase = await createClient();
+  const lastPartnershipUpload = canUploadPartnership ? await loadLastPartnershipUpload(supabase) : null;
   // Tabel dipaginasi di klien (10/20/50/100 per halaman), jadi daftar penuh
   // dimuat sekali — lewat fetchAll, karena satu halaman PostgREST hanya 1000
   // baris: dengan .limit(1000) kreator ke-1001 dan seterusnya tidak pernah
@@ -255,6 +259,17 @@ export default async function CreatorsPage() {
             <h2 className="text-sm font-semibold text-slate-700">Import Kreator (Username + CM)</h2>
             <div className="mt-2">
               <CreatorImportPanel />
+            </div>
+          </div>
+        )}
+
+        {canUploadPartnership && (
+          <div className="mt-6">
+            <h2 className="text-sm font-semibold text-slate-700">
+              Upload Status Kemitraan (Management Partnership & Fee Agreement)
+            </h2>
+            <div className="mt-2">
+              <PartnershipUploadPanel lastUploadAt={lastPartnershipUpload} />
             </div>
           </div>
         )}

@@ -21,9 +21,8 @@ export interface AuditEntry {
  * External principals (creator_user) and system jobs (retention) are not in team_members,
  * so their actor is recorded via actorLabel while actor_id stays null.
  */
-export async function writeAudit(entry: AuditEntry): Promise<void> {
-  const admin = createAdminClient();
-  const { error } = await admin.from("audit_logs").insert({
+function toRow(entry: AuditEntry) {
+  return {
     actor_id: entry.actorId ?? null,
     actor_label: entry.actorLabel ?? null,
     action: entry.action,
@@ -32,6 +31,24 @@ export async function writeAudit(entry: AuditEntry): Promise<void> {
     before: entry.before ?? null,
     after: entry.after ?? null,
     type: entry.type,
-  });
+  };
+}
+
+export async function writeAudit(entry: AuditEntry): Promise<void> {
+  const admin = createAdminClient();
+  const { error } = await admin.from("audit_logs").insert(toRow(entry));
   if (error) throw new Error(`writeAudit failed: ${error.message}`);
+}
+
+/**
+ * Same as writeAudit for many entries at once (bulk uploads that change hundreds of
+ * rows) — one insert per chunk instead of one round-trip per row.
+ */
+export async function writeAuditBatch(entries: AuditEntry[]): Promise<void> {
+  if (entries.length === 0) return;
+  const admin = createAdminClient();
+  for (let i = 0; i < entries.length; i += 500) {
+    const { error } = await admin.from("audit_logs").insert(entries.slice(i, i + 500).map(toRow));
+    if (error) throw new Error(`writeAuditBatch failed: ${error.message}`);
+  }
 }

@@ -69,3 +69,15 @@ export async function loadPartnershipStatus(
     throw new Error(`Gagal memuat status kemitraan: ${message}`);
   }
 }
+
+/** Time of the latest status upload (null = none yet, or migration 0083 not applied). */
+export async function loadLastPartnershipUpload(supabase: SupabaseClient): Promise<string | null> {
+  const { data, error } = await supabase
+    .from("creator_partnership_uploads")
+    .select("created_at")
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error) return null;
+  return (data?.created_at as string | undefined) ?? null;
+}
