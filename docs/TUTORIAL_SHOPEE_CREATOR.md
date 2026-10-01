@@ -183,6 +183,7 @@ Kolom *Campaign Type* dan *Partner Promo* sengaja diabaikan.
 | Pesan / gejala | Penyebab | Solusi |
 |---|---|---|
 | *File Shopee kosong atau tidak terbaca…* | File kosong/rusak/bukan Conversion Report | Export ulang dari Shopee |
+| *Header kolom Conversion Report Shopee tidak ditemukan… Baris pertama file: "…"* | Baris pertama bukan header Conversion Report (mis. export berbahasa Inggris, laporan lain, atau file yang sudah diolah). Baris judul di atas header (≤5 baris) dan file UTF-16 hasil simpan ulang Excel sudah otomatis ditangani | Cek isi "Baris pertama file" di pesan; export ulang Conversion Report dari Shopee Affiliate berbahasa Indonesia tanpa diolah |
 | *File … terlalu besar (… MB setelah dikompres; maksimum 200 MB)* / *terlalu besar setelah diekstrak (maksimum 400 MB)* | Export sangat besar (di atas ±400 MB CSV, atau ZIP/XLSX di atas 200 MB) | Export dengan rentang tanggal lebih pendek, upload terpisah (window berbeda) |
 | *File ZIP … berisi N file data* / *tidak berisi file .csv/.xlsx* | ZIP berisi lebih dari satu file atau kosong | Satu ZIP = satu CSV, atau upload CSV-nya langsung (tidak perlu ZIP) |
 | *Tidak ada baris berstatus Selesai pada file ini.* | Semua pesanan belum Selesai atau salah rentang | Ganti rentang tanggal export |

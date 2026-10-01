@@ -113,11 +113,36 @@ describe("parseShopeeFile", () => {
     expect(rows.reduce((a, r) => a + r.gmv, 0)).toBe(20_000_000);
   });
 
-  it("reports unrecognized headers instead of silently returning nothing", async () => {
-    const { rows, skipped, rawHeadersFound } = await parseShopeeFile(csvFile("foo,bar\n1,2\n"));
+  it("reports unrecognized headers with the file's first line instead of silently returning nothing", async () => {
+    const { rows, skipped, rawHeadersFound, headerNotFound } = await parseShopeeFile(
+      csvFile("Order ID,Order Status\n1,Completed\n")
+    );
     expect(rows).toHaveLength(0);
     expect(rawHeadersFound).toEqual([]);
     expect(skipped[0].reason).toMatch(/Header wajib tidak ditemukan/);
+    expect(headerNotFound).toEqual({ firstLine: "Order ID,Order Status" });
+  });
+
+  it("skips title/preamble lines above the header (same allowance as parseSheet)", async () => {
+    const csv = "\uFEFFLaporan Konversi Affiliate,,\nPeriode 2026-07-01 - 2026-07-07\n" + [HEADER, row({})].join("\n");
+    const { rows, headerNotFound } = await parseShopeeFile(csvFile(csv));
+    expect(headerNotFound).toBeUndefined();
+    expect(rows).toHaveLength(1);
+    expect(rows[0].affiliateUsername).toBe("affuser");
+  });
+
+  it("decodes a UTF-16 file (Excel 'Unicode Text' re-save) by its BOM", async () => {
+    const text = [HEADER, row({ productName: "Kalung — Émile ✓" })].join("\n");
+    const le = new Uint8Array(2 + text.length * 2);
+    le.set([0xff, 0xfe]);
+    for (let i = 0; i < text.length; i++) {
+      const c = text.charCodeAt(i);
+      le[2 + 2 * i] = c & 0xff;
+      le[3 + 2 * i] = c >> 8;
+    }
+    const { rows } = await parseShopeeFile(new File([le], "export.csv", { type: "text/csv" }));
+    expect(rows).toHaveLength(1);
+    expect(rows[0].productName).toBe("Kalung — Émile ✓");
   });
 
   it("skips rows with missing product/shop id even when Selesai", async () => {

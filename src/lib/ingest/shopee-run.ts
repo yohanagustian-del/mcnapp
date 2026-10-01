@@ -77,6 +77,16 @@ export async function runShopeeIngest(input: RunShopeeIngestInput): Promise<RunS
 
   if (parsed.rows.length === 0) {
     const hasContent = parsed.rawHeadersFound.length > 0 || parsed.rowsNonCompleted > 0;
+    if (parsed.headerNotFound) {
+      const first = parsed.headerNotFound.firstLine;
+      throw new Error(
+        "Header kolom Conversion Report Shopee tidak ditemukan di 5 baris pertama file " +
+          `(dicari: Status Pesanan, Waktu Pesanan Dibuat, Username Affiliate, Total Pembelian yang Dibuat(Rp)). ` +
+          (first ? `Baris pertama file: "${first}${first.length >= 200 ? "…" : ""}". ` : "File tampak kosong. ") +
+          "Pastikan file adalah export asli Conversion Report dari Shopee Affiliate berbahasa Indonesia, " +
+          "dan belum dibuka lalu disimpan ulang di Excel."
+      );
+    }
     if (!hasContent) {
       throw new Error(
         "File Shopee kosong atau tidak terbaca — pastikan file Conversion Report Shopee asli (bukan file kosong/rusak)."
