@@ -14,6 +14,14 @@ import {
   contractRemaining,
   type ContractAlertDays,
 } from "@/lib/creators/contract";
+import { PartnershipBadge } from "@/components/partnership-badge";
+import {
+  FEE_AGREEMENT_STATUSES,
+  PARTNERSHIP_STATUSES,
+  type FeeAgreementStatus,
+  type PartnershipStatus,
+  type PartnershipStatusLabels,
+} from "@/lib/creators/partnership-spec";
 import { updateRateCard } from "./actions";
 import { CreatorEditButton, type EditCmOption } from "./creator-edit-button";
 import { CreatorDeleteDialog, type DeleteTarget } from "./creator-delete-dialog";
@@ -47,6 +55,9 @@ export interface CreatorTableRow {
   rate_card: number | null;
   commission_share: number | null;
   contract_end_date: string | null;
+  /** Improvement MCN T7 — from the Excel upload (creator_partnership_status); null = belum ada data. */
+  partnership_status: PartnershipStatus | null;
+  fee_agreement_status: FeeAgreementStatus | null;
   status: string;
   owner_cpm_id: string | null;
   cmName: string | null;
@@ -118,6 +129,13 @@ function creatorClassBadge(value: string | null): string {
   return CREATOR_CLASS_BADGE[value ?? ""] ?? CREATOR_CLASS_BADGE.reguler;
 }
 
+/** "" = no filter, "none" = no status uploaded yet, otherwise the exact status. */
+function matchesStatusFilter(status: string | null, filter: string): boolean {
+  if (filter === "") return true;
+  if (filter === "none") return status === null;
+  return status === filter;
+}
+
 const PAGE_SIZES = [10, 20, 50, 100] as const;
 const DEFAULT_PAGE_SIZE = 10;
 
@@ -129,6 +147,7 @@ interface CellContext {
   nowMs: number;
   canUpload: boolean;
   alertDays: ContractAlertDays;
+  partnershipLabels: PartnershipStatusLabels;
 }
 
 interface TableColumn {
@@ -157,7 +176,12 @@ interface TableColumn {
    * kelas/estimasi, sisa kontrak, niche gabungan) — supaya CSV terbaca sama seperti
    * yang ditampilkan tabel, bukan angka mentah.
    */
-  csvValue?: (c: CreatorTableRow, nowMs: number, alertDays: ContractAlertDays) => string;
+  csvValue?: (
+    c: CreatorTableRow,
+    nowMs: number,
+    alertDays: ContractAlertDays,
+    partnershipLabels: PartnershipStatusLabels
+  ) => string;
 }
 
 /**
@@ -343,6 +367,35 @@ const COLUMNS: TableColumn[] = [
       return <span className={tone.text || undefined}>{r.label}</span>;
     },
   },
+  {
+    label: "Partnership",
+    compact: true,
+    value: (c) => c.partnership_status,
+    csvValue: (c, _n, _a, labels) =>
+      c.partnership_status ? labels.partnership[c.partnership_status].label : "Belum ada data",
+    cell: (c, ctx) => (
+      <PartnershipBadge kind="partnership" status={c.partnership_status} labels={ctx.partnershipLabels} />
+    ),
+  },
+  {
+    label: "Fee Agreement",
+    compact: true,
+    value: (c) => c.fee_agreement_status,
+    csvValue: (c, _n, _a, labels) =>
+      c.platform === "shopee"
+        ? "—"
+        : c.fee_agreement_status
+          ? labels.fee_agreement[c.fee_agreement_status].label
+          : "Belum ada data",
+    cell: (c, ctx) => (
+      <PartnershipBadge
+        kind="fee"
+        status={c.fee_agreement_status}
+        platform={c.platform ?? "tiktok"}
+        labels={ctx.partnershipLabels}
+      />
+    ),
+  },
   { label: "Domisili", value: (c) => c.domisili, cell: (c) => c.domisili ?? "—" },
   {
     label: "Alamat Lengkap",
@@ -411,6 +464,7 @@ export function CreatorsTable({
   rows,
   nowMs,
   alertDays,
+  partnershipLabels,
   canUpload,
   canEdit,
   canDelete,
@@ -425,6 +479,8 @@ export function CreatorsTable({
   nowMs: number;
   /** Ambang "Sisa Kontrak" (app_config m8.contract_alert_days) — CLAUDE.md: jangan hardcode. */
   alertDays: ContractAlertDays;
+  /** app_config m8.partnership_status_labels (resolved on the server). */
+  partnershipLabels: PartnershipStatusLabels;
   canUpload: boolean;
   canEdit: boolean;
   canDelete: boolean;
@@ -454,9 +510,20 @@ export function CreatorsTable({
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [dialogTargets, setDialogTargets] = useState<DeleteTarget[] | null>(null);
 
+  // Improvement MCN T7: filter Partnership / Fee Agreement ("" = semua, "none" = belum ada data).
+  const [partnershipFilter, setPartnershipFilter] = useState<string>("");
+  const [feeFilter, setFeeFilter] = useState<string>("");
   const filteredRows = useMemo(
-    () => rows.filter((c) => !removedIds.has(c.id) && matches(c.username, c.owner_cpm_id)),
-    [rows, removedIds, matches]
+    () =>
+      rows.filter(
+        (c) =>
+          !removedIds.has(c.id) &&
+          matches(c.username, c.owner_cpm_id) &&
+          matchesStatusFilter(c.partnership_status, partnershipFilter) &&
+          (feeFilter === "" ||
+            (c.platform !== "shopee" && matchesStatusFilter(c.fee_agreement_status, feeFilter)))
+      ),
+    [rows, removedIds, matches, partnershipFilter, feeFilter]
   );
 
   const [pageSize, setPageSize] = useState<number>(DEFAULT_PAGE_SIZE);
@@ -558,7 +625,7 @@ export function CreatorsTable({
       const row: Record<string, string> = {};
       for (const col of visibleColumns) {
         row[col.label] = col.csvValue
-          ? col.csvValue(c, nowMs, alertDays)
+          ? col.csvValue(c, nowMs, alertDays, partnershipLabels)
           : String(normalizeSortValue(col.value ? col.value(c, nowMs) : null) ?? "—");
       }
       return row;
@@ -572,14 +639,14 @@ export function CreatorsTable({
     a.download = `kreator_${new Date().toISOString().slice(0, 10)}.csv`;
     a.click();
     URL.revokeObjectURL(url);
-  }, [sortedRows, visibleColumns, nowMs, alertDays]);
+  }, [sortedRows, visibleColumns, nowMs, alertDays, partnershipLabels]);
 
   const showActions = canEdit || canDelete || canRequestCm;
   const requestedIds = useMemo(() => new Set(requestedCreatorIds ?? []), [requestedCreatorIds]);
 
   /** Kolom data terlihat + kolom centang + kolom Aksi — dipakai colSpan baris "kosong". */
   const colCount = visibleColumns.length + (canDelete ? 1 : 0) + (showActions ? 1 : 0);
-  const cellCtx: CellContext = { nowMs, canUpload, alertDays };
+  const cellCtx: CellContext = { nowMs, canUpload, alertDays, partnershipLabels };
 
   const toggleOne = useCallback((id: string) => {
     setSelected((prev) => {
@@ -704,6 +771,36 @@ export function CreatorsTable({
               </div>
             </>
           )}
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <select
+            value={partnershipFilter}
+            onChange={(e) => setPartnershipFilter(e.target.value)}
+            aria-label="Filter Partnership"
+            className="rounded-md border border-slate-300 px-2 py-1 text-sm text-slate-700"
+          >
+            <option value="">Partnership: semua</option>
+            {PARTNERSHIP_STATUSES.map((st) => (
+              <option key={st} value={st}>
+                {partnershipLabels.partnership[st].label}
+              </option>
+            ))}
+            <option value="none">Belum ada data</option>
+          </select>
+          <select
+            value={feeFilter}
+            onChange={(e) => setFeeFilter(e.target.value)}
+            aria-label="Filter Fee Agreement"
+            className="rounded-md border border-slate-300 px-2 py-1 text-sm text-slate-700"
+          >
+            <option value="">Fee Agreement: semua</option>
+            {FEE_AGREEMENT_STATUSES.map((st) => (
+              <option key={st} value={st}>
+                {partnershipLabels.fee_agreement[st].label}
+              </option>
+            ))}
+            <option value="none">Belum ada data</option>
+          </select>
         </div>
         <div className="flex items-center gap-2">
           <span className="text-xs text-slate-400">
