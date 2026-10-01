@@ -329,6 +329,10 @@ export const PERMISSIONS: Record<string, Role[]> = {
   // dibatasi ke kreator dalam scope-nya lewat assertCreatorInScope di server action
   // (pola sama schedule.edit) — daftar role di sini hanya gerbang kasar per aksi.
   "creators.contract_renew": [...MANAGEMENT_ROLES, ...ACQUISITION_ROLES, ...CM_ROLES],
+  // ===== Improvement MCN T5: status kemitraan (Management Partnership / Fee Agreement) =====
+  // Upload Excel status (satu-satunya jalur tulis creator_partnership_status, tanpa edit
+  // per baris — Q2). Asumsi A2: Management + CM Lead + Acquisition Lead.
+  "creators.partnership_upload": [...MANAGEMENT_ROLES, "cm_lead", "acquisition_lead"],
 };
 
 export function canAccessNav(item: NavItem, role: Role): boolean {

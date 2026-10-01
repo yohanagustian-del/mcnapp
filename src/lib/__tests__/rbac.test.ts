@@ -98,3 +98,17 @@ describe("m9.invite — undangan Creator Portal", () => {
     }
   });
 });
+
+// Improvement MCN T5 — upload status kemitraan (asumsi A2).
+describe("creators.partnership_upload", () => {
+  it("allowed for management, cm_lead, acquisition_lead", () => {
+    for (const role of [...MANAGEMENT_ROLES, "cm_lead", "acquisition_lead"] as Role[]) {
+      expect(hasPermission("creators.partnership_upload", role)).toBe(true);
+    }
+  });
+  it("denied for cpm, acquisition_spec, bizdev, finance", () => {
+    for (const role of ["cpm", "acquisition_spec", "bizdev", "finance"] as Role[]) {
+      expect(hasPermission("creators.partnership_upload", role)).toBe(false);
+    }
+  });
+});
