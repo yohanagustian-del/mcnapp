@@ -7,7 +7,13 @@ import { useCreatorFilter } from "@/components/creator-filter";
 import { MAX_BULK_DELETE } from "@/lib/creators/delete";
 import { creatorClassLabel } from "@/lib/creators/creator-class";
 import { estimateLabel, levelMismatch } from "@/lib/creators/affiliate-level";
-import { contractDays, contractRemaining, type ContractAlertDays } from "@/lib/creators/contract";
+import {
+  contractBucket,
+  contractBucketTone,
+  contractDays,
+  contractRemaining,
+  type ContractAlertDays,
+} from "@/lib/creators/contract";
 import { updateRateCard } from "./actions";
 import { CreatorEditButton, type EditCmOption } from "./creator-edit-button";
 import { CreatorDeleteDialog, type DeleteTarget } from "./creator-delete-dialog";
@@ -332,7 +338,9 @@ const COLUMNS: TableColumn[] = [
     csvValue: (c, nowMs, alertDays) => contractRemaining(c.join_date, c.contract_end_date, nowMs, alertDays).label,
     cell: (c, ctx) => {
       const r = contractRemaining(c.join_date, c.contract_end_date, ctx.nowMs, ctx.alertDays);
-      return <span className={r.danger ? "font-medium text-red-600" : undefined}>{r.label}</span>;
+      const days = contractDays(c.join_date, c.contract_end_date, ctx.nowMs);
+      const tone = contractBucketTone(contractBucket(days, ctx.alertDays));
+      return <span className={tone.text || undefined}>{r.label}</span>;
     },
   },
   { label: "Domisili", value: (c) => c.domisili, cell: (c) => c.domisili ?? "—" },

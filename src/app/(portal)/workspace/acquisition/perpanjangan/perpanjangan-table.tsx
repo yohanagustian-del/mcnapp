@@ -1,7 +1,13 @@
 "use client";
 
-import { Fragment, useMemo, useState, useTransition } from "react";
-import { renewContractAction } from "./actions";
+import { Fragment, useMemo, useState } from "react";
+import { ContractRenewForm } from "@/components/contract-renew-form";
+import {
+  contractBucket,
+  contractBucketTone,
+  type ContractAlertDays,
+  type ContractBucket,
+} from "@/lib/creators/contract";
 
 export interface PerpanjanganRow {
   id: string;
@@ -14,17 +20,18 @@ export interface PerpanjanganRow {
   priorPeriods: number;
 }
 
-const input = "rounded-md border border-slate-300 px-2 py-1 text-xs";
-const btn = "rounded-md bg-slate-900 px-2 py-1 text-xs font-medium text-white hover:bg-slate-700 disabled:opacity-50";
+type Bucket = "semua" | "habis" | "danger" | "warning";
 
-type Bucket = "semua" | "habis" | "d30" | "d60";
+// Tabs are cumulative: "≤danger" includes expired, "≤warning" includes danger + expired.
+const TAB_BUCKETS: Record<Exclude<Bucket, "semua">, ContractBucket[]> = {
+  habis: ["expired"],
+  danger: ["expired", "danger"],
+  warning: ["expired", "danger", "warning"],
+};
 
-function matchesBucket(days: number | null, bucket: Bucket): boolean {
+function matchesBucket(days: number | null, bucket: Bucket, alertDays: ContractAlertDays): boolean {
   if (bucket === "semua") return true;
-  if (days === null) return false;
-  if (bucket === "habis") return days < 0;
-  if (bucket === "d30") return days <= 30;
-  return days <= 60; // d60
+  return TAB_BUCKETS[bucket].includes(contractBucket(days, alertDays));
 }
 
 function daysLabel(days: number | null): string {
@@ -33,73 +40,44 @@ function daysLabel(days: number | null): string {
   return `${days} hari`;
 }
 
-function RenewForm({ row, onDone }: { row: PerpanjanganRow; onDone: () => void }) {
-  const [error, setError] = useState<string | null>(null);
-  const [pending, startTransition] = useTransition();
-  const defaultStart = row.contractEndDate
-    ? new Date(new Date(row.contractEndDate).getTime() + 86_400_000).toISOString().slice(0, 10)
-    : "";
-
-  function onSubmit(formData: FormData) {
-    setError(null);
-    startTransition(async () => {
-      const res = await renewContractAction(formData);
-      if (res.ok) onDone();
-      else setError(res.error);
-    });
-  }
-
-  return (
-    <div className="mt-2 rounded-md border border-slate-200 bg-slate-50 p-2">
-      <form action={onSubmit} className="flex flex-wrap items-end gap-2">
-        <input type="hidden" name="creator_id" value={row.id} />
-        <label className="text-[11px] text-slate-500">
-          Mulai
-          <input type="date" name="start_date" required defaultValue={defaultStart} className={`${input} block`} />
-        </label>
-        <label className="text-[11px] text-slate-500">
-          Akhir Baru
-          <input type="date" name="end_date" required className={`${input} block`} />
-        </label>
-        <label className="text-[11px] text-slate-500">
-          Catatan (opsional)
-          <input type="text" name="notes" className={`${input} block w-48`} />
-        </label>
-        <button type="submit" disabled={pending} className={btn}>
-          {pending ? "..." : "Simpan Perpanjangan"}
-        </button>
-      </form>
-      {error && <p className="mt-1 text-xs text-red-700">{error}</p>}
-    </div>
-  );
-}
-
-export function PerpanjanganTable({ rows }: { rows: PerpanjanganRow[] }) {
+export function PerpanjanganTable({
+  rows,
+  alertDays,
+}: {
+  rows: PerpanjanganRow[];
+  /** Thresholds from app_config m8.contract_alert_days — CLAUDE.md: never hardcode. */
+  alertDays: ContractAlertDays;
+}) {
   const [bucket, setBucket] = useState<Bucket>("semua");
   const [openId, setOpenId] = useState<string | null>(null);
   const [refreshedIds, setRefreshedIds] = useState<Set<string>>(new Set());
 
   const filtered = useMemo(
-    () => rows.filter((r) => matchesBucket(r.days, bucket)).sort((a, b) => (a.days ?? Infinity) - (b.days ?? Infinity)),
-    [rows, bucket]
+    () =>
+      rows
+        .filter((r) => matchesBucket(r.days, bucket, alertDays))
+        .sort((a, b) => (a.days ?? Infinity) - (b.days ?? Infinity)),
+    [rows, bucket, alertDays]
   );
 
   const counts = useMemo(
     () => ({
       semua: rows.length,
-      habis: rows.filter((r) => matchesBucket(r.days, "habis")).length,
-      d30: rows.filter((r) => matchesBucket(r.days, "d30")).length,
-      d60: rows.filter((r) => matchesBucket(r.days, "d60")).length,
+      habis: rows.filter((r) => matchesBucket(r.days, "habis", alertDays)).length,
+      danger: rows.filter((r) => matchesBucket(r.days, "danger", alertDays)).length,
+      warning: rows.filter((r) => matchesBucket(r.days, "warning", alertDays)).length,
     }),
-    [rows]
+    [rows, alertDays]
   );
 
   const TABS: { key: Bucket; label: string }[] = [
     { key: "habis", label: "Sudah Habis" },
-    { key: "d30", label: "≤30 Hari" },
-    { key: "d60", label: "≤60 Hari" },
+    { key: "danger", label: `≤${alertDays.danger} Hari` },
+    { key: "warning", label: `≤${alertDays.warning} Hari` },
     { key: "semua", label: "Semua" },
   ];
+
+  const toneOf = (days: number | null) => contractBucketTone(contractBucket(days, alertDays));
 
   return (
     <div className="space-y-3">
@@ -133,7 +111,7 @@ export function PerpanjanganTable({ rows }: { rows: PerpanjanganRow[] }) {
           <tbody className="divide-y divide-slate-100">
             {filtered.map((r) => (
               <Fragment key={r.id}>
-                <tr className={r.days !== null && r.days < 0 ? "bg-red-50/40" : undefined}>
+                <tr className={toneOf(r.days).row || undefined}>
                   <td className="px-3 py-2 font-medium">
                     {r.name}
                     {r.username && <span className="ml-1 text-slate-400">@{r.username}</span>}
@@ -141,7 +119,7 @@ export function PerpanjanganTable({ rows }: { rows: PerpanjanganRow[] }) {
                   <td className="px-3 py-2">{r.cmName ?? "—"}</td>
                   <td className="px-3 py-2">{r.joinDate ?? "—"}</td>
                   <td className="px-3 py-2">{r.contractEndDate ?? "—"}</td>
-                  <td className={`px-3 py-2 ${r.days !== null && r.days < 0 ? "font-medium text-red-600" : ""}`}>
+                  <td className={`px-3 py-2 ${toneOf(r.days).text}`}>
                     {daysLabel(r.days)}
                   </td>
                   <td className="px-3 py-2">{r.priorPeriods}x</td>
@@ -160,8 +138,9 @@ export function PerpanjanganTable({ rows }: { rows: PerpanjanganRow[] }) {
                 {openId === r.id && (
                   <tr>
                     <td colSpan={7} className="px-3 pb-3">
-                      <RenewForm
-                        row={r}
+                      <ContractRenewForm
+                        creatorId={r.id}
+                        contractEndDate={r.contractEndDate}
                         onDone={() => {
                           setOpenId(null);
                           setRefreshedIds((prev) => new Set(prev).add(r.id));
