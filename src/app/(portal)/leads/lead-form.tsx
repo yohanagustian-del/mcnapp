@@ -3,35 +3,15 @@
 import { useActionState } from "react";
 import {
   BRAND_LEAD_PLATFORMS,
+  BRAND_LEAD_PLATFORM_LABELS as PLATFORM_LABELS,
   BRAND_LEAD_SOURCES,
+  BRAND_LEAD_SOURCE_LABELS as SOURCE_LABELS,
   BRAND_LEAD_STATUSES,
+  BRAND_LEAD_STATUS_LABELS as STATUS_LABELS,
   BRAND_LEAD_SUPPORT,
+  BRAND_LEAD_SUPPORT_LABELS as SUPPORT_LABELS,
 } from "@/lib/leads/brand-lead";
 import type { LeadFormState } from "./actions";
-
-const SOURCE_LABELS: Record<string, string> = {
-  matchmaking: "Matchmaking",
-  event: "Event",
-  iklan: "Iklan",
-  rekomendasi: "Rekomendasi",
-  scouting: "Scouting",
-  others: "Lainnya",
-};
-const PLATFORM_LABELS: Record<string, string> = { shopee: "Shopee", tiktok_shop: "TikTok Shop" };
-const SUPPORT_LABELS: Record<string, string> = {
-  tap: "TAP",
-  ads_support: "Ads Support",
-  hsl: "HSL",
-  sample: "Sample",
-  rate_card: "Rate Card",
-};
-const STATUS_LABELS: Record<string, string> = {
-  baru: "Baru",
-  kontak: "Kontak",
-  nego: "Nego",
-  deal: "Deal",
-  batal: "Batal",
-};
 
 export interface LeadContactDefault {
   lead_name?: string | null;
@@ -46,6 +26,9 @@ export interface LeadFormDefaults {
   city?: string | null;
   business_category?: string | null;
   store_link?: string | null;
+  bizdev_names?: string | null;
+  brand_group?: string | null;
+  ads_scheme?: string | null;
   platforms?: string[];
   marketing_budget?: number | null;
   target_roas?: number | null;
@@ -55,7 +38,9 @@ export interface LeadFormDefaults {
   contacts?: LeadContactDefault[];
 }
 
-const CONTACT_ROWS = 5;
+/** Empty contact rows shown on a new lead; an existing lead shows all its contacts + 2 blank rows. */
+const MIN_CONTACT_ROWS = 5;
+const EXTRA_CONTACT_ROWS = 2;
 
 export function LeadForm({
   action,
@@ -68,6 +53,9 @@ export function LeadForm({
 }) {
   const [state, formAction, pending] = useActionState<LeadFormState | null, FormData>(action, null);
   const contacts = defaults?.contacts ?? [];
+  // A bulk-uploaded lead can carry more than 5 contacts; every one must be
+  // rendered, because updateLead rewrites the contact list from the form.
+  const contactRows = Math.max(MIN_CONTACT_ROWS, contacts.length + EXTRA_CONTACT_ROWS);
 
   const field = (name: string) => state?.fieldErrors?.[name];
 
@@ -97,12 +85,24 @@ export function LeadForm({
           <input name="city" defaultValue={defaults?.city ?? ""} className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm" />
         </div>
         <div>
-          <label className="block text-xs text-slate-500">Kategori Bisnis</label>
+          <label className="block text-xs text-slate-500">Niche / Kategori Bisnis</label>
           <input name="business_category" defaultValue={defaults?.business_category ?? ""} className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm" />
         </div>
         <div>
           <label className="block text-xs text-slate-500">Link Toko</label>
           <input name="store_link" defaultValue={defaults?.store_link ?? ""} className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm" />
+        </div>
+        <div>
+          <label className="block text-xs text-slate-500">Bizdev (PIC MEA)</label>
+          <input name="bizdev_names" defaultValue={defaults?.bizdev_names ?? ""} placeholder="mis. Erlina, Mizan" className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm" />
+        </div>
+        <div>
+          <label className="block text-xs text-slate-500">Grup Brand (nama grup / link WA)</label>
+          <input name="brand_group" defaultValue={defaults?.brand_group ?? ""} className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm" />
+        </div>
+        <div>
+          <label className="block text-xs text-slate-500">Ads Brand (skema ads)</label>
+          <input name="ads_scheme" defaultValue={defaults?.ads_scheme ?? ""} placeholder="mis. Ads By Brand - Minta Barcode" className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm" />
         </div>
         <div>
           <label className="block text-xs text-slate-500">Budget Marketing (Rp)</label>
@@ -155,7 +155,8 @@ export function LeadForm({
         <p className="text-sm font-medium text-slate-700">Data Prospek (kontak PIC)</p>
         <p className="text-xs text-slate-500">Isi minimal satu kontak ATAU Nama Toko di atas.</p>
         <div className="mt-2 space-y-2">
-          {Array.from({ length: CONTACT_ROWS }, (_, i) => contacts[i] ?? {}).map((c, i) => (
+          <input type="hidden" name="contact_rows" value={contactRows} />
+          {Array.from({ length: contactRows }, (_, i) => contacts[i] ?? {}).map((c, i) => (
             <div key={i} className="grid gap-2 sm:grid-cols-3">
               <input name={`contact_name_${i}`} defaultValue={c.lead_name ?? ""} placeholder="Nama PIC" className="rounded-md border border-slate-300 px-3 py-2 text-sm" />
               <input name={`contact_phone_${i}`} defaultValue={c.phone ?? ""} placeholder="No. HP" className="rounded-md border border-slate-300 px-3 py-2 text-sm" />

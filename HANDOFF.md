@@ -2,6 +2,12 @@
 
 Status per sesi 2026-07-09 (sesi 5, backlog-sweep + audit deploy). Baca ini + `CLAUDE.md` sebelum lanjut.
 
+## ⚡ SESI 2026-10-01 — Brand Lead Bank: search Nama Brand/Niche + upload massal
+1. Migrasi **0084** (`brand_leads.bizdev_names/brand_group/ads_scheme`, `brand_support` + `flash_sale`, view `brand_lead_niches` security_invoker) **SUDAH APPLY** ke staging (`fomlangoiiywhexwoqom`) & production (`bqknstylbpwsnlgnzayw`), diverifikasi SQL, `get_advisors` security tanpa temuan baru.
+2. `/leads`: search Nama Brand + filter Niche + kolom Contact PIC/Bizdev/Dukungan/Ads Brand; tombol "Upload Massal" (template .xlsx, atau spreadsheet matchmaking BizDev langsung). Lihat CLAUDE.md #9.
+3. CM sekarang bisa membuka `/leads` (lihat & cari saja). `/leads` dan `/leads/[id]` kini digerbang `canAccessNav` (dulu cukup login).
+4. `normalizePhoneId`: nomor tanpa 0/62/+ yang diawali `86` dibaca sebagai +86 (Tiongkok), bukan +6286.
+
 ## ⚡ SESI 2026-10-01 — Improvement MCN (T1–T8, plan `docs/plans/IMPROVEMENT_MCN_2026-09.md`)
 1. **T1 (#90)** Special Project → Metrik Harian: kolom kumulatif dibuang, tabel ringkas Target GMV | Achieved GMV | GMV Gap | Sisa Hari (`project-target-summary.tsx`, angka dari `trackDaily()`: `targetGmv`, `gmvGapToTarget`, `daysRemaining`).
 2. **T2 (#91)** Undang Portal Kreator: modul bersama `lib/portal/invite.ts` + `components/portal-invite-button.tsx`, gate `m9.invite` (Management + CM + Akuisisi), CPM hanya kreator miliknya (`isCreatorInScope`/`assertCreatorInScope`). Status portal dibaca via `loadPortalStatus()` (admin client) — dulu selalu "belum diundang" karena RLS `cu_self_read`.

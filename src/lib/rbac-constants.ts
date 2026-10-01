@@ -92,7 +92,9 @@ export const NAV_ITEMS: NavItem[] = [
   // dengan Deal Brand — isinya memang pandangan lain atas data yang sama.
   { href: "/bd-projects", label: "Project BD", roles: [...MANAGEMENT_ROLES, ...BIZDEV_ROLES, "finance"], group: "BizDev & Deal" },
   { href: "/deals/import", label: "Import Master Deal", roles: [...MANAGEMENT_ROLES, "bizdev_lead", "bd_admin"], group: "BizDev & Deal" },
-  { href: "/leads", label: "Brand Lead Bank", roles: [...MANAGEMENT_ROLES, ...BIZDEV_ROLES], group: "BizDev & Deal" },
+  // CM ikut melihat & mencari (request 2026-10-01): brand lama yang belum winning bisa
+  // dicocokkan ke kreator baru. Tambah/upload/edit tetap BizDev (leads.create/edit).
+  { href: "/leads", label: "Brand Lead Bank", roles: [...MANAGEMENT_ROLES, ...BIZDEV_ROLES, ...CM_ROLES], group: "BizDev & Deal" },
   { href: "/workspace/bizdev", label: "BizDev Workspace", roles: [...MANAGEMENT_ROLES, ...BIZDEV_ROLES], group: "BizDev & Deal" },
   { href: "/matching", label: "Creator Product Match", roles: [...MANAGEMENT_ROLES, ...CM_ROLES, "bizdev_lead", "bizdev"], group: "BizDev & Deal" },
   // Product×Creator Matching: catalog TAP (master upload + derive dari TAP) + rekomendasi.
@@ -164,7 +166,7 @@ export const PERMISSIONS: Record<string, Role[]> = {
   // Brand Lead Bank: semua BD lihat semua lead (permintaan user, bukan per-baris);
   // edit digerbang per-baris di server action (pembuat ATAU bizdev_lead/management),
   // bukan cuma daftar role di sini — pola sama K4 PX-M1.
-  "leads.view": [...MANAGEMENT_ROLES, ...BIZDEV_ROLES],
+  "leads.view": [...MANAGEMENT_ROLES, ...BIZDEV_ROLES, ...CM_ROLES],
   "leads.create": [...MANAGEMENT_ROLES, "bizdev_lead", "bizdev"],
   "leads.edit": [...MANAGEMENT_ROLES, "bizdev_lead", "bizdev"],
   "deals.register": [...MANAGEMENT_ROLES, "bizdev_lead", "bizdev"],
