@@ -61,7 +61,7 @@ export function ShopeeIngestForm() {
         </button>
       </form>
       <p className="mt-2 text-xs text-slate-500">
-        Hanya pesanan berstatus Selesai yang dihitung (acuan tanggal: Waktu Pesanan Selesai). Window
+        Hanya pesanan berstatus Selesai yang dihitung (acuan tanggal: Waktu Pesanan Dibuat). Window
         mingguan W1-W5 sama seperti TikTok (W1=1-7, W2=8-14, W3=15-21, W4=22-28, W5=29-akhir bulan) —
         semua baris Selesai di file harus berada dalam satu window yang sama. Upload ulang untuk
         window yang sama akan menimpa hasil lama (idempotent). Analisis kebocoran link agency Shopee
