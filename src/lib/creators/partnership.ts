@@ -70,14 +70,35 @@ export async function loadPartnershipStatus(
   }
 }
 
-/** Time of the latest status upload (null = none yet, or migration 0083 not applied). */
-export async function loadLastPartnershipUpload(supabase: SupabaseClient): Promise<string | null> {
+export interface PartnershipUploadSummary {
+  createdAt: string;
+  fileName: string | null;
+  /** Usernames in the file that are not registered creators — skipped (A3). */
+  unknownUsernames: string[];
+  /** CPM uploads: creators owned by another CM — skipped (A2). */
+  outOfScopeUsernames: string[];
+}
+
+const strings = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : []);
+
+/**
+ * Latest status upload + the creators it skipped, so the "N kreator dilewati" notice
+ * stays visible on /creators after the uploader's result panel is gone (user decision
+ * A3, 2026-10-01). null = no upload yet, or migration 0083 not applied.
+ */
+export async function loadLastPartnershipUpload(supabase: SupabaseClient): Promise<PartnershipUploadSummary | null> {
   const { data, error } = await supabase
     .from("creator_partnership_uploads")
-    .select("created_at")
+    .select("created_at, file_name, summary")
     .order("created_at", { ascending: false })
     .limit(1)
     .maybeSingle();
-  if (error) return null;
-  return (data?.created_at as string | undefined) ?? null;
+  if (error || !data) return null;
+  const summary = (data.summary ?? {}) as Record<string, unknown>;
+  return {
+    createdAt: data.created_at as string,
+    fileName: (data.file_name as string | null) ?? null,
+    unknownUsernames: strings(summary.unknown_usernames),
+    outOfScopeUsernames: strings(summary.out_of_scope_usernames),
+  };
 }

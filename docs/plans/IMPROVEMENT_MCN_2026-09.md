@@ -153,6 +153,10 @@ Catatan: dokumen memuat 1 gambar yang tidak terbaca oleh tool.
   3. Jalankan `get_advisors` (security) dan pastikan tidak ada tabel baru tanpa RLS.
   4. Merge PR Partnership, lalu verifikasi halaman /creators, /creators/[id], dan /workspace/cm tidak error.
 
+### Keputusan user 2026-10-01 (menggantikan asumsi di bawah)
+- A1 ya · **A2 opsi B: Management + CM + Akuisisi** (CPM hanya kreator miliknya) · **A3 dilewati + notifikasi kreator yang dilewati** · A4 ya
+- **Q5 opsi B: bizdev & campaign_ops tetap boleh mengundang dari Special Project** (peserta project saja) · Q6 opsi A · Q7 opsi A
+
 ### Asumsi default (dipakai jalan dulu, dikonfirmasi di akhir)
 - A1: Shopee Management Partnership memakai 4 nilai yang sama dengan TikTok.
 - A2: Upload status hanya boleh oleh Management + CM Lead + Acquisition Lead.

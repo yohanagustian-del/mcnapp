@@ -6,6 +6,40 @@ import {
   uploadPartnershipStatus,
   type PartnershipUploadReport,
 } from "./partnership-actions";
+import type { PartnershipUploadSummary } from "@/lib/creators/partnership";
+
+/**
+ * Prominent notice listing creators an upload skipped (user decision A3): unregistered
+ * usernames are never created as prospects, so the uploader must see them to follow up.
+ */
+function SkippedNotice({
+  title,
+  unknown,
+  outOfScope,
+}: {
+  title: string;
+  unknown: string[];
+  outOfScope: string[];
+}) {
+  if (unknown.length === 0 && outOfScope.length === 0) return null;
+  return (
+    <div role="alert" className="mt-3 rounded-md border border-amber-300 bg-amber-50 p-3 text-xs text-amber-900">
+      <p className="font-semibold">⚠ {title}</p>
+      {unknown.length > 0 && (
+        <p className="mt-1">
+          <strong>{unknown.length} kreator dilewati</strong> karena username belum terdaftar di menu Kreator
+          (daftarkan dulu, lalu upload ulang): {unknown.join(", ")}
+        </p>
+      )}
+      {outOfScope.length > 0 && (
+        <p className="mt-1">
+          <strong>{outOfScope.length} kreator dilewati</strong> karena dipegang CM lain (CPM hanya bisa mengubah
+          kreator miliknya): {outOfScope.join(", ")}
+        </p>
+      )}
+    </div>
+  );
+}
 
 const btnPrimary =
   "rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-700 disabled:opacity-50";
@@ -16,7 +50,7 @@ const btnSecondary =
  * Upload status kemitraan (Management Partnership + Fee Agreement) from the user's
  * Excel file — the only way these statuses change (no per-row edit, Q2).
  */
-export function PartnershipUploadPanel({ lastUploadAt }: { lastUploadAt: string | null }) {
+export function PartnershipUploadPanel({ lastUpload }: { lastUpload: PartnershipUploadSummary | null }) {
   const [report, setReport] = useState<PartnershipUploadReport | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
@@ -80,9 +114,22 @@ export function PartnershipUploadPanel({ lastUploadAt }: { lastUploadAt: string 
       <p className="mt-2 text-xs text-slate-500">
         Kolom: <strong>Username*</strong>, Nama Kreator, Platform (kosong = tiktok), Management Partnership,
         Fee Agreement (khusus TikTok). Username dicocokkan ke kreator yang sudah terdaftar; yang tidak ditemukan
-        dilewati. Status yang turun (mis. LINKED → UNLINK REQ, AGREE → DISAGREE) menjadi alert ke CM pemilik.
-        {lastUploadAt && <> Upload terakhir: {new Date(lastUploadAt).toLocaleString("id-ID")}.</>}
+        dilewati dan ditampilkan sebagai peringatan. CPM hanya bisa mengubah kreator miliknya. Status yang turun (mis. LINKED → UNLINK REQ, AGREE → DISAGREE) menjadi alert ke CM pemilik.
+        {lastUpload && (
+          <>
+            {" "}Upload terakhir: {new Date(lastUpload.createdAt).toLocaleString("id-ID")}
+            {lastUpload.fileName ? ` (${lastUpload.fileName})` : ""}.
+          </>
+        )}
       </p>
+
+      {!report && lastUpload && (
+        <SkippedNotice
+          title="Upload terakhir melewati sebagian kreator"
+          unknown={lastUpload.unknownUsernames}
+          outOfScope={lastUpload.outOfScopeUsernames}
+        />
+      )}
 
       {error && <p className="mt-3 text-sm text-red-700">{error}</p>}
 
@@ -94,18 +141,20 @@ export function PartnershipUploadPanel({ lastUploadAt }: { lastUploadAt: string 
             <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs text-amber-800">
               Tak dikenal: {report.unknownUsernames.length}
             </span>
+            {report.outOfScopeUsernames.length > 0 && (
+              <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs text-amber-800">
+                Kreator CM lain: {report.outOfScopeUsernames.length}
+              </span>
+            )}
             <span className="rounded-full bg-blue-100 px-2 py-0.5 text-xs text-blue-800">Berubah: {report.changed}</span>
             <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs">Tetap: {report.unchanged}</span>
             <span className="rounded-full bg-red-100 px-2 py-0.5 text-xs text-red-800">Alert: {report.alerts}</span>
           </div>
-          {report.unknownUsernames.length > 0 && (
-            <details className="text-xs">
-              <summary className="cursor-pointer text-amber-800">
-                {report.unknownUsernames.length} username tidak ditemukan (dilewati)
-              </summary>
-              <p className="mt-1 text-slate-600">{report.unknownUsernames.join(", ")}</p>
-            </details>
-          )}
+          <SkippedNotice
+            title="Sebagian kreator di file ini dilewati"
+            unknown={report.unknownUsernames}
+            outOfScope={report.outOfScopeUsernames}
+          />
           {report.rowNotes.length > 0 && (
             <details className="text-xs">
               <summary className="cursor-pointer text-slate-700">{report.rowNotes.length} catatan per baris</summary>

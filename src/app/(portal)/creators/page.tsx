@@ -281,7 +281,7 @@ export default async function CreatorsPage() {
               Upload Status Kemitraan (Management Partnership & Fee Agreement)
             </h2>
             <div className="mt-2">
-              <PartnershipUploadPanel lastUploadAt={lastPartnershipUpload} />
+              <PartnershipUploadPanel lastUpload={lastPartnershipUpload} />
             </div>
           </div>
         )}

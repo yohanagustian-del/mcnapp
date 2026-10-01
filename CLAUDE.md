@@ -29,7 +29,7 @@ Platform internal MCN MEA (agency creator TikTok/Shopee). Menggabungkan tools te
 ### 3. Read-only (jangan bikin endpoint edit)
 - `agency_links.link_status` → diisi engine M4 dari upload mingguan. TIDAK ADA edit manual, siapa pun.
 - `creators.commission_share` → sync dari platform. Read-only. Turun = alert.
-- `creator_partnership_status` (Management Partnership + Fee Agreement, migrasi 0083) → SATU-SATUNYA penulis = upload Excel `uploadPartnershipStatus` (`/creators`, izin `creators.partnership_upload`). Tidak ada edit per baris. Regresi (linked/link_req → unlink_req/not_linked, agree → disagree/cancellation_req) = ALERT `partnership_drop` ke CM pemilik, bukan approval. Parser/template/aturan regresi = `lib/creators/partnership-spec.ts` (jangan bikin versi kedua); badge = `components/partnership-badge.tsx`.
+- `creator_partnership_status` (Management Partnership + Fee Agreement, migrasi 0083) → SATU-SATUNYA penulis = upload Excel `uploadPartnershipStatus` (`/creators`, izin `creators.partnership_upload` = Management + CM + Akuisisi; CPM hanya mengubah kreator miliknya, baris kreator lain dilewati). Tidak ada edit per baris. Username tak terdaftar DILEWATI (bukan dibuat prospek) dan ditampilkan sebagai peringatan, termasuk notifikasi "upload terakhir" di `/creators`. Regresi (linked/link_req → unlink_req/not_linked, agree → disagree/cancellation_req) = ALERT `partnership_drop` ke CM pemilik, bukan approval. Parser/template/aturan regresi = `lib/creators/partnership-spec.ts` (jangan bikin versi kedua); badge = `components/partnership-badge.tsx`.
 
 ### 4. Satu sumber kebenaran (jangan duplikasi logic)
 - Report → M2. Link status & lead → M4.

@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { ROLES, PERMISSIONS, hasPermission, MANAGEMENT_ROLES, ADS_ROLES, type Role } from "@/lib/rbac";
 import { isCreatorInScope } from "@/lib/schedule/scope";
+import { portalInviteGate } from "@/lib/portal/invite-gate";
 
 describe("Phase 5.0 — RBAC foundation", () => {
   it("registers the new internal roles", () => {
@@ -99,16 +100,32 @@ describe("m9.invite — undangan Creator Portal", () => {
   });
 });
 
-// Improvement MCN T5 — upload status kemitraan (asumsi A2).
+// Improvement MCN T5 — upload status kemitraan (keputusan user A2: Management + CM + Akuisisi).
 describe("creators.partnership_upload", () => {
-  it("allowed for management, cm_lead, acquisition_lead", () => {
-    for (const role of [...MANAGEMENT_ROLES, "cm_lead", "acquisition_lead"] as Role[]) {
+  it("allowed for management, cm_lead, cpm, acquisition_lead, acquisition_spec", () => {
+    for (const role of [...MANAGEMENT_ROLES, "cm_lead", "cpm", "acquisition_lead", "acquisition_spec"] as Role[]) {
       expect(hasPermission("creators.partnership_upload", role)).toBe(true);
     }
   });
-  it("denied for cpm, acquisition_spec, bizdev, finance", () => {
-    for (const role of ["cpm", "acquisition_spec", "bizdev", "finance"] as Role[]) {
+  it("denied for bizdev, campaign_ops, finance", () => {
+    for (const role of ["bizdev", "campaign_ops", "finance"] as Role[]) {
       expect(hasPermission("creators.partnership_upload", role)).toBe(false);
+    }
+  });
+});
+
+// Q5 (keputusan user 2026-10-01): bizdev & campaign_ops tetap boleh mengundang — hanya
+// peserta Special Project.
+describe("portalInviteGate", () => {
+  it("any for m9.invite roles, project for m7.curate-only roles, null otherwise", () => {
+    for (const role of ["cpm", "cm_lead", "acquisition_spec", "acquisition_lead", ...MANAGEMENT_ROLES] as Role[]) {
+      expect(portalInviteGate(role)).toBe("any");
+    }
+    for (const role of ["bizdev", "bizdev_lead", "campaign_ops"] as Role[]) {
+      expect(portalInviteGate(role)).toBe("project");
+    }
+    for (const role of ["finance", "creator_support"] as Role[]) {
+      expect(portalInviteGate(role)).toBeNull();
     }
   });
 });
