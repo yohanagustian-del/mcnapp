@@ -13,7 +13,11 @@ import { uploadCreators } from "./actions";
 import { CreatorsTable, type CreatorTableRow } from "./creators-table";
 import { CreatorImportPanel } from "./creator-import-panel";
 import { PartnershipUploadPanel } from "./partnership-upload-panel";
-import { loadLastPartnershipUpload } from "@/lib/creators/partnership";
+import {
+  loadLastPartnershipUpload,
+  loadPartnershipLabels,
+  loadPartnershipStatus,
+} from "@/lib/creators/partnership";
 import { CreatorCreateDialog } from "./creator-create-dialog";
 import { CmRequestsPanel } from "./cm-requests-panel";
 
@@ -100,6 +104,12 @@ export default async function CreatorsPage() {
   }
   const affiliateLevels = await getConfig<AffiliateLevelRule[]>("creators.affiliate_levels");
 
+  // Improvement MCN T7: Partnership / Fee Agreement from the Excel upload (RLS-scoped read).
+  const [partnershipById, partnershipLabels] = await Promise.all([
+    loadPartnershipStatus(supabase),
+    loadPartnershipLabels(),
+  ]);
+
   const rows: CreatorTableRow[] = creators.map((c) => ({
     id: c.id,
     name: c.name,
@@ -126,6 +136,8 @@ export default async function CreatorsPage() {
     rate_card: c.rate_card,
     commission_share: c.commission_share,
     contract_end_date: c.contract_end_date,
+    partnership_status: partnershipById.get(c.id)?.partnership_status ?? null,
+    fee_agreement_status: partnershipById.get(c.id)?.fee_agreement_status ?? null,
     status: c.status,
     owner_cpm_id: c.owner_cpm_id,
     cmName: c.team_members?.name ?? null,
@@ -296,6 +308,7 @@ export default async function CreatorsPage() {
             rows={rows}
             nowMs={Date.now()}
             alertDays={alertDays}
+            partnershipLabels={partnershipLabels}
             canUpload={canUpload}
             canEdit={canEdit}
             canDelete={canDelete}

@@ -13,6 +13,16 @@ import { ProductMatchView } from "@/components/product-match-view";
 import { PortalInviteButton } from "@/components/portal-invite-button";
 import { loadPortalStatus } from "@/lib/portal/invite";
 import { isCreatorInScope } from "@/lib/schedule/scope";
+import { PartnershipBadge } from "@/components/partnership-badge";
+import {
+  contractBucket,
+  contractBucketTone,
+  contractDays,
+  contractRemaining,
+  DEFAULT_CONTRACT_ALERT_DAYS,
+} from "@/lib/creators/contract";
+import { loadContractAlertDays } from "@/lib/creators/contract-alerts";
+import { loadPartnershipLabels, loadPartnershipStatus } from "@/lib/creators/partnership";
 import { WeeklyGmvChart } from "./weekly-gmv-chart";
 
 export const dynamic = "force-dynamic";
@@ -51,7 +61,7 @@ export default async function CreatorDetailPage({
   const { data: creator } = await supabase
     .from("creators")
     .select(
-      "id, name, username, platform, jenis_creator, level, niche, top_niches, status, gmv, gmv_live, gmv_video, commission_share, followers, owner_cpm_id"
+      "id, name, username, platform, jenis_creator, level, niche, top_niches, status, gmv, gmv_live, gmv_video, commission_share, followers, owner_cpm_id, join_date, contract_end_date"
     )
     .eq("id", id)
     .maybeSingle();
@@ -63,6 +73,21 @@ export default async function CreatorDetailPage({
   const canInvitePortal =
     hasPermission("m9.invite", member.role) && isCreatorInScope(member, creator.owner_cpm_id);
   const portalStatus = canInvitePortal ? ((await loadPortalStatus([creator.id]))[creator.id] ?? null) : null;
+
+  // ===== Kontrak & Kemitraan (Improvement MCN T7) =====
+  // Bucket from contract.ts + app_config m8.contract_alert_days; partnership status from
+  // the Excel upload (creator_partnership_status, RLS-scoped).
+  const [contractAlertDays, partnershipLabels, partnershipById] = await Promise.all([
+    loadContractAlertDays().catch(() => DEFAULT_CONTRACT_ALERT_DAYS),
+    loadPartnershipLabels(),
+    loadPartnershipStatus(supabase, [creator.id]),
+  ]);
+  const contractNowMs = Date.now();
+  const contract = contractRemaining(creator.join_date, creator.contract_end_date, contractNowMs, contractAlertDays);
+  const contractTone = contractBucketTone(
+    contractBucket(contractDays(creator.join_date, creator.contract_end_date, contractNowMs), contractAlertDays)
+  );
+  const partnership = partnershipById.get(creator.id) ?? null;
 
   // ===== Pertumbuhan GMV Mingguan (W1-W5) — pemilih bulan =====
   // All periods for this creator (only needed to list available months + build
@@ -151,6 +176,51 @@ export default async function CreatorDetailPage({
           </div>
         )}
       </div>
+
+      <section className="rounded-lg border border-slate-200 bg-white p-4">
+        <h2 className="text-sm font-semibold text-slate-700">Kontrak & Kemitraan</h2>
+        <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-3">
+          <div>
+            <p className="text-xs uppercase text-slate-500">Sisa Kontrak</p>
+            <p className={`text-lg font-semibold ${contractTone.text}`}>{contract.label}</p>
+            <p className="text-xs text-slate-400">
+              Berakhir {creator.contract_end_date ?? "—"} · merah bila ≤{contractAlertDays.danger} hari
+            </p>
+          </div>
+          <div>
+            <p className="text-xs uppercase text-slate-500">Management Partnership</p>
+            <p className="mt-1">
+              <PartnershipBadge kind="partnership" status={partnership?.partnership_status} labels={partnershipLabels} />
+            </p>
+            {partnership?.partnership_status && (
+              <p className="mt-1 text-xs text-slate-400">
+                {partnershipLabels.partnership[partnership.partnership_status].meaning}
+              </p>
+            )}
+          </div>
+          <div>
+            <p className="text-xs uppercase text-slate-500">Fee Agreement</p>
+            <p className="mt-1">
+              <PartnershipBadge
+                kind="fee"
+                status={partnership?.fee_agreement_status}
+                platform={creator.platform ?? "tiktok"}
+                labels={partnershipLabels}
+              />
+            </p>
+            {partnership?.fee_agreement_status && (
+              <p className="mt-1 text-xs text-slate-400">
+                {partnershipLabels.fee_agreement[partnership.fee_agreement_status].meaning}
+              </p>
+            )}
+          </div>
+        </div>
+        <p className="mt-3 text-xs text-slate-400">
+          {partnership
+            ? `Status kemitraan dari upload terakhir: ${new Date(partnership.updated_at).toLocaleString("id-ID")}`
+            : "Kreator ini belum ada di file status kemitraan yang diunggah."}
+        </p>
+      </section>
 
       <section className="grid grid-cols-2 gap-3 md:grid-cols-4">
         <div className="rounded-lg border border-slate-200 bg-white p-3">
