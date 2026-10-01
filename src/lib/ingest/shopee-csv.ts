@@ -71,6 +71,29 @@ export interface ShopeeParseResult {
   rowsNonCompleted: number;
   skipped: SkippedShopeeRow[];
   rawHeadersFound: string[];
+  /**
+   * Set when the Conversion Report header row could not be found: the file's
+   * first non-empty line (trimmed to 200 chars), so the error the user sees
+   * shows what the file actually starts with.
+   */
+  headerNotFound?: { firstLine: string };
+}
+
+/** Leading non-header lines tolerated before the header (title rows etc.) — same allowance as parseSheet. */
+const MAX_PREAMBLE_LINES = 5;
+
+/** True when a raw CSV line looks like the Conversion Report header (any required column present). */
+function isHeaderLine(line: string): boolean {
+  const cells = line.split(/[,;\t]/).map((c) => normalizeHeader(c.replace(/^\s*"|"\s*$/g, "")));
+  return SHOPEE_REQUIRED_HEADERS.some((h) => cells.includes(h));
+}
+
+/** Text encoding from the byte-order mark: Excel's "Unicode Text"/UTF-16 saves start with FF FE / FE FF. */
+async function detectEncoding(file: File): Promise<"utf-8" | "utf-16le" | "utf-16be"> {
+  const b = new Uint8Array(await file.slice(0, 2).arrayBuffer());
+  if (b[0] === 0xff && b[1] === 0xfe) return "utf-16le";
+  if (b[0] === 0xfe && b[1] === 0xff) return "utf-16be";
+  return "utf-8";
 }
 
 /** "Waktu Pesanan Dibuat" is "YYYY-MM-DD HH:MM:SS" — take the date part only. */
@@ -101,6 +124,11 @@ function platformBucket(platform: string): "live" | "video" | "other" {
  * columns), and materializing the text + every raw 57-column row object (the
  * parseSheet path) peaked at ~3.2GB for 200MB — past the serverless function
  * memory. Non-CSV files (.xlsx) still go through parseSheet.
+ *
+ * Like parseSheet, up to MAX_PREAMBLE_LINES leading lines before the header
+ * (e.g. a report title row) are skipped, and a UTF-16 file (Excel re-save) is
+ * decoded by its BOM. If no header is found, `headerNotFound` carries the
+ * file's first line for the error message.
  */
 export async function parseShopeeFile(file: File): Promise<ShopeeParseResult> {
   const skipped: SkippedShopeeRow[] = [];
@@ -181,25 +209,42 @@ export async function parseShopeeFile(file: File): Promise<ShopeeParseResult> {
     return { rows, rowsNonCompleted, skipped, rawHeadersFound };
   }
 
+  let headerNotFound: ShopeeParseResult["headerNotFound"];
+  const encoding = await detectEncoding(file);
+
   await new Promise<void>((resolve, reject) => {
     let dataRow = 0;
     let headerChecked = false;
-    // setEncoding: StringDecoder keeps multi-byte UTF-8 chars intact across chunk
-    // boundaries. The BOM survives into the first header, which normalizeHeader's
-    // trim() strips (U+FEFF is whitespace to String.prototype.trim).
-    const input = Readable.fromWeb(file.stream() as unknown as NodeWebReadableStream<Uint8Array>);
-    input.setEncoding("utf8");
+    let firstLine = "";
+    // TextDecoderStream keeps multi-byte chars intact across chunk boundaries and
+    // drops the BOM (UTF-8 or UTF-16), so Papa only ever sees clean text.
+    const text = (file.stream() as unknown as NodeWebReadableStream<Uint8Array>).pipeThrough(
+      new TextDecoderStream(encoding) as unknown as import("node:stream/web").TransformStream<Uint8Array, string>
+    );
+    const input = Readable.fromWeb(text);
     input.on("error", reject);
     Papa.parse<Record<string, string>>(input as unknown as Papa.LocalFile, {
       header: true,
       skipEmptyLines: "greedy",
       transformHeader: normalizeHeader,
+      // Drop title/preamble lines above the header (the first chunk is 64KB,
+      // far more than a few header-sized lines).
+      beforeFirstChunk: (chunk) => {
+        const lines = chunk.split(/\r?\n/, MAX_PREAMBLE_LINES + 1);
+        firstLine = (lines.find((l) => l.trim() !== "") ?? "").trim().slice(0, 200);
+        const at = lines.findIndex(isHeaderLine);
+        if (at <= 0) return chunk;
+        let cut = 0;
+        for (let i = 0; i < at; i++) cut = chunk.indexOf("\n", cut) + 1;
+        return chunk.slice(cut);
+      },
       step: (result, parser) => {
         if (!headerChecked) {
           headerChecked = true;
           rawHeadersFound = result.meta.fields ?? [];
           if (!SHOPEE_REQUIRED_HEADERS.some((h) => rawHeadersFound.includes(h))) {
             skipped.push({ row: -1, reason: `Header wajib tidak ditemukan (${SHOPEE_REQUIRED_HEADERS.join(", ")})` });
+            headerNotFound = { firstLine };
             rawHeadersFound = [];
             parser.abort();
             return;
@@ -214,7 +259,7 @@ export async function parseShopeeFile(file: File): Promise<ShopeeParseResult> {
     });
   });
 
-  return { rows, rowsNonCompleted, skipped, rawHeadersFound };
+  return { rows, rowsNonCompleted, skipped, rawHeadersFound, headerNotFound };
 }
 
 export interface ShopeeWindowCheck {
