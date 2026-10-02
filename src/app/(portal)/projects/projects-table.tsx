@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useMemo } from "react";
 import { rupiah } from "@/lib/utils/format";
+import { ProjectTargetEdit } from "./project-target-edit";
 import {
   PAGE_SIZE_10, SortableTh, TableFilterBar, TablePagination, useTableControls,
   type FacetDef, type SortConfig,
@@ -71,7 +72,7 @@ const SORT: SortConfig<ProjectRow> = {
  * Semua client-side atas daftar yang sudah dimuat server component (limit 100) —
  * mengetik/menyortir/pindah halaman tidak memicu query Supabase baru.
  */
-export function ProjectsTable({ rows }: { rows: ProjectRow[] }) {
+export function ProjectsTable({ rows, canEditTarget = false }: { rows: ProjectRow[]; canEditTarget?: boolean }) {
   const facets = useMemo(() => STATUS_FACET, []);
   const controls = useTableControls<ProjectRow>({
     rows,
@@ -114,7 +115,12 @@ export function ProjectsTable({ rows }: { rows: ProjectRow[] }) {
                     {p.type && <span className="ml-1 text-xs text-slate-400">{p.type}</span>}
                   </td>
                   <td className="px-4 py-2 whitespace-nowrap">{p.startDate ?? "—"} → {p.endDate ?? "—"}</td>
-                  <td className="px-4 py-2">{rupiah(p.targetGmv)}</td>
+                  <td className="px-4 py-2">
+                    <span className="inline-flex flex-wrap items-center gap-2">
+                      {rupiah(p.targetGmv)}
+                      {canEditTarget && <ProjectTargetEdit projectId={p.id} initialTarget={p.targetGmv} />}
+                    </span>
+                  </td>
                   <td className="px-4 py-2">
                     {p.targetCreators ? (
                       <span className={p.participants < p.targetCreators ? "text-amber-700" : "text-green-700"}>

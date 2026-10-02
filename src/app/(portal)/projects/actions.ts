@@ -533,14 +533,14 @@ export async function addParticipant(formData: FormData): Promise<AddParticipant
 }
 
 /**
- * Ubah target GMV peserta dari tabel "Performa per Kreator" — SPV/Head/Director
- * saja (requireProjectLead). Hanya target_gmv yang bisa diubah lewat sini: GMV
+ * Ubah target GMV peserta dari tabel "Performa per Kreator" — management + leader
+ * (izin m7.edit_target). Hanya target_gmv yang bisa diubah lewat sini: GMV
  * aktual/item terjual datang dari upload performa (project_creator_metrics), read-only
  * per CLAUDE.md #3 — tidak ada input manual untuk itu di mana pun, termasuk di sini.
  */
 export async function updateParticipantTarget(formData: FormData): Promise<AddParticipantResult> {
   try {
-    const actor = await requireProjectLead();
+    const actor = await requirePermission("m7.edit_target");
     const projectId = Number(formData.get("project_id"));
     const creatorId = String(formData.get("creator_id") ?? "").trim();
     if (!projectId || !creatorId) throw new Error("Project & kreator wajib dikenali");
@@ -567,6 +567,42 @@ export async function updateParticipantTarget(formData: FormData): Promise<AddPa
       entityId: `${projectId}:${creatorId}`,
       before: { target_gmv: existing.target_gmv }, after: { target_gmv: targetGmv }, type: "auto",
     });
+    revalidatePath(`/projects/${projectId}`);
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "Terjadi kesalahan tidak terduga." };
+  }
+}
+
+/**
+ * Ubah HANYA target GMV project (bukan nama/periode/ads cap) — management + leader
+ * (izin m7.edit_target). Edit penuh project tetap updateProject (management saja).
+ */
+export async function updateProjectTargetGmv(formData: FormData): Promise<AddParticipantResult> {
+  try {
+    const actor = await requirePermission("m7.edit_target");
+    const projectId = Number(formData.get("project_id"));
+    if (!Number.isInteger(projectId) || projectId <= 0) throw new Error("Project tidak dikenali");
+
+    const targetGmv = parseRupiah(String(formData.get("target_gmv") ?? ""));
+    if (targetGmv === null || targetGmv <= 0) {
+      throw new Error("Target GMV wajib diisi, angka murni (mis. 50000000 atau Rp50.000.000)");
+    }
+
+    const admin = createAdminClient();
+    const { data: existing } = await admin
+      .from("special_projects").select("target_gmv").eq("id", projectId).maybeSingle();
+    if (!existing) throw new Error(`Project ${projectId} tidak ditemukan`);
+
+    const { error } = await admin.from("special_projects").update({ target_gmv: targetGmv }).eq("id", projectId);
+    if (error) throw new Error(`Gagal menyimpan target GMV: ${error.message}`);
+
+    await writeAudit({
+      actorId: actor.id, action: "m7.update_project_target", entityType: "special_projects",
+      entityId: String(projectId),
+      before: { target_gmv: existing.target_gmv }, after: { target_gmv: targetGmv }, type: "auto",
+    });
+    revalidatePath("/projects");
     revalidatePath(`/projects/${projectId}`);
     return { ok: true };
   } catch (e) {

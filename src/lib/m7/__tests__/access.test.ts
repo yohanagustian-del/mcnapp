@@ -52,3 +52,14 @@ describe("canUploadProjectPerformance", () => {
     );
   });
 });
+
+describe("RBAC m7.edit_target", () => {
+  it("management + leader (cm/bizdev/akuisisi lead) saja", async () => {
+    const { hasPermission } = await import("@/lib/rbac");
+    const { ROLES } = await import("@/lib/rbac-constants");
+    const allowed = ["director", "head", "spv", "cm_lead", "bizdev_lead", "acquisition_lead"];
+    for (const role of ROLES) {
+      expect(hasPermission("m7.edit_target", role)).toBe(allowed.includes(role));
+    }
+  });
+});
