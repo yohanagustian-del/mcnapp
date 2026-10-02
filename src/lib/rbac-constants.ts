@@ -214,6 +214,11 @@ export const PERMISSIONS: Record<string, Role[]> = {
   "m6.run": [...MANAGEMENT_ROLES, "bizdev_lead", "bizdev"],
   // M7 §2.7: buat/edit project & kelola peserta/man power = management + lead terkait + PM (campaign_ops)
   "m7.manage": [...MANAGEMENT_ROLES, "cm_lead", "bizdev_lead", "acquisition_lead", "campaign_ops"],
+  // Ubah Target GMV di Special Project (target per kreator di "Performa per Kreator" +
+  // target GMV project) = management + leader (CM Lead / BizDev Lead / Akuisisi Lead),
+  // permintaan user 2026-10-02. SENGAJA lebih sempit dari m7.manage (tanpa campaign_ops)
+  // dan hanya mengubah target_gmv — edit penuh/hapus project & hapus peserta tetap management.
+  "m7.edit_target": [...MANAGEMENT_ROLES, "cm_lead", "bizdev_lead", "acquisition_lead"],
   // M7 report insight (Special Project): editing/finalizing narasi report dibuka untuk
   // SEMUA role staff (permintaan user 2026-09-28) — beda dari m7.manage (yang tetap
   // membatasi buat/edit project & man power). od_viewer sengaja dikecualikan: read-only

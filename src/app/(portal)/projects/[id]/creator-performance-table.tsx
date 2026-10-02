@@ -252,15 +252,18 @@ function DeleteParticipantButton({ projectId, creatorId, creatorName }: { projec
 
 /**
  * Performa per Kreator: klik header untuk urut naik/turun, paginasi 10/50/100.
- * `canManage` (SPV/Head/Director) menambah kolom Aksi — edit target GMV & keluarkan
- * peserta; GMV aktual/item tetap read-only (datanya dari upload, CLAUDE.md #3).
+ * Kolom Aksi: `canEditTarget` (management + leader) = edit target GMV, `canManage`
+ * (SPV/Head/Director) = keluarkan peserta; GMV aktual/item tetap read-only (datanya dari upload, CLAUDE.md #3).
  */
 export function CreatorPerformanceTable({
-  rows, projectId, canManage = false, canEditNotes = false,
+  rows, projectId, canManage = false, canEditTarget = false, canEditNotes = false,
 }: {
   rows: CreatorPerformanceRow[];
   projectId?: number;
+  /** SPV/Head/Director: keluarkan peserta. */
   canManage?: boolean;
+  /** Management + leader (m7.edit_target): ubah Target GMV per kreator. */
+  canEditTarget?: boolean;
   /** Semua role staff: kolom Analisa, Brand Pairs, Ads By. */
   canEditNotes?: boolean;
 }) {
@@ -271,7 +274,7 @@ export function CreatorPerformanceTable({
     itemLabel: "kreator",
   });
   const [editingId, setEditingId] = useState<string | null>(null);
-  const showActions = canManage && projectId !== undefined;
+  const showActions = (canManage || canEditTarget) && projectId !== undefined;
   const showNotes = canEditNotes && projectId !== undefined;
 
   return (
@@ -304,7 +307,7 @@ export function CreatorPerformanceTable({
                   {r.cmName ?? <span className="text-amber-700">Belum ada CM</span>}
                 </td>
                 <td className="px-4 py-2">
-                  {showActions && editingId === r.creatorId ? (
+                  {showActions && canEditTarget && editingId === r.creatorId ? (
                     <EditTargetForm
                       projectId={projectId}
                       creatorId={r.creatorId}
@@ -360,14 +363,18 @@ export function CreatorPerformanceTable({
                   <td className="px-4 py-2">
                     {editingId !== r.creatorId && (
                       <span className="inline-flex items-center gap-1">
-                        <button
-                          type="button"
-                          onClick={() => setEditingId(r.creatorId)}
-                          className="rounded-md border border-slate-300 px-2 py-1 text-xs hover:bg-slate-50"
-                        >
-                          Edit
-                        </button>
-                        <DeleteParticipantButton projectId={projectId} creatorId={r.creatorId} creatorName={r.creatorName} />
+                        {canEditTarget && (
+                          <button
+                            type="button"
+                            onClick={() => setEditingId(r.creatorId)}
+                            className="rounded-md border border-slate-300 px-2 py-1 text-xs hover:bg-slate-50"
+                          >
+                            Edit Target
+                          </button>
+                        )}
+                        {canManage && (
+                          <DeleteParticipantButton projectId={projectId} creatorId={r.creatorId} creatorName={r.creatorName} />
+                        )}
                       </span>
                     )}
                   </td>

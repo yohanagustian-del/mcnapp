@@ -52,7 +52,7 @@ export default async function ProjectsPage() {
 
       {canManage && <ProjectCreateForm projectTypes={PROJECT_TYPES} />}
 
-      <ProjectsTable rows={projectRows} />
+      <ProjectsTable rows={projectRows} canEditTarget={hasPermission("m7.edit_target", member.role)} />
     </div>
   );
 }

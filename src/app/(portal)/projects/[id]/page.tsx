@@ -2,6 +2,7 @@ import { notFound } from "next/navigation";
 import Link from "next/link";
 import { requireMember, hasPermission, MANAGEMENT_ROLES } from "@/lib/rbac";
 import { EditProjectPanel } from "./edit-project-panel";
+import { ProjectTargetEdit } from "../project-target-edit";
 import { createClient } from "@/lib/supabase/server";
 import { getConfig } from "@/lib/config";
 import { resolveOrigin } from "@/lib/auth/origin";
@@ -345,6 +346,10 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
             projectTypes={PROJECT_TYPES}
           />
         )}
+        {/* Leader (bukan management): hanya boleh mengubah Target GMV project. */}
+        {!MANAGEMENT_ROLES.includes(member.role) && hasPermission("m7.edit_target", member.role) && (
+          <ProjectTargetEdit projectId={project.id} initialTarget={project.target_gmv === null ? null : Number(project.target_gmv)} />
+        )}
       </div>
 
       {canManage && (
@@ -592,6 +597,7 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
         rows={creatorPerformanceRows}
         projectId={project.id}
         canManage={MANAGEMENT_ROLES.includes(member.role)}
+        canEditTarget={hasPermission("m7.edit_target", member.role)}
         canEditNotes={hasPermission("m7.participant_notes", member.role)}
       />
 
