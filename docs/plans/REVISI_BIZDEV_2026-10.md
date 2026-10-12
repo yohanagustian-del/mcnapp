@@ -5,21 +5,21 @@ Dokumen memuat **2 gambar yang tidak terbaca tool** (gambar "segmentasi harga se
 tampilan Report Kreator). Akar masalah segmentasi dipastikan lewat query ke database produksi, bukan
 dari gambar.
 
-Status: **DRAFT — menunggu jawaban interview §0** sebelum tiket T3 ke atas dikerjakan. T1 dan T2 bisa
-langsung jalan karena tidak bergantung keputusan.
+Status: **DISETUJUI dengan keputusan interview 2026-10-12** (Q1–Q4 dijawab user, lihat §0). Q5 dan Q6
+dijalankan sesuai rekomendasi karena tidak ada keberatan. Siap dieksekusi T1 → T10.
 
 ---
 
-## 0. Pertanyaan interview (jawab dulu sebelum T3+)
+## 0. Keputusan interview (dijawab user 2026-10-12 — jangan re-interview)
 
-| # | Pertanyaan | Rekomendasi | Dampak kalau beda |
+| # | Pertanyaan | **Keputusan** | Konsekuensi di tiket |
 |---|---|---|---|
-| Q1 | **Di mana BizDev di-assign ke brand (maks 2 orang)?** | Tombol **Edit** per baris Shop di tab Deal Brand (sudah ada tombol itu untuk Shop ID & Tipe Campaign) + pertanyaan "BizDev handler" di form Registrasi Deal. Awal: diisi otomatis dari `deal_by`/`created_by` yang sudah ada (hanya 23 kartu & 45 deal yang punya). | Kalau mau dari upload Excel massal, perlu importer + template tambahan (T5 membesar). |
-| Q2 | **Periode angka di summary BizDev & TAP Matchmaking?** | Default **bulan berjalan**, ada pemilih periode (bulan / rentang minggu W1–W5) — sama dengan skema upload mingguan. | "All-time" membuat angka brand lama mendominasi dan tidak bisa dibandingkan antar BizDev. |
-| Q3 | **Report Brand v2: ganti total jalur upload file manual?** | **Ganti**: report dibangun dari data mingguan yang sudah diupload di `/ingest` (0 upload tambahan, 0 LLM seperti Report Kreator v2). Jalur upload file lama dihapus. | Kalau tetap mau upload file per report, dua jalur hidup berdampingan dan angkanya bisa beda. |
-| Q4 | **Shopee di TAP Matchmaking & GMV TAP:** laporan Shopee (Conversion Report) itu gabungan MCN + SAP. Kolom mana yang menandai order lewat link agency (SAP)? `Partner Promo`? `ID Kontrak MCN`? `Campaign Type`? | **Fase 1 = TikTok saja** (MCN + TAP sudah dua file terpisah). Shopee tampil GMV MCN-nya saja dengan label "GMV TAP belum tersedia untuk Shopee". | Kalau kolomnya diketahui sekarang, Shopee bisa ikut di fase yang sama. |
-| Q5 | **Segmen harga TikTok untuk baris `items_sold = 0` tapi `orders > 0`** (±17% GMV mingguan): pakai `gmv/orders` sebagai pendekatan harga? | **Ya**, dengan penanda `price_basis = 'orders'` supaya bisa dibedakan. | Kalau tidak, baris itu tetap tanpa segmen (seperti sekarang). |
-| Q6 | **Backfill**: raw file mingguan dibuang setelah ingest (drop-raw), jadi agregat per shop (T4) dan segmen Shopee (T2) **hanya terisi untuk upload berikutnya**. File minggu Agustus–September baru saja diupload ulang 2026-10-05, jadi filenya masih ada. Mau diupload ulang setelah rilis? | **Ya**, upload ulang W1–W5 Sep (dan Agustus bila perlu) setelah T4 rilis. Ingest idempotent per (kreator × minggu), aman diulang. | Tanpa backfill, summary BizDev & TAP Matchmaking kosong sampai minggu depan. |
+| Q1 | Di mana BizDev di-assign ke brand (maks 2 orang)? | **Keduanya**: tombol Edit per baris Shop di tab Deal Brand (+ pertanyaan opsional di Registrasi Deal) untuk koreksi harian, DAN upload Excel massal untuk pengisian awal. Seed otomatis dari `deal_by`/`created_by` tetap dilakukan. | T5 bertambah importer `uploadBrandBizdevHandlers` + template .xlsx (kolom: Shop ID / Shop Name / BizDev 1 / BizDev 2), pola yang sama dengan `uploadPartnershipStatus`: spec + template satu file, dijaga test round-trip. |
+| Q2 | Periode angka di summary BizDev & TAP Matchmaking? | **Bulan berjalan + pemilih periode** (bulan lain / minggu W1–W5). | T6, T7, T9 memakai pemilih periode yang sama (`lib/m8/period.ts`, satu util). |
+| Q3 | Report Brand v2: ganti total jalur upload file manual? | **Ganti total, 0 LLM.** Jalur upload file & ringkasan LLM dihapus; report lama (schema v1) tetap bisa dibuka read-only. | T9 menghapus `brand-report-form.tsx`, `generateBrandReport` lama, dan `lib/m8/brand-summary.ts`. |
+| Q4 | Shopee di TAP Matchmaking & GMV TAP? | **Fase 1 = TikTok saja.** Shopee tampil GMV MCN-nya dengan label "GMV TAP belum tersedia untuk Shopee". Kolom penanda order SAP di laporan Shopee belum dipastikan. | T4 menulis `gmv_tap = null` untuk baris Shopee; T6/T7 menampilkan label, bukan 0. Tiket lanjutan Shopee dibuka setelah kolomnya dipastikan. |
+| Q5 | Segmen harga TikTok untuk baris `items_sold = 0` tapi `orders > 0` (±17% GMV mingguan)? | **Sesuai rekomendasi** (tidak ditanyakan terpisah): pakai `gmv/orders` sebagai pendekatan harga, ditandai di komentar + test. | T2 langkah 4. |
+| Q6 | Backfill: agregat per shop & segmen Shopee hanya terisi untuk upload berikutnya (raw dibuang). | **Sesuai rekomendasi**: upload ulang file mingguan W1–W5 Sep (file masih ada, baru diupload ulang 2026-10-05) setelah T4 rilis. Ingest idempotent per (kreator × minggu). | T10 langkah 3. Sampai backfill selesai, UI menampilkan "data periode ini belum diupload dengan versi baru". |
 
 ---
 
@@ -142,15 +142,15 @@ Acquisition Workspace, Tim, Config OKR, OD Oversight, Retensi Data.
 | Tiket | Judul | Blokir | Migrasi | Butuh jawaban |
 |---|---|---|---|---|
 | T1 | Nav audit + label "Request Creator Brand Deals" + hapus section Pipeline | — | tidak | — |
-| T2 | Fix segmentasi harga: parser Shopee baca Qty/Harga + platform Shopee + cadangan gmv/orders | — | SQL backfill `platform` saja (tanpa DDL) | Q5 |
-| T3 | Migrasi 0087: `creator_shop_period_gmv`, `brand_bizdev_handlers`, `brand_reports` v2 | — | file saja | Q1, Q3 |
-| T4 | Ingest menulis `creator_shop_period_gmv` (TikTok MCN+TAP; Shopee MCN saja) | T3 | — | Q4 |
-| T5 | Assign BizDev per brand (maks 2) + badge "Non BD Handle" | T3 | — | Q1 |
-| T6 | BizDev Workspace: section summary per BizDev + tabel breakdown (paling atas) | T4, T5 | — | Q2 |
-| T7 | Halaman TAP Matchmaking `/tap-matchmaking` | T4 | — | Q2, Q4 |
+| T2 | Fix segmentasi harga: parser Shopee baca Qty/Harga + platform Shopee + cadangan gmv/orders | — | SQL backfill `platform` saja (tanpa DDL) | Q5 ✔ |
+| T3 | Migrasi 0087: `creator_shop_period_gmv`, `brand_bizdev_handlers`, `brand_reports` v2 | — | file saja | Q1, Q3 ✔ |
+| T4 | Ingest menulis `creator_shop_period_gmv` (TikTok MCN+TAP; Shopee MCN saja) | T3 | — | Q4 ✔ |
+| T5 | Assign BizDev per brand (maks 2): Edit per baris + upload Excel + badge "Non BD Handle" | T3 | — | Q1 ✔ |
+| T6 | BizDev Workspace: section summary per BizDev + tabel breakdown (paling atas) | T4, T5 | — | Q2 ✔ |
+| T7 | Halaman TAP Matchmaking `/tap-matchmaking` | T4 | — | Q2, Q4 ✔ |
 | T8 | Brand Lead Bank → Registrasi Deal (prefill + tautan otomatis) | — | tidak | — |
-| T9 | Report Brand v2 `/brand-reports` (otomatis dari data mingguan, 0 LLM) + hapus section di workspace | T3, T4 | — | Q3 |
-| T10 | FINAL: apply 0087 (staging → prod via `apply_migration`), backfill, HANDOFF/CLAUDE.md | semua | apply | Q6 |
+| T9 | Report Brand v2 `/brand-reports` (otomatis dari data mingguan, 0 LLM) + hapus section di workspace | T3, T4 | — | Q3 ✔ |
+| T10 | FINAL: apply 0087 (staging → prod via `apply_migration`), backfill, HANDOFF/CLAUDE.md | semua | apply | Q6 ✔ |
 
 ### T1 — Nav audit + label + hapus Pipeline
 - **File:** `src/lib/rbac-constants.ts`, `src/app/(portal)/layout.tsx`,
@@ -230,13 +230,22 @@ Acquisition Workspace, Tim, Config OKR, OD Oversight, Retensi Data.
 - **Test:** round-trip MCN+TAP sample → Σ gmv_mcn per kreator = `creator_period_summary.affiliate_gmv`
   kreator itu (invariant), Σ gmv_tap = `CreatorLeakRollup.gmvTap`.
 
-### T5 — Assign BizDev per brand
+### T5 — Assign BizDev per brand (Q1: Edit per baris DAN upload Excel)
 - **File:** `src/app/(portal)/deals/shop-edit-button.tsx`, `src/lib/deals/shop-edit.ts`,
-  `src/app/(portal)/deals/actions.ts` (`setBrandBizdevHandlers`), `deal-form.tsx` (+ pertanyaan
-  "BizDev handler", opsional, maks 2), `components/bizdev-handler-badge.tsx`.
+  `src/app/(portal)/deals/actions.ts` (`setBrandBizdevHandlers`, `uploadBrandBizdevHandlers`),
+  `deal-form.tsx` (+ pertanyaan "BizDev handler", opsional, maks 2),
+  `src/lib/deals/bizdev-handler-spec.ts` (kolom + parser + template .xlsx dalam SATU file, dijaga
+  test round-trip — pola `partnership-spec.ts`), `components/bizdev-handler-badge.tsx`, tombol
+  "Upload BizDev Handler" di tab Deal Brand.
 - **Aturan:** izin `deals.edit`; maks 2 member ber-role `BIZDEV_ROLES`; simpan sebagai selisih
   (hapus yang keluar + tambah yang masuk), audit_logs `type: auto`. Seed awal (T10, SQL): dari
   `products_tap.deal_by` dan `brand_deals.created_by` per shop_key bila ber-role BizDev.
+- **Upload Excel:** kolom `Shop ID | Shop Name | BizDev 1 | BizDev 2` (nama BizDev dicocokkan ke
+  `team_members.name` ber-role BizDev, tidak peka huruf besar/kecil). Shop dicari lewat `shop_id`
+  dulu, lalu nama (SQL, bukan ekspresi shop_key di aplikasi). Shop tak ditemukan / nama BizDev tak
+  dikenal → baris DILEWATI dan ditampilkan sebagai peringatan (bukan dibuat baru) — sama seperti
+  `uploadPartnershipStatus`. Sel kosong = tidak mengubah assignment lama; isi file = keadaan akhir
+  (2 nama menggantikan yang lama).
 - **Tampilan:** kolom "BizDev" di tabel Shop (tab Deal Brand) dan detail deal; tanpa handler →
   badge abu "Non BD Handle".
 
