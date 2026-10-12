@@ -5,8 +5,8 @@ Dokumen memuat **2 gambar yang tidak terbaca tool** (gambar "segmentasi harga se
 tampilan Report Kreator). Akar masalah segmentasi dipastikan lewat query ke database produksi, bukan
 dari gambar.
 
-Status: **DISETUJUI dengan keputusan interview 2026-10-12** (Q1–Q4 dijawab user, lihat §0). Q5 dan Q6
-dijalankan sesuai rekomendasi karena tidak ada keberatan. Siap dieksekusi T1 → T10.
+Status: **DISETUJUI dengan keputusan interview 2026-10-12** (Q1–Q6 semuanya dijawab langsung oleh user,
+lihat §0; Q1–Q4 ditanyakan dua kali karena salah klik, jawabannya sama). Siap dieksekusi T1 → T10.
 
 ---
 
@@ -18,8 +18,8 @@ dijalankan sesuai rekomendasi karena tidak ada keberatan. Siap dieksekusi T1 →
 | Q2 | Periode angka di summary BizDev & TAP Matchmaking? | **Bulan berjalan + pemilih periode** (bulan lain / minggu W1–W5). | T6, T7, T9 memakai pemilih periode yang sama (`lib/m8/period.ts`, satu util). |
 | Q3 | Report Brand v2: ganti total jalur upload file manual? | **Ganti total, 0 LLM.** Jalur upload file & ringkasan LLM dihapus; report lama (schema v1) tetap bisa dibuka read-only. | T9 menghapus `brand-report-form.tsx`, `generateBrandReport` lama, dan `lib/m8/brand-summary.ts`. |
 | Q4 | Shopee di TAP Matchmaking & GMV TAP? | **Fase 1 = TikTok saja.** Shopee tampil GMV MCN-nya dengan label "GMV TAP belum tersedia untuk Shopee". Kolom penanda order SAP di laporan Shopee belum dipastikan. | T4 menulis `gmv_tap = null` untuk baris Shopee; T6/T7 menampilkan label, bukan 0. Tiket lanjutan Shopee dibuka setelah kolomnya dipastikan. |
-| Q5 | Segmen harga TikTok untuk baris `items_sold = 0` tapi `orders > 0` (±17% GMV mingguan)? | **Sesuai rekomendasi** (tidak ditanyakan terpisah): pakai `gmv/orders` sebagai pendekatan harga, ditandai di komentar + test. | T2 langkah 4. |
-| Q6 | Backfill: agregat per shop & segmen Shopee hanya terisi untuk upload berikutnya (raw dibuang). | **Sesuai rekomendasi**: upload ulang file mingguan W1–W5 Sep (file masih ada, baru diupload ulang 2026-10-05) setelah T4 rilis. Ingest idempotent per (kreator × minggu). | T10 langkah 3. Sampai backfill selesai, UI menampilkan "data periode ini belum diupload dengan versi baru". |
+| Q5 | Segmen harga TikTok untuk baris `items_sold = 0` tapi `orders > 0` (±17% GMV mingguan)? | **Ya, pakai `gmv/orders`** sebagai pendekatan harga, ditandai di komentar + test. | T2 langkah 4. |
+| Q6 | Backfill: agregat per shop & segmen Shopee hanya terisi untuk upload berikutnya (raw dibuang). | **Ya, upload ulang September W1–W5** (file masih ada, baru diupload ulang 2026-10-05) setelah T4 rilis. Ingest idempotent per (kreator × minggu). | T10 langkah 3. Sampai backfill selesai, UI menampilkan "data periode ini belum diupload dengan versi baru". |
 
 ---
 
