@@ -4,7 +4,6 @@ import { createClient } from "@/lib/supabase/server";
 import { getProjectRequirements } from "@/lib/m7/requirements";
 import { ProjectRequirementsPanel } from "@/components/project-requirements-panel";
 import { processCreatorRequest } from "./actions";
-import { BrandReportForm } from "./brand-report-form";
 import { CampaignReqTable, type CampaignReqRow } from "./campaign-req-table";
 import { RouteCampaignForm } from "./route-campaign-form";
 import { CompactScheduleList, type CompactSlotRow } from "../../schedule/compact-list";
@@ -23,12 +22,6 @@ export const dynamic = "force-dynamic";
 const rupiah = (n: number | null | undefined) =>
   n === null || n === undefined ? "—" : `Rp${Math.round(Number(n)).toLocaleString("id-ID")}`;
 const btnSmall = "rounded-md px-2 py-1 text-xs font-medium";
-
-interface BrandReportData {
-  totals?: { gmv?: number; video_views?: number; live_views?: number; videos?: number; creators?: number };
-  roas?: number | null;
-  upgrade_recommendation?: boolean;
-}
 
 export default async function BizdevWorkspacePage({
   searchParams,
@@ -95,7 +88,7 @@ export default async function BizdevWorkspacePage({
       creatorUsername: bdCreatorById.get(s.creator_id)?.username ?? null,
     }));
   }
-  const [{ data: deals }, { data: creatorReqs }, { data: campaignReqs }, { data: leads }, { data: brandReports }] =
+  const [{ data: deals }, { data: creatorReqs }, { data: campaignReqs }, { data: leads }] =
     await Promise.all([
       supabase
         .from("brand_deals")
@@ -117,11 +110,6 @@ export default async function BizdevWorkspacePage({
         .select("id, shop_id, shop_name, frequency, total_gmv, priority_score, source, status")
         .order("priority_score", { ascending: false, nullsFirst: false })
         .limit(20),
-      supabase
-        .from("brand_reports")
-        .select("id, deal_id, period_start, period_end, data_json, summary_text, token_used, brand_deals(brand_name)")
-        .order("created_at", { ascending: false })
-        .limit(10),
     ]);
 
   const name = (rel: unknown) => (rel as { name?: string } | null)?.name ?? "—";
@@ -350,48 +338,16 @@ export default async function BizdevWorkspacePage({
         </div>
       </section>
 
-      {/* ===== §2B.3-2B.4 Campaign & hasil + report brand ===== */}
+      {/* ===== Report brand (REVISI_BIZDEV T9: pindah ke /brand-reports) ===== */}
       {canReport && (
-        <section>
-          <h2 className="text-lg font-medium">Report Brand Deals (§2B.4)</h2>
-          <p className="mt-1 text-xs text-slate-500">
-            Agregasi hasil campaign per brand dari data platform (GMV, video, view; ROAS bila ads
-            spend diisi) + saran upgrade service bila ROAS & GMV di atas ambang (tunable).
+        <section className="rounded-lg border border-slate-200 bg-white p-4">
+          <h2 className="text-lg font-medium">Report Brand</h2>
+          <p className="mt-1 text-sm text-slate-500">
+            Report performa brand per shop &amp; periode (GMV MCN vs TAP, top kreator, live vs video, Produk TAP,
+            saran upgrade) kini dibuat dari data upload mingguan di halaman{" "}
+            <Link href="/brand-reports" className="underline">Report Brand</Link> — tanpa upload file dan tanpa AI.
+            Report lama tetap bisa dibuka di sana.
           </p>
-          <div className="mt-3"><BrandReportForm deals={dealOptions} /></div>
-          <div className="mt-3 overflow-x-auto rounded-lg border border-slate-200 bg-white">
-            <table className="min-w-full text-sm">
-              <thead className="bg-slate-50 text-left text-xs uppercase text-slate-500">
-                <tr>
-                  <th className="px-4 py-3">Brand</th><th className="px-4 py-3">Periode</th>
-                  <th className="px-4 py-3">GMV</th><th className="px-4 py-3">ROAS</th>
-                  <th className="px-4 py-3">Video / View</th><th className="px-4 py-3">Creator</th>
-                  <th className="px-4 py-3">Upgrade?</th><th className="px-4 py-3">Ringkasan</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100">
-                {(brandReports ?? []).map((r) => {
-                  const d = (r.data_json ?? {}) as BrandReportData;
-                  const t = d.totals ?? {};
-                  return (
-                    <tr key={r.id}>
-                      <td className="px-4 py-2 font-medium">{name(r.brand_deals)}</td>
-                      <td className="px-4 py-2">{r.period_start} → {r.period_end}</td>
-                      <td className="px-4 py-2">{rupiah(t.gmv ?? null)}</td>
-                      <td className="px-4 py-2">{d.roas ? d.roas.toFixed(2) : "—"}</td>
-                      <td className="px-4 py-2">{t.videos ?? 0} / {(Number(t.video_views ?? 0) + Number(t.live_views ?? 0)).toLocaleString("id-ID")}</td>
-                      <td className="px-4 py-2">{t.creators ?? 0}</td>
-                      <td className="px-4 py-2">{d.upgrade_recommendation ? <span className="rounded-full bg-green-100 px-2 py-0.5 text-xs font-medium text-green-800">✦ layak upgrade</span> : "—"}</td>
-                      <td className="max-w-md px-4 py-2 text-xs text-slate-600">{r.summary_text ? `${r.summary_text.slice(0, 160)}… (${r.token_used} token)` : "data-only (0 token)"}</td>
-                    </tr>
-                  );
-                })}
-                {(brandReports ?? []).length === 0 && (
-                  <tr><td colSpan={8} className="px-4 py-6 text-center text-slate-400">Belum ada report brand.</td></tr>
-                )}
-              </tbody>
-            </table>
-          </div>
         </section>
       )}
     </div>
