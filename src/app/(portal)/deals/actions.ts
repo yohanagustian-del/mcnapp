@@ -32,6 +32,7 @@ import { priceSegmentOf, type PriceBounds } from "@/lib/projection/gmv";
 import { NO_CAMPAIGN, uploadProductMasterList } from "@/lib/m10/products";
 import { groupKeysByCampaign } from "@/lib/m10/product-keys";
 import type { UploadReport } from "@/app/(portal)/tim/actions";
+import { assignHandlersOnRegister, handlerIdsFromForm } from "@/lib/deals/bizdev-handlers";
 
 export interface DealFormState {
   ok: boolean;
@@ -110,9 +111,11 @@ export async function registerDealCard(
 
   const admin = createAdminClient();
 
+  const handlerIds = handlerIdsFromForm(formData);
+
   // ---------- Deal shop: produknya belum diketahui ----------
   if (target === "brand_deal") {
-    return registerShopDeal(d, actor.id, admin);
+    return registerShopDeal(d, actor.id, admin, handlerIds);
   }
 
   // ---------- Kartu produk ----------
@@ -184,6 +187,18 @@ export async function registerDealCard(
     type: "auto", // menambah data/income → auto berlaku, tetap ter-log (CLAUDE.md #2)
   });
 
+  // BizDev handler opsional (REVISI_BIZDEV T5): shop_key dibaca dari kolom generated,
+  // bukan dihitung ulang di aplikasi (CLAUDE.md #4).
+  let handlerNote: string | null = null;
+  if (handlerIds.length > 0) {
+    const { data: saved } = await admin
+      .from("products_tap").select("shop_key")
+      .eq("campaign_id", campaignId).eq("product_id", productId).maybeSingle();
+    const assigned = await assignHandlersOnRegister(admin, actor.id, (saved?.shop_key as string | null) ?? null, handlerIds);
+    handlerNote = assigned.note;
+    if (assigned.audit) await writeAudit(assigned.audit);
+  }
+
   revalidatePath("/products");
   revalidatePath("/deals");
   const notes: string[] = [];
@@ -193,6 +208,7 @@ export async function registerDealCard(
   if (d.product_name === undefined) {
     notes.push("Product Name belum diisi → kartu ditandai perlu review, lengkapi lewat tab Produk TAP");
   }
+  if (handlerNote) notes.push(handlerNote);
   return {
     ok: true,
     message:
@@ -218,7 +234,8 @@ export async function registerDealCard(
 async function registerShopDeal(
   d: ProductCardInput,
   actorId: string,
-  admin: ReturnType<typeof createAdminClient>
+  admin: ReturnType<typeof createAdminClient>,
+  handlerIds: string[] = []
 ): Promise<DealFormState> {
   const shopId = d.shop_id ?? null;
   const expDate = d.effective_end ?? null;
@@ -327,6 +344,13 @@ async function registerShopDeal(
     after: { ...record, submitted: d },
     type: "auto", // menambah data/income → auto berlaku, tetap ter-log (CLAUDE.md #2)
   });
+
+  if (handlerIds.length > 0) {
+    const { data: saved } = await admin.from("brand_deals").select("shop_key").eq("id", dealId).maybeSingle();
+    const assigned = await assignHandlersOnRegister(admin, actorId, (saved?.shop_key as string | null) ?? null, handlerIds);
+    if (assigned.note) extras.push(assigned.note);
+    if (assigned.audit) await writeAudit(assigned.audit);
+  }
 
   revalidatePath("/deals");
   return {

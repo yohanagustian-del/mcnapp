@@ -9,6 +9,9 @@ import {
 } from "@/components/table-controls";
 import { CAMPAIGN_TYPE_LABEL } from "@/lib/deals/campaign-type";
 import { ShopEditButton } from "./shop-edit-button";
+import { BizdevHandlerButton } from "./bizdev-handler-button";
+import { BizdevHandlerBadge } from "@/components/bizdev-handler-badge";
+import type { BizdevMember } from "@/lib/deals/bizdev-handlers";
 
 /**
  * Satu SHOP dari view `deal_shop_summary`: ringkasan kartu Produk TAP shop itu, atau —
@@ -55,6 +58,11 @@ export interface ShopSummaryRow {
    * role yang tidak boleh melihatnya — servernya yang menyaring, bukan tabel ini.
    */
   uploaded_by_names: string[];
+  /**
+   * BizDev penanggung jawab brand (brand_bizdev_handlers, maks 2). null = belum bisa
+   * dibaca (migrasi 0087 belum di-apply); [] = "Non BD Handle".
+   */
+  bizdev_handlers: BizdevMember[] | null;
 }
 
 /** Rupiah dipadatkan ("Rp1,2 jt") — nominal penuh tetap tersedia lewat title. */
@@ -261,6 +269,14 @@ const COLUMNS: TableColumn[] = [
     ),
   },
   {
+    // Penanggung jawab brand (REVISI_BIZDEV T5) — beda dari Deal by (yang menutup deal).
+    label: "BizDev",
+    compact: true,
+    value: (s) => s.bizdev_handlers?.[0]?.name ?? null,
+    className: td,
+    cell: (s) => <BizdevHandlerBadge names={s.bizdev_handlers?.map((h) => h.name) ?? null} />,
+  },
+  {
     // Yang menutup deal (CM/BizDev) — beda dari Nama BD (akun yang menginput kartu).
     label: "Deal by",
     compact: true,
@@ -348,9 +364,12 @@ export function ShopsTable({
   canEdit,
   canSeeOwner,
   emptyMessage,
+  bizdevMembers,
 }: {
   rows: ShopSummaryRow[];
   canEdit: boolean;
+  /** Daftar BizDev untuk tombol "BizDev" per baris; null = role tanpa izin deals.edit / data tidak tersedia. */
+  bizdevMembers: BizdevMember[] | null;
   /** Role boleh melihat kolom Nama BD (products.view_owner_name). */
   canSeeOwner: boolean;
   emptyMessage: string;
@@ -380,7 +399,8 @@ export function ShopsTable({
     compactLabels,
   });
   const visibleColumns = allowedColumns.filter((c) => columnPref.isShown(c.label));
-  const colCount = visibleColumns.length + (canEdit ? 1 : 0);
+  const showActions = canEdit || bizdevMembers !== null;
+  const colCount = visibleColumns.length + (showActions ? 1 : 0);
 
   return (
     <div className="rounded-lg border border-slate-200 bg-white">
@@ -404,7 +424,7 @@ export function ShopsTable({
                   <th key={col.label} className={th}>{col.label}</th>
                 )
               )}
-              {canEdit && <th className={th}>Aksi</th>}
+              {showActions && <th className={th}>Aksi</th>}
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
@@ -415,9 +435,17 @@ export function ShopsTable({
                     {col.cell(s)}
                   </td>
                 ))}
-                {canEdit && (
+                {showActions && (
                   <td className={td}>
-                    <ShopEditButton shop={s} />
+                    {canEdit && <ShopEditButton shop={s} />}
+                    {bizdevMembers !== null && s.bizdev_handlers !== null && (
+                      <BizdevHandlerButton
+                        shopKey={s.shop_key}
+                        shopLabel={s.shop_name ?? s.shop_key}
+                        current={s.bizdev_handlers}
+                        members={bizdevMembers}
+                      />
+                    )}
                   </td>
                 )}
               </tr>
