@@ -97,3 +97,17 @@ sesi yang sama). Migrasi `0067`–`0068`. Status: SELESAI (14 tiket/PR, #56–#6
 - [x] §F Konsolidasi `/ingest` — lane artifak pindah ke `/link-leakage`.
 - [x] CLAUDE.md #4/#8/#9 diperbarui; `projectGmv()` (per-kreator) dihapus (M5 lama sudah tidak ada
   pemakainya).
+
+## Fase 7 — Revisi BizDev 2026-10
+Rencana: `docs/plans/REVISI_BIZDEV_2026-10.md` (status tiket + keputusan tertunda §7). Migrasi `0087`.
+
+- [x] T1 Nav audit + label + hapus Pipeline BizDev (#106).
+- [x] T2 Segmentasi harga dari harga satuan + backfill `platform` Shopee (#107).
+- [x] T3 Migrasi 0087 (file) — `creator_shop_period_gmv`, `brand_bizdev_handlers`, view grain minggu/bulan, brand_reports v2 (#108).
+- [x] T4 Ingest menulis GMV per kreator × shop × periode (#109).
+- [x] T5 BizDev handler per brand (maks 2) + upload Excel (#110).
+- [x] T6 Summary per BizDev + util periode (#111).
+- [x] T7 TAP Matchmaking (#112).
+- [x] T8 Brand Lead Bank → Registrasi Deal (#113).
+- [x] T9 Report Brand v2, 0 LLM (#114).
+- [ ] T10 Apply 0087 staging → production, backfill, dokumen (lihat status di plan).

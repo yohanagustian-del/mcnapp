@@ -49,6 +49,14 @@ Platform internal MCN MEA (agency creator TikTok/Shopee). Menggabungkan tools te
   (`live-notes.ts`) DIPAKAI APA ADANYA untuk kedua pemilik; yang berbeda hanya konteks pemilik
   (parameter `LiveSessionOwner`), bukan salinan kode. Jangan pernah bikin tabel/parser/report
   kedua untuk sesi live.
+- **GMV per shop = SATU sumber** (`creator_shop_period_gmv`, migrasi 0087, sejak 2026-10-13): ditulis
+  ingest mingguan dari baris MCN + TAP yang SAMA dengan analisa bocor (`buildCreatorShopPeriod`,
+  `shop-period-write.ts`). Summary per BizDev (`/workspace/bizdev`), TAP Matchmaking
+  (`/tap-matchmaking`), dan Report Brand v2 (`/brand-reports`) HANYA membaca view-nya
+  (`shop_period_summary`, `creator_shop_perf`, `bizdev_brand_perf`, `shop_key_map`; grain minggu &
+  bulan di SQL) lewat `lib/m8/shop-perf-data.ts` + util periode `lib/m8/period.ts` — jangan hitung
+  ulang GMV per shop di JS dan jangan bikin parser periode kedua. `gmv_tap` NULL = data TAP tidak
+  ada (Shopee fase 1), bukan nol. Batch sebelum 0087 tidak punya baris → UI bilang "upload ulang".
 - **Report Kreator (M2) v2 = 0 LLM.** Angka dari `lib/report/build.ts`, SEMUA kalimat (ringkasan,
   insight box, badge produk, rekomendasi) dari `lib/report/rules.ts` + ambang `app_config`
   (`m2.report_rules`, `m2.live_benchmarks`). `token_used` selalu 0. Tim hanya boleh menyunting
@@ -80,6 +88,20 @@ Platform internal MCN MEA (agency creator TikTok/Shopee). Menggabungkan tools te
 - Produk yang DIKERJASAMAKAN pada sebuah project = centangan di detail project, disimpan sebagai kunci `(campaign_id, product_id)` di `bd_project_products` (migrasi 0045). Hanya kuncinya: harga/komisi/masa berlaku tetap dibaca dari `products_tap`. Daftarnya ditulis ulang utuh tiap simpan (form mengirim keadaan akhir), sama seperti daftar shop.
 - `brand_deals` (tab Deal Brand) = sumber deal lama DAN deal baru yang produknya belum diketahui: diisi Import Master Deal, form Registrasi Deal jalur shop-saja (`registerShopDeal`), dan form Edit deal. Dari sanalah exp_date sinkron ke cooperating_shops.deal_end untuk alert kadaluarsa M4. Baris yang lahir dari Registrasi Deal TIDAK mewarisi default `campaign_type = 'paid'` — nilainya ditulis null eksplisit, karena tipe campaign tidak ditanyakan.
 - Jadwal Live (M13): pertanyaan "Link ke deal (opsional)" di form slot memilih SHOP dari tabel "Shop" di tab Deal Brand (view `deal_shop_summary`) dan menyimpannya di `live_schedule_slots.shop_key` (= `products_tap.shop_key`, migrasi 0045) — bukan `deal_id`, yang tetap ada untuk slot lama. Kalau kartu shop itu punya `pic_tap`, jadwalnya muncul sebagai notifikasi (badge sidebar `/schedule` + panel di halamannya) di akun PIC TAP tersebut; hitungannya dari sumber, tidak disimpan (`lib/schedule/pic-tap-alerts.ts`).
+
+- **Pipeline stage BizDev dihapus dari UI** (REVISI_BIZDEV T1, 2026-10): kolom `campaign_requests.pipeline_stage`
+  DIBIARKAN di DB (data lama), tapi tidak ada lagi tabel/aksi yang menulisnya — jangan hidupkan lagi.
+- **BizDev penanggung jawab brand** = `brand_bizdev_handlers` (migrasi 0087, maks 2 per `shop_key`, trigger
+  DB + `validateHandlerIds`). Diisi tombol BizDev per baris tab Deal Brand, pertanyaan opsional Registrasi
+  Deal (TIDAK menimpa handler yang sudah ada), atau upload Excel (`lib/deals/bizdev-handler-spec.ts`, satu
+  parser + template). Tanpa baris = "Non BD Handle". Izin = `deals.edit`.
+- **Report Brand v2 = 0 LLM** (`/brand-reports`, `lib/brand-report/`): angka dari view 0087 + Produk TAP,
+  kalimat dari `rules.ts` + `app_config m8.brand_report_rules`, `token_used` selalu 0; tim hanya menyunting
+  TEKS (`brand_reports.edits_json`), Draft → Final mengunci teks. ROAS/upgrade = `shouldRecommendUpgrade` +
+  `m8.upgrade_roas_min`/`m8.upgrade_gmv_min`. Report v1 (upload file + LLM) read-only; jalur generate-nya
+  DIHAPUS. Hanya shop yang punya `shop_key` (kartu/deal terdaftar) yang bisa dibuatkan report.
+- **Brand Lead Bank → Registrasi Deal** (`/deals/baru?lead_id=`): prefill dari lead, lalu lead ditandai deal
+  lewat SATU logika `lib/leads/convert.ts` (dipakai juga `markLeadConverted`).
 
 ### 7. Data cleaning (ingest sheet lama) — WAJIB tangani
 - Rupiah campur: "Rp1,075,484,867" (koma=ribuan) DAN "Rp4.131.512.642" (titik=ribuan). parseRupiah deteksi keduanya → number.
@@ -114,6 +136,9 @@ Platform internal MCN MEA (agency creator TikTok/Shopee). Menggabungkan tools te
   role. Kedua tabel WAJIB restrictive deny `is_creator_user()` (pola sama `products_tap`) —
   kalau menambah tabel baru yang tidak untuk kreator, JANGAN lupa policy ini (0067 sempat
   melewatkannya, ditambal 0068).
+  **Aturan umum (sejak 0087):** SETIAP tabel/view baru yang bukan untuk kreator WAJIB restrictive deny
+  `is_creator_user()` (view: `security_invoker = on` supaya policy tabel dasarnya berlaku). 0087 juga
+  menambal `brand_reports` yang sejak 0006 tidak punya deny. Test `missing-migration.test.ts` menjaga ini.
 - **Brand Lead Bank: search + upload massal** (migrasi 0084, request 2026-10-01). `/leads` bisa
   dicari per Nama Brand (ILIKE per kata, `brandLeadSearchPatterns`) dan difilter Niche (dropdown dari
   view `brand_lead_niches`, agregasi SQL). CM (`CM_ROLES`) ikut MELIHAT & mencari; tambah/upload/edit
