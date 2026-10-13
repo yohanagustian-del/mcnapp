@@ -99,6 +99,8 @@ export const NAV_ITEMS: NavItem[] = [
   // dicocokkan ke kreator baru. Tambah/upload/edit tetap BizDev (leads.create/edit).
   { href: "/leads", label: "Brand Lead Bank", roles: [...MANAGEMENT_ROLES, ...BIZDEV_ROLES, ...CM_ROLES], group: "BizDev & Deal" },
   { href: "/workspace/bizdev", label: "BizDev Workspace", roles: [...MANAGEMENT_ROLES, ...BIZDEV_ROLES], group: "BizDev & Deal" },
+  // TAP Matchmaking (REVISI_BIZDEV T7): shop → kreator pemakai TAP vs belum. Alat BizDev.
+  { href: "/tap-matchmaking", label: "TAP Matchmaking", roles: [...MANAGEMENT_ROLES, ...BIZDEV_ROLES], group: "BizDev & Deal" },
   // Product×Creator Matching: catalog TAP (master upload + derive dari TAP) + rekomendasi.
   { href: "/products", label: "Produk TAP", roles: [...MANAGEMENT_ROLES, ...CM_ROLES, ...BIZDEV_ROLES], group: "BizDev & Deal" },
   // Un-hidden 2026-09-23: M6 diganti model pool (lib/m6/predictor.ts) —

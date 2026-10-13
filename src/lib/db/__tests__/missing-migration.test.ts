@@ -34,7 +34,7 @@ describe("migrasi 0087 — penjaga CLAUDE.md #9", () => {
   });
 
   it("view baru security_invoker (RLS pemanggil tetap berlaku)", () => {
-    for (const v of ["shop_period_summary", "shop_key_map", "bizdev_brand_perf"]) {
+    for (const v of ["shop_period_summary", "shop_key_map", "bizdev_brand_perf", "creator_shop_perf"]) {
       expect(sql).toMatch(new RegExp(`create or replace view ${v}\\s+with \\(security_invoker = on\\)`));
     }
   });
