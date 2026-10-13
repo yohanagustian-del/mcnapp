@@ -29,6 +29,7 @@ export const NAV_ICON_PATHS: Record<string, string> = {
   "/bd-projects": "M4 5h6v6H4zM14 5h6v6h-6zM4 15h6v4H4zM14 15h6v4h-6zM10 8h4M10 17h4",
   "/workspace/bizdev": "M3 20h18M6 20V9M11 20V4M16 20v-8M21 20v-5",
   // TAP Matchmaking: toko (kotak) tersambung ke dua kreator (lingkaran).
+  "/brand-reports": "M7 3h7l5 5v13H7zM14 3v5h5M10 13h6M10 17h6",
   "/tap-matchmaking": "M3 10h8v10H3zM7 10V7M17 6a2.5 2.5 0 100-5 2.5 2.5 0 000 5zM17 15a2.5 2.5 0 100-5 2.5 2.5 0 000 5zM11 14l3.5-1.5M11 17l3.5-4",
   "/predictor": "M3 17l6-6 4 4 8-8M15 7h6v6",
   "/leads": "M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2M12 11a4 4 0 100-8 4 4 0 000 8zM22 21v-2a4 4 0 00-3-3.87",

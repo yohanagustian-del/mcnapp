@@ -170,3 +170,11 @@ describe("nav TAP Matchmaking (REVISI_BIZDEV T7)", () => {
     }
   });
 });
+
+describe("nav Report Brand (REVISI_BIZDEV T9)", () => {
+  it("roles nav /brand-reports = izin m8.brand_report", () => {
+    const item = NAV_ITEMS.find((n) => n.href === "/brand-reports")!;
+    expect(item.group).toBe("BizDev & Deal");
+    expect([...item.roles].sort()).toEqual([...PERMISSIONS["m8.brand_report"]].sort());
+  });
+});
