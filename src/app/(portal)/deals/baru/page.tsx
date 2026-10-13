@@ -34,6 +34,10 @@ export default async function DealBaruPage() {
     .eq("active", true)
     .in("role", [...CM_ROLES, ...BIZDEV_ROLES])
     .order("name");
+  // BizDev handler (REVISI_BIZDEV T5): hanya role BizDev, sama dengan validasi server.
+  const bizdevOptions: MemberOption[] = (dealByRows ?? [])
+    .filter((m) => (BIZDEV_ROLES as Role[]).includes(m.role as Role))
+    .map((m) => ({ id: m.id as string, name: m.name as string }));
   const dealByOptions: MemberOption[] = (dealByRows ?? []).map((m) => ({
     id: m.id as string,
     name: m.name as string,
@@ -55,7 +59,11 @@ export default async function DealBaruPage() {
         keduanya diisi per shop di dalam project lewat tab <strong>Project BD</strong>.
       </p>
       <div className="mt-6">
-        <DealForm picOptions={(picOptions ?? []) as MemberOption[]} dealByOptions={dealByOptions} />
+        <DealForm
+          picOptions={(picOptions ?? []) as MemberOption[]}
+          dealByOptions={dealByOptions}
+          bizdevOptions={bizdevOptions}
+        />
       </div>
 
       <h2 className="mt-10 text-lg font-semibold">Upload Produk Deal Lama via Excel</h2>

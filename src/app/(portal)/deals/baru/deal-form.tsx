@@ -26,9 +26,12 @@ export interface MemberOption {
 export function DealForm({
   picOptions,
   dealByOptions,
+  bizdevOptions = [],
 }: {
   picOptions: MemberOption[];
   dealByOptions: MemberOption[];
+  /** Anggota aktif ber-role BizDev untuk pertanyaan opsional "BizDev handler" (maks 2). */
+  bizdevOptions?: MemberOption[];
 }) {
   const [state, formAction, pending] = useActionState<DealFormState | null, FormData>(
     registerDealCard,
@@ -128,6 +131,28 @@ export function DealForm({
           </select>
         </Field>
       </div>
+
+      {bizdevOptions.length > 0 && (
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          {[1, 2].map((i) => (
+            <Field key={i} label={`BizDev handler ${i} (opsional)`}>
+              <select name={`bizdev_handler_${i}`} defaultValue="" className={inputCls}>
+                <option value="">— kosong —</option>
+                {bizdevOptions.map((o) => (
+                  <option key={o.id} value={o.id}>
+                    {o.name}
+                  </option>
+                ))}
+              </select>
+            </Field>
+          ))}
+          <p className="text-xs text-slate-500 sm:col-span-2">
+            BizDev penanggung jawab brand ini (maks 2). Kosong = tampil sebagai{" "}
+            <strong>Non BD Handle</strong>. Kalau brand ini sudah punya BizDev, isian ini tidak
+            menimpanya — ubah lewat tombol <strong>BizDev</strong> di tab Deal Brand.
+          </p>
+        </div>
+      )}
 
       <p className="rounded-md bg-slate-50 p-3 text-xs text-slate-500">
         <strong>Semua isian opsional</strong> — isi yang sudah diketahui saja, sisanya boleh

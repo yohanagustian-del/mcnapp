@@ -3,6 +3,9 @@ import { redirect } from "next/navigation";
 import { requireMember, canAccessNav, NAV_ITEMS, hasPermission } from "@/lib/rbac";
 import { createClient } from "@/lib/supabase/server";
 import { ShopsTable, type ShopSummaryRow } from "./shops-table";
+import { BizdevHandlerUploadPanel } from "./bizdev-handler-upload-panel";
+import { loadBizdevMembers, loadHandlerIndex } from "@/lib/deals/bizdev-handlers";
+import { MIGRATION_0087_MISSING } from "@/lib/db/missing-migration";
 
 /**
  * Batas baris shop yang ditarik sekali muat. Bukan paginasi sungguhan: kalau batasnya
@@ -58,6 +61,11 @@ export default async function DealsPage({
     const { data: memberRows } = await supabase.from("team_members").select("id, name");
     for (const m of memberRows ?? []) memberNameById.set(m.id as string, m.name as string);
   }
+  // BizDev penanggung jawab per brand (migrasi 0087). Tabel belum ada → kolom "—" + banner.
+  const handlerIndex = await loadHandlerIndex(supabase);
+  const canAssignBizdev = hasPermission("deals.edit", member.role) && !handlerIndex.missing;
+  const bizdevMembers = canAssignBizdev ? await loadBizdevMembers(supabase) : null;
+
   const names = (ids: unknown): string[] =>
     Array.isArray(ids)
       ? [...new Set(ids.map((id) => memberNameById.get(String(id))).filter((n): n is string => !!n))]
@@ -91,6 +99,7 @@ export default async function DealsPage({
     deal_by_names: names(s.deal_by_ids),
     pic_tap_names: names(s.pic_tap_ids),
     uploaded_by_names: canSeeOwner ? names(s.uploaded_by_ids) : [],
+    bizdev_handlers: handlerIndex.missing ? null : (handlerIndex.byShopKey.get(s.shop_key as string) ?? []),
   }));
 
   const canRegister = hasPermission("deals.register", member.role);
@@ -165,6 +174,13 @@ export default async function DealsPage({
         </p>
       )}
 
+      {handlerIndex.missing && (
+        <p className="mt-3 rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+          Kolom BizDev belum aktif: {MIGRATION_0087_MISSING}
+        </p>
+      )}
+      {canAssignBizdev && <BizdevHandlerUploadPanel />}
+
       {shopError && (
         <p className="mt-3 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">
           Gagal memuat ringkasan shop: {shopError.message}
@@ -176,6 +192,7 @@ export default async function DealsPage({
           rows={shopRows}
           canEdit={canEditShop}
           canSeeOwner={canSeeOwner}
+          bizdevMembers={bizdevMembers}
           emptyMessage={
             q
               ? `Tidak ada shop cocok dengan "${q}".`

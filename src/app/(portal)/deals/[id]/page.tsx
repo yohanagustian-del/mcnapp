@@ -11,6 +11,8 @@ import {
   uploadReportCreators,
 } from "@/lib/deals/report-actions";
 import { ReportSessionRowActions } from "@/components/report-session-row-actions";
+import { BizdevHandlerBadge } from "@/components/bizdev-handler-badge";
+import { loadHandlerIndex } from "@/lib/deals/bizdev-handlers";
 
 function formatRp(v: number | null | undefined): string {
   return v ? `Rp${Number(v).toLocaleString("id-ID")}` : "—";
@@ -38,11 +40,17 @@ export default async function DealDetailPage({
   const { data: deal } = await supabase
     .from("brand_deals")
     .select(
-      "id, brand_name, shop_id, niche, exp_date, campaign_name, komisi_kreator_raw, komisi_mea_raw, ads_budget, service_fee, campaign_type, sourced_by_role, status, contact_pic_brand"
+      "id, brand_name, shop_id, shop_key, niche, exp_date, campaign_name, komisi_kreator_raw, komisi_mea_raw, ads_budget, service_fee, campaign_type, sourced_by_role, status, contact_pic_brand"
     )
     .eq("id", id)
     .maybeSingle();
   if (!deal) notFound();
+
+  // BizDev penanggung jawab brand (migrasi 0087) — per shop_key, sama dengan tab Deal Brand.
+  const handlerIndex = await loadHandlerIndex(supabase, [deal.shop_key as string]);
+  const handlerNames = handlerIndex.missing
+    ? null
+    : (handlerIndex.byShopKey.get(deal.shop_key as string) ?? []).map((h) => h.name);
 
   const [{ data: products }, { data: sessions }, { data: proposals }] = await Promise.all([
     supabase
@@ -100,6 +108,9 @@ export default async function DealDetailPage({
       </Link>
       <h1 className="mt-2 text-2xl font-semibold">{deal.brand_name}</h1>
       <p className="mt-1 font-mono text-xs text-slate-500">{deal.id}</p>
+      <p className="mt-2 text-sm text-slate-600">
+        BizDev: <BizdevHandlerBadge names={handlerNames} />
+      </p>
 
       <div className="mt-4 grid grid-cols-2 gap-3 rounded-lg border border-slate-200 bg-white p-4 text-sm md:grid-cols-4">
         {infos.map(([label, value]) => (
