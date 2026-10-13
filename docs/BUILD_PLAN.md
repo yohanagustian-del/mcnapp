@@ -110,4 +110,4 @@ Rencana: `docs/plans/REVISI_BIZDEV_2026-10.md` (status tiket + keputusan tertund
 - [x] T7 TAP Matchmaking (#112).
 - [x] T8 Brand Lead Bank → Registrasi Deal (#113).
 - [x] T9 Report Brand v2, 0 LLM (#114).
-- [ ] T10 Apply 0087 staging → production, backfill, dokumen (lihat status di plan).
+- [x] T10 Apply 0087 staging → production (`0087a` + `0087b`), backfill platform Shopee + seed BizDev handler, dokumen.
