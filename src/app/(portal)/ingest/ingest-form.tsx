@@ -166,7 +166,8 @@ export function IngestForm() {
             <li>
               Agregat tersimpan: {result.aggregateRows.periodSummary} ringkasan periode ·{" "}
               {result.aggregateRows.subcatSegment} subkategori×segmen ·{" "}
-              {result.aggregateRows.topProducts} top produk
+              {result.aggregateRows.topProducts} top produk ·{" "}
+              {result.aggregateRows.shopPeriod} kreator×shop
             </li>
             <li>
               Raw transaksi tidak disimpan ke DB — hanya agregat performa yang ditulis.

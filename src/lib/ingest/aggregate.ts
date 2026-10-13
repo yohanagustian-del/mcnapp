@@ -18,7 +18,8 @@
  * in that same field for the same reason.
  */
 import { priceSegmentOf, type PriceBounds, type PriceSegment } from "@/lib/projection/gmv";
-import type { McnRow } from "./schema";
+import type { McnRow, TapRow } from "./schema";
+import { normalizeShopId } from "@/lib/m4/leak-compute";
 
 export interface PeriodSummaryRow {
   creatorId: string;
@@ -381,3 +382,141 @@ export function buildTopProducts(rows: McnRow[], topN: number): TopProductRow[] 
   }
   return out;
 }
+
+// ============ Kreator × shop × periode (migrasi 0087, REVISI_BIZDEV T4) ============
+
+/** One row of creator_shop_period_gmv (platform/period/batch stamped by the writer). */
+export interface CreatorShopPeriodRow {
+  creatorId: string;
+  shopId: string;
+  shopName: string | null;
+  gmvMcn: number;
+  gmvMcnLive: number;
+  gmvMcnVideo: number;
+  ordersMcn: number;
+  itemsSoldMcn: number;
+  /** null = no TAP data for this upload/platform (not zero). */
+  gmvTap: number | null;
+  gmvTapLive: number | null;
+  gmvTapVideo: number | null;
+  ordersTap: number | null;
+  estPartnerCommission: number | null;
+  actualPartnerCommission: number | null;
+  estCreatorCommission: number | null;
+  actualCreatorCommission: number | null;
+}
+
+export interface CreatorShopPeriodResult {
+  rows: CreatorShopPeriodRow[];
+  /** TAP GMV that could not be attributed to any creator of this file (reported, never guessed). */
+  unattributedTapGmv: number;
+}
+
+const addNullable = (a: number | null, b: number | null): number | null =>
+  b === null ? a : (a ?? 0) + b;
+
+/**
+ * Builds creator_shop_period_gmv rows from the SAME parsed MCN + TAP rows the
+ * aggregates and the leak analysis use (no re-parse, CLAUDE.md #4). Pure.
+ *
+ * - `mcnRows[].creatorName` = resolved creator_id (run.ts convention).
+ * - `tapRows[].creatorName` = resolved creator_id, "" for the 1-creator TAP export
+ *   variant without a creator column (CLAUDE.md #5), or null when the name could
+ *   not be resolved (that GMV is reported in `unattributedTapGmv`).
+ * - Nameless TAP rows: single-creator file → that creator; otherwise split over
+ *   the creators selling in that shop proportionally to their MCN GMV (same
+ *   allocation rule as the M4 leak analysis). A shop with no MCN GMV → unattributed.
+ * - `hasTap = false` (no TAP file uploaded) → every TAP column is null; with a TAP
+ *   file, a creator×shop without TAP rows gets 0 (TAP known, just unused).
+ *
+ * Invariants (tested): Σ gmvMcn per creator = buildPeriodSummary(...).affiliateGmv;
+ * Σ gmvTap + unattributedTapGmv = Σ TAP affiliate GMV.
+ */
+export function buildCreatorShopPeriod(
+  mcnRows: McnRow[],
+  tapRows: (Omit<TapRow, "creatorName"> & { creatorName: string | null })[],
+  hasTap: boolean
+): CreatorShopPeriodResult {
+  const byKey = new Map<string, CreatorShopPeriodRow>();
+  const tapInit = hasTap ? 0 : null;
+  const get = (creatorId: string, shopId: string, shopName: string | null): CreatorShopPeriodRow => {
+    const key = `${creatorId}|${shopId}`;
+    let acc = byKey.get(key);
+    if (!acc) {
+      acc = {
+        creatorId, shopId, shopName,
+        gmvMcn: 0, gmvMcnLive: 0, gmvMcnVideo: 0, ordersMcn: 0, itemsSoldMcn: 0,
+        gmvTap: tapInit, gmvTapLive: tapInit, gmvTapVideo: tapInit, ordersTap: tapInit,
+        estPartnerCommission: null, actualPartnerCommission: null,
+        estCreatorCommission: null, actualCreatorCommission: null,
+      };
+      byKey.set(key, acc);
+    }
+    if (!acc.shopName && shopName) acc.shopName = shopName;
+    return acc;
+  };
+
+  const shopMcnTotal = new Map<string, number>();
+  const shopCreators = new Map<string, Map<string, number>>();
+  for (const r of mcnRows) {
+    if (!r.creatorName || !r.shopId) continue;
+    const shop = normalizeShopId(r.shopId);
+    const acc = get(r.creatorName, shop, r.shopName);
+    acc.gmvMcn += r.affiliateGmv;
+    acc.gmvMcnLive += r.affiliateLiveGmv;
+    acc.gmvMcnVideo += r.affiliateVideoGmv;
+    acc.ordersMcn += r.orders;
+    acc.itemsSoldMcn += r.itemsSold;
+    shopMcnTotal.set(shop, (shopMcnTotal.get(shop) ?? 0) + r.affiliateGmv);
+    const perCreator = shopCreators.get(shop) ?? new Map<string, number>();
+    perCreator.set(r.creatorName, (perCreator.get(r.creatorName) ?? 0) + r.affiliateGmv);
+    shopCreators.set(shop, perCreator);
+  }
+
+  const mcnCreators = new Set(mcnRows.map((r) => r.creatorName).filter(Boolean));
+  const singleCreator = mcnCreators.size === 1 ? [...mcnCreators][0] : null;
+  let unattributedTapGmv = 0;
+
+  const addTap = (acc: CreatorShopPeriodRow, t: TapRow | Omit<TapRow, "creatorName">, share: number) => {
+    acc.gmvTap = (acc.gmvTap ?? 0) + t.affiliateGmv * share;
+    acc.gmvTapLive = (acc.gmvTapLive ?? 0) + t.affiliateLiveGmv * share;
+    acc.gmvTapVideo = (acc.gmvTapVideo ?? 0) + t.affiliateVideoGmv * share;
+    acc.ordersTap = (acc.ordersTap ?? 0) + Math.round(t.orders * share);
+    const scale = (v: number | null) => (v === null ? null : v * share);
+    acc.estPartnerCommission = addNullable(acc.estPartnerCommission, scale(t.estPartnerCommission));
+    acc.actualPartnerCommission = addNullable(acc.actualPartnerCommission, scale(t.actualPartnerCommission));
+    acc.estCreatorCommission = addNullable(acc.estCreatorCommission, scale(t.estCreatorCommission));
+    acc.actualCreatorCommission = addNullable(acc.actualCreatorCommission, scale(t.actualCreatorCommission));
+  };
+
+  if (hasTap) {
+    for (const t of tapRows) {
+      if (!t.shopId) continue;
+      const shop = normalizeShopId(t.shopId);
+      if (t.creatorName === null) {
+        unattributedTapGmv += t.affiliateGmv;
+        continue;
+      }
+      if (t.creatorName) {
+        addTap(get(t.creatorName, shop, t.shopName), t, 1);
+        continue;
+      }
+      if (singleCreator) {
+        addTap(get(singleCreator, shop, t.shopName), t, 1);
+        continue;
+      }
+      const total = shopMcnTotal.get(shop) ?? 0;
+      const perCreator = shopCreators.get(shop);
+      if (!perCreator || total <= 0) {
+        unattributedTapGmv += t.affiliateGmv;
+        continue;
+      }
+      for (const [creatorId, gmv] of perCreator) {
+        if (gmv > 0) addTap(get(creatorId, shop, t.shopName), t, gmv / total);
+      }
+    }
+  }
+
+  return { rows: [...byKey.values()], unattributedTapGmv };
+}
+

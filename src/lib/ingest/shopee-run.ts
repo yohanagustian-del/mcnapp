@@ -7,7 +7,10 @@ import type { PriceBounds } from "@/lib/projection/gmv";
 import { deriveJenisCreator, rankTopNiches, resolveCreatorNamesByPlatform } from "@/lib/platform-csv";
 import { validateW1W5Period } from "@/lib/utils/date";
 import { parseShopeeFile, validateSingleShopeeWindow, type ShopeeRow, type SkippedShopeeRow } from "./shopee-csv";
-import { buildShopeePeriodSummary, buildShopeeSubcatSegment, type ShopeePeriodSummaryRow } from "./shopee-aggregate";
+import {
+  buildShopeeCreatorShopPeriod, buildShopeePeriodSummary, buildShopeeSubcatSegment, type ShopeePeriodSummaryRow,
+} from "./shopee-aggregate";
+import { writeCreatorShopPeriod } from "./shop-period-write";
 import type { SubcatSegmentRow } from "./aggregate";
 import { computeSharedAutoFillFields, fetchMonthlyAvgGmvByCreator, writeCreatorAutoFillUpdate } from "./creator-autofill";
 
@@ -199,6 +202,12 @@ export async function runShopeeIngest(input: RunShopeeIngestInput): Promise<RunS
     const subcatSegment = buildShopeeSubcatSegment(resolvedRows, periodEnd, bounds);
     await writeShopeeAggregates(admin, batchId, [...creatorIdsSet], periodStart, periodEnd, periodSummary, subcatSegment);
 
+    // ---- 4b. Agregat kreator × shop (migrasi 0087) — GMV MCN saja, TAP NULL (Q4) ----
+    const shopPeriodWrite = await writeCreatorShopPeriod(
+      admin, "shopee", batchId, [...creatorIdsSet], periodStart, periodEnd, buildShopeeCreatorShopPeriod(resolvedRows)
+    );
+    if (shopPeriodWrite.skipped) skipped.push({ row: -1, reason: shopPeriodWrite.skipped });
+
     // ---- 5. Auto-fill creators master (shared helper + niche ranking) ----
     await autoFillShopeeCreators(admin, actorId, periodSummary, subcatSegment);
 
@@ -225,6 +234,7 @@ export async function runShopeeIngest(input: RunShopeeIngestInput): Promise<RunS
         creators: creatorIdsSet.size,
         created_prospects: createdProspects.length,
         gmv_total: gmvTotal,
+        shop_period_rows: shopPeriodWrite.written,
         dropped_raw: true,
         leak_engine: "external_artifact",
       },
