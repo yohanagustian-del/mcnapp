@@ -152,12 +152,24 @@ export interface SubcatSegmentRow {
   avgPrice: number | null;
 }
 
+/** Unit price used for a TikTok row's segment: gmv/items_sold, else gmv/orders (Q5), else null. */
+export function tiktokRowUnitPrice(r: Pick<McnRow, "affiliateGmv" | "itemsSold" | "orders">): number | null {
+  if (r.itemsSold > 0) return r.affiliateGmv / r.itemsSold;
+  if (r.orders > 0) return r.affiliateGmv / r.orders;
+  return null;
+}
+
 /**
  * Groups rows by (creator, level2 category, price segment). Segment is derived
  * PER PRODUCT ROW from that row's own avg_price (= affiliate_gmv / items_sold),
  * then rows sharing (creator, category, segment) are summed — matches Module
- * 0.5 §2.3/§2.6 ("segmen dihitung saat ingest dari avg_price"). items_sold=0
- * rows fall into the `null` segment bucket (GMV still counted, no div-by-zero).
+ * 0.5 §2.3/§2.6 ("segmen dihitung saat ingest dari avg_price").
+ *
+ * Fallback (keputusan user Q5, REVISI_BIZDEV 2026-10): a row with items_sold=0
+ * but orders>0 (±17% of weekly GMV in production) is priced by gmv/orders — an
+ * approximation (one order may hold several items), used only because the
+ * alternative is no segment at all. Rows with neither items nor orders still
+ * fall into the `null` segment bucket (GMV still counted, no div-by-zero).
  */
 export function buildSubcatSegment(rows: McnRow[], bounds: PriceBounds): SubcatSegmentRow[] {
   interface Acc {
@@ -174,8 +186,8 @@ export function buildSubcatSegment(rows: McnRow[], bounds: PriceBounds): SubcatS
 
   for (const r of rows) {
     if (!r.creatorName || !r.level2Category) continue;
-    const segment: PriceSegment | null =
-      r.itemsSold > 0 ? priceSegmentOf(r.affiliateGmv / r.itemsSold, bounds) : null;
+    const unitPrice = tiktokRowUnitPrice(r);
+    const segment: PriceSegment | null = unitPrice !== null ? priceSegmentOf(unitPrice, bounds) : null;
     const key = `${r.creatorName}|${r.level2Category.toLowerCase()}|${segment ?? "null"}`;
     const acc = byKey.get(key) ?? {
       creatorId: r.creatorName,
@@ -204,7 +216,8 @@ export function buildSubcatSegment(rows: McnRow[], bounds: PriceBounds): SubcatS
     liveGmv: acc.liveGmv,
     itemsSold: acc.itemsSold,
     orders: acc.orders,
-    avgPrice: acc.itemsSold > 0 ? acc.gmv / acc.itemsSold : null,
+    // Same fallback as the segment (Q5): gmv/orders when the group sold no counted items.
+    avgPrice: acc.itemsSold > 0 ? acc.gmv / acc.itemsSold : acc.orders > 0 ? acc.gmv / acc.orders : null,
   }));
 }
 

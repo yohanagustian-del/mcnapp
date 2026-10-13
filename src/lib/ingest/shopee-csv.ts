@@ -34,6 +34,11 @@ export const SHOPEE_COLUMNS = {
   cat2: "kategori_l2",
   gmv: "total_pembelian_yang_dibuat(rp)",
   platform: "platform",
+  // Per-item quantity & unit price of the order-line. Both exist in the real
+  // export (see shopee-csv.test.ts HEADER) — the price segment is derived from
+  // them (REVISI_BIZDEV T2; before that every Shopee row had segment null).
+  qty: "qty",
+  unitPrice: "harga(rp)",
 } as const;
 
 export const SHOPEE_REQUIRED_HEADERS = [
@@ -55,6 +60,10 @@ export interface ShopeeRow {
   level1Category: string | null;
   level2Category: string | null;
   gmv: number;
+  /** Qty of the order-line; null when blank/dirty (never guessed — CLAUDE.md #7). */
+  qty: number | null;
+  /** Harga(Rp) = unit price; null when blank/dirty/0. */
+  unitPrice: number | null;
   /** Raw Platform column value ("Shopeelive-Shopee" / "Shopeevideo-Shopee" / "WhatsApp" / ...). */
   platform: string;
   bucket: "live" | "video" | "other";
@@ -104,6 +113,20 @@ function dateOnly(raw: string): string | null {
 }
 
 /** Platform column → live/video/other bucket (case-insensitive substring match per CLAUDE.md task rule #4). */
+/** Qty cell → positive integer, else null (blank, "-", decimals, text). */
+export function parseShopeeQty(raw: string | undefined): number | null {
+  const t = (raw ?? "").trim().replace(/[.,]0+$/, "");
+  if (!/^\d+$/.test(t)) return null;
+  const n = Number(t);
+  return n > 0 ? n : null;
+}
+
+/** Harga(Rp) cell → positive Rupiah, else null (parseRupiah handles both thousand separators). */
+export function parseShopeeUnitPrice(raw: string | undefined): number | null {
+  const n = parseRupiah(raw);
+  return n !== null && n > 0 ? n : null;
+}
+
 function platformBucket(platform: string): "live" | "video" | "other" {
   const p = platform.toLowerCase();
   if (p.includes("live")) return "live";
@@ -196,6 +219,8 @@ export async function parseShopeeFile(file: File): Promise<ShopeeParseResult> {
       level1Category: opt(r[SHOPEE_COLUMNS.cat1]),
       level2Category: opt(r[SHOPEE_COLUMNS.cat2]),
       gmv: parseRupiah(r[SHOPEE_COLUMNS.gmv]) ?? 0,
+      qty: parseShopeeQty(r[SHOPEE_COLUMNS.qty]),
+      unitPrice: parseShopeeUnitPrice(r[SHOPEE_COLUMNS.unitPrice]),
       platform: intern(platform),
       bucket: platformBucket(platform),
     });

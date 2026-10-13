@@ -4,10 +4,10 @@
  * aggregate.ts's role for the TikTok pipeline. Weekly GMV summary
  * (buildShopeePeriodSummary) plus category GMV (buildShopeeSubcatSegment,
  * added once a normalized Shopee category list existed to map
- * `kategori_l2` against — see shopee-category.ts). Still no top-products or
- * price-segment for Shopee: the Conversion Report has no per-item
- * price/quantity to derive `price_segment` from safely (CLAUDE.md #7 — don't
- * guess at dirty/incomplete data), so `priceSegment` stays null on every row.
+ * `kategori_l2` against — see shopee-category.ts). Still no top-products for
+ * Shopee. Price segment: derived per order-line from `Harga(Rp)` (unit price),
+ * falling back to gmv/Qty, else null (REVISI_BIZDEV T2 — the old claim that the
+ * report had no price/quantity was wrong: both columns exist in the export).
  *
  * NOTE on `ShopeeRow.affiliateUsername` after resolution: shopee-run.ts resolves
  * usernames to creators.id via resolveCreatorNamesByPlatform() BEFORE calling
@@ -17,6 +17,7 @@
  */
 import type { ShopeeRow } from "./shopee-csv";
 import type { SubcatSegmentRow } from "./aggregate";
+import { priceSegmentOf, type PriceBounds, type PriceSegment } from "@/lib/projection/gmv";
 import { normalizeShopeeCategory } from "./shopee-category";
 
 export interface ShopeePeriodSummaryRow {
@@ -27,6 +28,8 @@ export interface ShopeePeriodSummaryRow {
   affiliateLiveGmv: number;
   affiliateVideoGmv: number;
   orders: number;
+  /** Σ Qty of rows with a readable Qty (rows with blank Qty add 0, not a guess). */
+  itemsSold: number;
 }
 
 /**
@@ -53,6 +56,7 @@ export function buildShopeePeriodSummary(
     affiliateLiveGmv: number;
     affiliateVideoGmv: number;
     orders: number;
+    itemsSold: number;
   }
   const byCreator = new Map<string, Acc>();
 
@@ -65,11 +69,13 @@ export function buildShopeePeriodSummary(
       affiliateLiveGmv: 0,
       affiliateVideoGmv: 0,
       orders: 0,
+      itemsSold: 0,
     };
     acc.gmvTotal += r.gmv;
     if (r.bucket === "live") acc.affiliateLiveGmv += r.gmv;
     else if (r.bucket === "video") acc.affiliateVideoGmv += r.gmv;
     acc.orders += 1;
+    acc.itemsSold += r.qty ?? 0;
     byCreator.set(key, acc);
   }
 
@@ -81,55 +87,77 @@ export function buildShopeePeriodSummary(
     affiliateLiveGmv: acc.affiliateLiveGmv,
     affiliateVideoGmv: acc.affiliateVideoGmv,
     orders: acc.orders,
+    itemsSold: acc.itemsSold,
   }));
 }
 
 /**
- * Groups rows by (creator, normalized level2 category) → GMV/live-GMV/orders
- * per category, in the same SubcatSegmentRow shape aggregate.ts's TikTok-side
- * buildSubcatSegment produces (CLAUDE.md #4 — one row shape feeding
- * creator_subcat_segment_gmv, whichever platform wrote it). `priceSegment` is
- * always null and `itemsSold`/`avgPrice` stay at their neutral defaults — see
- * the module doc for why. Rows whose category doesn't match the official
- * Shopee list (normalizeShopeeCategory returns null — blank or unrecognized
- * text) are excluded rather than counted under a guessed category.
+ * Price segment of one Shopee order-line: unit price `Harga(Rp)` when readable,
+ * else gmv/Qty, else null. Same priceSegmentOf + app_config bounds as TikTok
+ * (CLAUDE.md #8 — one segmentation implementation).
  */
-export function buildShopeeSubcatSegment(rows: ShopeeRow[], windowEnd: string): SubcatSegmentRow[] {
+export function shopeeRowSegment(r: ShopeeRow, bounds: PriceBounds): PriceSegment | null {
+  if (r.unitPrice !== null && r.unitPrice > 0) return priceSegmentOf(r.unitPrice, bounds);
+  if (r.qty !== null && r.qty > 0 && r.gmv > 0) return priceSegmentOf(r.gmv / r.qty, bounds);
+  return null;
+}
+
+/**
+ * Groups rows by (creator, normalized level2 category, price segment) → GMV/
+ * live-GMV/orders/items, in the same SubcatSegmentRow shape aggregate.ts's
+ * TikTok-side buildSubcatSegment produces (CLAUDE.md #4 — one row shape feeding
+ * creator_subcat_segment_gmv, whichever platform wrote it). The segment is
+ * derived PER ORDER-LINE (shopeeRowSegment) and is part of the group key, exactly
+ * like TikTok. Rows whose category doesn't match the official Shopee list
+ * (normalizeShopeeCategory returns null — blank or unrecognized text) are
+ * excluded rather than counted under a guessed category.
+ */
+export function buildShopeeSubcatSegment(
+  rows: ShopeeRow[],
+  windowEnd: string,
+  bounds: PriceBounds
+): SubcatSegmentRow[] {
   interface Acc {
     creatorId: string;
     level2Category: string;
+    priceSegment: PriceSegment | null;
     gmv: number;
     liveGmv: number;
     orders: number;
+    itemsSold: number;
   }
   const byKey = new Map<string, Acc>();
 
   for (const r of rows) {
     const category = normalizeShopeeCategory(r.level2Category);
     if (!r.affiliateUsername || !category) continue;
-    const key = `${r.affiliateUsername}|${category.toLowerCase()}`;
+    const segment = shopeeRowSegment(r, bounds);
+    const key = `${r.affiliateUsername}|${category.toLowerCase()}|${segment ?? "null"}`;
     const acc = byKey.get(key) ?? {
       creatorId: r.affiliateUsername,
       level2Category: category,
+      priceSegment: segment,
       gmv: 0,
       liveGmv: 0,
       orders: 0,
+      itemsSold: 0,
     };
     acc.gmv += r.gmv;
     if (r.bucket === "live") acc.liveGmv += r.gmv;
     acc.orders += 1;
+    acc.itemsSold += r.qty ?? 0;
     byKey.set(key, acc);
   }
 
   return [...byKey.values()].map((acc) => ({
     creatorId: acc.creatorId,
     level2Category: acc.level2Category,
-    priceSegment: null,
+    priceSegment: acc.priceSegment,
     windowEnd,
     gmv: acc.gmv,
     liveGmv: acc.liveGmv,
-    itemsSold: 0,
+    itemsSold: acc.itemsSold,
     orders: acc.orders,
-    avgPrice: null,
+    avgPrice: acc.itemsSold > 0 ? acc.gmv / acc.itemsSold : null,
   }));
 }

@@ -157,7 +157,7 @@ Acquisition Workspace, Tim, Config OKR, OD Oversight, Retensi Data.
 | Tiket | Branch | PR | Status |
 |---|---|---|---|
 | T1 | `claude/revisi-bizdev-t1-nav-audit` | #106 | merged |
-| T2 | — | — | belum |
+| T2 | `claude/revisi-bizdev-t2-segmentasi-harga` | #107 | merged (backfill `platform` menunggu T10) |
 | T3 | — | — | belum |
 | T4 | — | — | belum |
 | T5 | — | — | belum |
@@ -358,3 +358,6 @@ Format: `ID | tiket | pertanyaan | contoh kasus nyata | opsi | yang diambil + al
 | ID | Tiket | Pertanyaan | Contoh kasus nyata | Opsi | Diambil + alasan | Dampak kalau diubah |
 |---|---|---|---|---|---|---|
 | K1 | T1 | Menu Special Project kini tampil untuk SEMUA role staff (kecuali `od_viewer`), termasuk `finance`, `creator_support`, `ads_support`, `campaign_external`. Perlu dipersempit? | `m7.participant_notes` & `m7.report_insight_edit` = semua role kecuali od_viewer (keputusan 2026-09-28/30) → `creator_support` sudah boleh mengisi catatan "Performa per Kreator" tapi dulu harus mengetik URL `/projects`. | A: semua role ber-izin M7 (sesuai plan) · B: hanya `m7.curate` ∪ finance · C: biarkan seperti dulu | A — plan §4 menulis gabungan `m7.curate` ∪ `m7.participant_notes`; menyembunyikan menu dari role yang punya hak tulis hanya memaksa mengetik URL. | Ubah satu baris `roles` `/projects` di `rbac-constants.ts` + test `audit nav 2026-10`. |
+| K2 | T2 | Segmen harga Shopee per baris: `Harga(Rp)` (harga satuan) didahulukan, `Total Pembelian/Qty` hanya cadangan. Benar begitu, atau justru harga efektif setelah diskon (`gmv/qty`) yang dipakai? | Fixture `shopee-csv.test.ts`: `Qty=1, Harga(Rp)=50000, Total Pembelian=100000` — dua sumber bisa berbeda (voucher/diskon/bundling); di data nyata selisih ini menentukan segmen di sekitar batas 180rb/800rb. | A: `Harga(Rp)` dulu, cadangan `gmv/Qty` · B: `gmv/Qty` dulu (harga efektif, konsisten dengan TikTok `gmv/items_sold`) · C: hanya `Harga(Rp)` | A — kolom harga eksplisit dari platform lebih jujur daripada turunan; TikTok memakai turunan karena file TikTok tidak punya kolom harga. | Ganti urutan di `shopeeRowSegment()` (`shopee-aggregate.ts`) + 1 test; segmen batch yang sudah diupload baru berubah setelah upload ulang. |
+| K3 | T2 | `/creators/[id]` & Creator Product Match: Product Match TIDAK diubah karena engine-nya menghitung segmen dari AOV `gmv/orders` per kategori (bukan kolom `price_segment`), jadi sudah tidak nol untuk Shopee. Pesan "segmen belum tersedia" hanya di Matriks `/creators/[id]`. Perlu juga di Product Match? | `lib/product-match/engine.ts` baris 59: `segment: priceSegmentOf(aov, bounds)` dengan `aov = gmv/orders`. | A: biarkan (tidak ada nol) · B: tambah catatan "segmen dari AOV" di Product Match | A — tidak ada tampilan nol yang perlu ditutupi. | Hanya teks UI. |
+

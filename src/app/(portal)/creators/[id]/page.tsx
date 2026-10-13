@@ -309,6 +309,12 @@ export default async function CreatorDetailPage({
           <p className="mt-4 text-sm text-slate-500">
             Belum ada data kategori×segmen untuk creator ini — upload data platform via /ingest.
           </p>
+        ) : matrix.cells.size === 0 ? (
+          // GMV per kategori ada, tapi tak satu baris pun bersegmen: batch lama sebelum
+          // perbaikan parser (REVISI_BIZDEV T2). Jangan tampilkan tabel nol.
+          <p className="mt-4 rounded-md bg-amber-50 p-3 text-sm text-amber-800">
+            Segmen harga belum tersedia untuk batch ini (upload ulang file periode ini).
+          </p>
         ) : (
           <div className="mt-4 overflow-x-auto">
             <table className="min-w-full text-sm">
