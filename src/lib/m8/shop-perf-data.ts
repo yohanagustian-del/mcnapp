@@ -19,7 +19,7 @@ type FilterQ = ReturnType<ReturnType<SupabaseClient["from"]>["select"]>;
 /** Semua baris view untuk satu periode (paginasi 1000/halaman). `missing` = migrasi 0087 belum di-apply. */
 export async function loadPeriodView<T>(
   client: SupabaseClient,
-  view: "bizdev_brand_perf" | "shop_period_summary",
+  view: "bizdev_brand_perf" | "shop_period_summary" | "creator_shop_perf",
   columns: string,
   sel: PeriodSelection,
   extra: (q: FilterQ) => FilterQ = (q) => q

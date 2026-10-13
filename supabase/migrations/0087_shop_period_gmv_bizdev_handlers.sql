@@ -194,6 +194,35 @@ join shop_key_map m on m.platform = s.platform and m.shop_id = s.shop_id
 left join brand_bizdev_handlers h on h.shop_key = m.shop_key
 left join team_members tm on tm.id = h.member_id;
 
+-- ============ 3d. creator_shop_perf ============
+-- Per (platform, kreator, shop) dalam satu periode (minggu / bulan) — sumber TAP
+-- Matchmaking & daftar kreator Report Brand v2. Bulanan = jumlah minggu di SQL.
+create or replace view creator_shop_perf
+with (security_invoker = on) as
+with grained as (
+  select 'week'::text as period_kind, g.period_start as period_key, g.* from creator_shop_period_gmv g
+  union all
+  select 'month'::text, date_trunc('month', g.period_start)::date, g.* from creator_shop_period_gmv g
+)
+select
+  x.platform,
+  x.creator_id,
+  x.shop_id,
+  max(nullif(btrim(x.shop_name), '')) as shop_name,
+  x.period_kind,
+  x.period_key,
+  sum(x.gmv_mcn) as gmv_mcn,
+  sum(x.gmv_mcn_live) as gmv_mcn_live,
+  sum(x.gmv_mcn_video) as gmv_mcn_video,
+  sum(x.orders_mcn) as orders_mcn,
+  sum(x.gmv_tap) as gmv_tap,
+  sum(x.gmv_tap_live) as gmv_tap_live,
+  sum(x.gmv_tap_video) as gmv_tap_video,
+  sum(x.orders_tap) as orders_tap,
+  sum(x.actual_partner_commission) as actual_partner_commission
+from grained x
+group by x.platform, x.creator_id, x.shop_id, x.period_kind, x.period_key;
+
 -- ============ 4. brand_reports v2 ============
 alter table brand_reports alter column deal_id drop not null;
 alter table brand_reports add column if not exists shop_key text;

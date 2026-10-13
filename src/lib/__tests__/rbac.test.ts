@@ -159,3 +159,14 @@ describe("audit nav 2026-10 (REVISI_BIZDEV T1)", () => {
     expect(PERMISSIONS["m8.pipeline"]).toBeUndefined();
   });
 });
+
+describe("nav TAP Matchmaking (REVISI_BIZDEV T7)", () => {
+  it("grup BizDev & Deal, roles = Management + BIZDEV_ROLES", () => {
+    const item = NAV_ITEMS.find((n) => n.href === "/tap-matchmaking")!;
+    expect(item.group).toBe("BizDev & Deal");
+    for (const role of ROLES) {
+      const expected = MANAGEMENT_ROLES.includes(role) || ["bizdev_lead", "bizdev", "campaign_ops", "bd_admin"].includes(role);
+      expect(canAccessNav(item, role), role).toBe(expected);
+    }
+  });
+});
