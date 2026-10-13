@@ -7,7 +7,7 @@ import { getConfig } from "@/lib/config";
 import { requirePermission } from "@/lib/rbac";
 import { parseMcnFile } from "@/lib/ingest/parse";
 import { parseRupiah } from "@/lib/utils/rupiah";
-import { PIPELINE_STAGES, shouldRecommendUpgrade, type PipelineStage } from "@/lib/m8/routing";
+import { shouldRecommendUpgrade } from "@/lib/m8/routing";
 import { generateBrandSummary, summaryAvailable } from "@/lib/m8/brand-summary";
 
 export interface BrandReportState {
@@ -50,29 +50,6 @@ export async function processCreatorRequest(formData: FormData): Promise<void> {
   });
   revalidatePath("/workspace/bizdev");
   revalidatePath("/workspace/cm");
-}
-
-/** Pipeline deal per tahap (§2B.2): prospek → nego → closing → aktif → selesai. */
-export async function setPipelineStage(formData: FormData): Promise<void> {
-  const actor = await requirePermission("m8.pipeline");
-  const dealId = String(formData.get("deal_id") ?? "").trim();
-  const stage = String(formData.get("stage") ?? "") as PipelineStage;
-  if (!dealId || !PIPELINE_STAGES.includes(stage)) throw new Error("Deal & tahap wajib valid");
-
-  const admin = createAdminClient();
-  const { data: deal } = await admin
-    .from("brand_deals").select("id, pipeline_stage").eq("id", dealId).maybeSingle();
-  if (!deal) throw new Error(`Deal ${dealId} tidak ditemukan`);
-
-  const { error } = await admin
-    .from("brand_deals").update({ pipeline_stage: stage }).eq("id", dealId);
-  if (error) throw new Error(`Gagal update tahap: ${error.message}`);
-
-  await writeAudit({
-    actorId: actor.id, action: "m8.pipeline_stage", entityType: "brand_deals", entityId: dealId,
-    before: { pipeline_stage: deal.pipeline_stage }, after: { pipeline_stage: stage }, type: "auto",
-  });
-  revalidatePath("/workspace/bizdev");
 }
 
 /**

@@ -152,6 +152,21 @@ Acquisition Workspace, Tim, Config OKR, OD Oversight, Retensi Data.
 | T9 | Report Brand v2 `/brand-reports` (otomatis dari data mingguan, 0 LLM) + hapus section di workspace | T3, T4 | — | Q3 ✔ |
 | T10 | FINAL: apply 0087 (staging → prod via `apply_migration`), backfill, HANDOFF/CLAUDE.md | semua | apply | Q6 ✔ |
 
+### Status tiket (diperbarui di PR tiap tiket)
+
+| Tiket | Branch | PR | Status |
+|---|---|---|---|
+| T1 | `claude/revisi-bizdev-t1-nav-audit` | #106 | merged |
+| T2 | — | — | belum |
+| T3 | — | — | belum |
+| T4 | — | — | belum |
+| T5 | — | — | belum |
+| T6 | — | — | belum |
+| T7 | — | — | belum |
+| T8 | — | — | belum |
+| T9 | — | — | belum |
+| T10 | — | — | belum (migrasi 0087: staging ✗ · production ✗) |
+
 ### T1 — Nav audit + label + hapus Pipeline
 - **File:** `src/lib/rbac-constants.ts`, `src/app/(portal)/layout.tsx`,
   `src/app/(portal)/matching/page.tsx`, `src/app/(portal)/workspace/bizdev/page.tsx`,
@@ -333,3 +348,13 @@ Acquisition Workspace, Tim, Config OKR, OD Oversight, Retensi Data.
   cukup untuk kedua fitur, dan per-produk sudah ada di CSV backup analisa bocor.
 - Tidak menambah LLM di mana pun (CLAUDE.md #1); Report Brand v2 mengikuti Report Kreator v2.
 - Tidak mengubah `agency_links.link_status`, `commission_share`, atau status kemitraan (read-only).
+
+---
+
+## 7. Keputusan tertunda (diambil opsi konservatif saat eksekusi full-auto, ditanyakan sekali di akhir)
+
+Format: `ID | tiket | pertanyaan | contoh kasus nyata | opsi | yang diambil + alasan | dampak kalau diubah`.
+
+| ID | Tiket | Pertanyaan | Contoh kasus nyata | Opsi | Diambil + alasan | Dampak kalau diubah |
+|---|---|---|---|---|---|---|
+| K1 | T1 | Menu Special Project kini tampil untuk SEMUA role staff (kecuali `od_viewer`), termasuk `finance`, `creator_support`, `ads_support`, `campaign_external`. Perlu dipersempit? | `m7.participant_notes` & `m7.report_insight_edit` = semua role kecuali od_viewer (keputusan 2026-09-28/30) → `creator_support` sudah boleh mengisi catatan "Performa per Kreator" tapi dulu harus mengetik URL `/projects`. | A: semua role ber-izin M7 (sesuai plan) · B: hanya `m7.curate` ∪ finance · C: biarkan seperti dulu | A — plan §4 menulis gabungan `m7.curate` ∪ `m7.participant_notes`; menyembunyikan menu dari role yang punya hak tulis hanya memaksa mengetik URL. | Ubah satu baris `roles` `/projects` di `rbac-constants.ts` + test `audit nav 2026-10`. |

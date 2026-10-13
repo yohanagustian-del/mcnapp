@@ -1,9 +1,12 @@
-import { requireMember, hasPermission } from "@/lib/rbac";
+import { redirect } from "next/navigation";
+import { requireMember, hasPermission, canAccessNav, NAV_ITEMS } from "@/lib/rbac";
 import { createClient } from "@/lib/supabase/server";
 import { MatchingForm } from "./matching-form";
 
 export default async function MatchingPage() {
   const member = await requireMember();
+  const navItem = NAV_ITEMS.find((n) => n.href === "/matching")!;
+  if (!canAccessNav(navItem, member.role)) redirect("/dashboard");
   const canRun = hasPermission("m5.run", member.role);
 
   const supabase = await createClient();
@@ -34,7 +37,7 @@ export default async function MatchingPage() {
         </div>
       ) : (
         <p className="mt-6 rounded-lg border border-slate-200 bg-white p-4 text-sm text-slate-500">
-          Role Anda tidak punya izin menjalankan Product Match (CPM/CM Lead/Management/BizDev).
+          Role Anda tidak punya izin menjalankan Product Match (CPM/CM Lead/Management).
         </p>
       )}
 

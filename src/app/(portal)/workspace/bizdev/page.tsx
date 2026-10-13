@@ -6,7 +6,6 @@ import { ProjectRequirementsPanel } from "@/components/project-requirements-pane
 import { processCreatorRequest } from "./actions";
 import { BrandReportForm } from "./brand-report-form";
 import { CampaignReqTable, type CampaignReqRow } from "./campaign-req-table";
-import { PipelineTable, type PipelineDealRow } from "./pipeline-table";
 import { RouteCampaignForm } from "./route-campaign-form";
 import { CompactScheduleList, type CompactSlotRow } from "../../schedule/compact-list";
 import type { LiveScheduleSlot } from "@/lib/schedule/types";
@@ -31,7 +30,6 @@ export default async function BizdevWorkspacePage() {
   const canBrandAcc = hasPermission("m8.brand_acc", member.role);
   const canHandover = hasPermission("m8.handover", member.role);
   const canProcess = hasPermission("m8.request_process", member.role);
-  const canPipeline = hasPermission("m8.pipeline", member.role);
   const canReport = hasPermission("m8.brand_report", member.role);
   const canViewSchedule = hasPermission("schedule.view", member.role);
   const canViewLeads = hasPermission("leads.view", member.role);
@@ -79,7 +77,7 @@ export default async function BizdevWorkspacePage() {
     await Promise.all([
       supabase
         .from("brand_deals")
-        .select("id, brand_name, shop_id, pipeline_stage, status, campaign_name, exp_date")
+        .select("id, brand_name")
         .order("created_at", { ascending: false })
         .limit(100),
       supabase
@@ -125,13 +123,6 @@ export default async function BizdevWorkspacePage() {
     handedOverAt: r.handed_over_at,
     creatorSourcedBy: r.creator_sourced_by,
   }));
-  const pipelineRows: PipelineDealRow[] = (deals ?? []).map((d) => ({
-    id: d.id,
-    brandName: d.brand_name,
-    campaignName: d.campaign_name,
-    expDate: d.exp_date,
-    pipelineStage: d.pipeline_stage,
-  }));
 
   // Kolom 1 (kreator) + kolom 2 (kategori) untuk form routing — BizDev mencentang,
   // tidak lagi mengetik ID manual. Kategori dari penjualan nyata (creator_subcat_segment_gmv).
@@ -165,8 +156,8 @@ export default async function BizdevWorkspacePage() {
       <div>
         <h1 className="text-2xl font-semibold">BizDev Workspace (M8)</h1>
         <p className="mt-1 text-sm text-slate-500">
-          Tracker req semua CM, pipeline deal, routing req campaign ke CM pemilik creator, report
-          brand. Deterministik — LLM hanya opsional untuk ringkasan report brand (pola M2).
+          Tracker req semua CM, request creator untuk brand deals (routing ke CM pemilik creator),
+          report brand. Deterministik — LLM hanya opsional untuk ringkasan report brand (pola M2).
         </p>
       </div>
 
@@ -198,7 +189,7 @@ export default async function BizdevWorkspacePage() {
       {/* ===== §2E Routing req campaign ===== */}
       {canRoute && (
         <section>
-          <h2 className="text-lg font-medium">Routing Req Campaign → CM Pemilik Creator</h2>
+          <h2 className="text-lg font-medium">Request Creator Brand Deals</h2>
           <p className="mt-1 text-xs text-slate-500">
             3 kolom: (1) kreator → CM pemilik (cek owner_cpm_id, bukan CM lain); (2) kategori →
             semua CM yang punya kreator dengan penjualan di kategori itu; (3) teks bebas → broadcast
@@ -309,12 +300,6 @@ export default async function BizdevWorkspacePage() {
             pemilihan creator dibantu <Link href="/matching" className="underline">Creator Product Match</Link>.
           </p>
         </div>
-      </section>
-
-      {/* ===== §2B.2 Pipeline deal ===== */}
-      <section>
-        <h2 className="text-lg font-medium">Pipeline Deal Brand</h2>
-        <PipelineTable rows={pipelineRows} canPipeline={canPipeline} />
       </section>
 
       {/* ===== §2B.3-2B.4 Campaign & hasil + report brand ===== */}

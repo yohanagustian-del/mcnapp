@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { ROLES, PERMISSIONS, hasPermission, MANAGEMENT_ROLES, ADS_ROLES, type Role } from "@/lib/rbac";
+import { ROLES, PERMISSIONS, hasPermission, MANAGEMENT_ROLES, ADS_ROLES, NAV_ITEMS, canAccessNav, type Role } from "@/lib/rbac";
 import { isCreatorInScope } from "@/lib/schedule/scope";
 import { portalInviteGate } from "@/lib/portal/invite-gate";
 
@@ -127,5 +127,35 @@ describe("portalInviteGate", () => {
     for (const role of ["finance", "creator_support"] as Role[]) {
       expect(portalInviteGate(role)).toBeNull();
     }
+  });
+});
+
+describe("audit nav 2026-10 (REVISI_BIZDEV T1)", () => {
+  const nav = (href: string) => NAV_ITEMS.find((n) => n.href === href)!;
+
+  it("setiap role yang punya hak di Special Project melihat menunya", () => {
+    const granted = new Set<Role>([
+      ...PERMISSIONS["m7.curate"],
+      ...PERMISSIONS["m7.participant_notes"],
+      ...PERMISSIONS["m7.report_insight_edit"],
+    ]);
+    for (const role of granted) expect(canAccessNav(nav("/projects"), role)).toBe(true);
+    expect(canAccessNav(nav("/projects"), "od_viewer")).toBe(false);
+  });
+
+  it("Creator Product Match = alat CM: nav sama dengan m5.run, di grup Creator Management", () => {
+    const item = nav("/matching");
+    expect(item.group).toBe("Creator Management");
+    for (const role of ROLES) {
+      expect(canAccessNav(item, role)).toBe(hasPermission("m5.run", role));
+    }
+  });
+
+  it("setiap role yang boleh upload M4 melihat menu Upload Data Platform Mingguan", () => {
+    for (const role of PERMISSIONS["m4.upload"]) expect(canAccessNav(nav("/ingest"), role)).toBe(true);
+  });
+
+  it("izin m8.pipeline sudah dihapus bersama section Pipeline Deal Brand", () => {
+    expect(PERMISSIONS["m8.pipeline"]).toBeUndefined();
   });
 });
