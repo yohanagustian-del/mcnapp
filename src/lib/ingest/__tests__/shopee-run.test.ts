@@ -46,14 +46,14 @@ const CREATOR_IDS = ["CRT-001"];
 const summary: ShopeePeriodSummaryRow[] = [
   {
     creatorId: "CRT-001", periodStart: "2026-07-01", periodEnd: "2026-07-07",
-    gmvTotal: 300_000, affiliateLiveGmv: 200_000, affiliateVideoGmv: 100_000, orders: 5,
+    gmvTotal: 300_000, affiliateLiveGmv: 200_000, affiliateVideoGmv: 100_000, orders: 5, itemsSold: 7,
   },
 ];
 
 const subcat: SubcatSegmentRow[] = [
   {
-    creatorId: "CRT-001", level2Category: "Dress", priceSegment: null, windowEnd: PERIOD_END,
-    gmv: 300_000, liveGmv: 200_000, itemsSold: 0, orders: 5, avgPrice: null,
+    creatorId: "CRT-001", level2Category: "Dress", priceSegment: "entry", windowEnd: PERIOD_END,
+    gmv: 300_000, liveGmv: 200_000, itemsSold: 7, orders: 5, avgPrice: 300_000 / 7,
   },
 ];
 
@@ -95,27 +95,29 @@ describe("writeShopeeAggregates (creator_period_summary + creator_subcat_segment
     await writeShopeeAggregates(mockSupabase(ops), BATCH, CREATOR_IDS, PERIOD_START, PERIOD_END, summary, subcat);
     const insert = ops.find((o) => o.op === "insert" && o.table === "creator_period_summary")!;
     expect(insert.rows?.[0]).toMatchObject({
-      creator_id: "CRT-001", upload_batch: BATCH, gmv_total: 300_000, affiliate_gmv: 300_000,
+      creator_id: "CRT-001", upload_batch: BATCH, platform: "shopee", gmv_total: 300_000, affiliate_gmv: 300_000,
+      items_sold: 7,
       affiliate_live_gmv: 200_000, affiliate_video_gmv: 100_000, orders: 5, live_pct: 200_000 / 300_000,
     });
   });
 
-  it("maps subcat fields to snake_case columns; price_segment/items_sold/avg_price stay neutral", async () => {
+  it("maps subcat fields to snake_case columns incl. price_segment/items_sold/avg_price and platform='shopee'", async () => {
     const ops: Op[] = [];
     await writeShopeeAggregates(mockSupabase(ops), BATCH, CREATOR_IDS, PERIOD_START, PERIOD_END, summary, subcat);
     const insert = ops.find((o) => o.op === "insert" && o.table === "creator_subcat_segment_gmv")!;
     expect(insert.rows?.[0]).toMatchObject({
-      creator_id: "CRT-001", level2_category: "Dress", price_segment: null, upload_batch: BATCH,
-      window_end: PERIOD_END, gmv: 300_000, live_gmv: 200_000, items_sold: 0, orders: 5, avg_price: null,
+      creator_id: "CRT-001", level2_category: "Dress", price_segment: "entry", upload_batch: BATCH,
+      platform: "shopee", window_end: PERIOD_END, gmv: 300_000, live_gmv: 200_000, items_sold: 7, orders: 5,
+      avg_price: 300_000 / 7,
     });
   });
 
-  it("leaves TikTok-only period_summary columns (items_sold, ctr, ctor, direct_gmv, refund_gmv, live/video orders) at neutral defaults, not fabricated", async () => {
+  it("leaves TikTok-only period_summary columns (ctr, ctor, direct_gmv, refund_gmv, live/video orders) at neutral defaults, not fabricated", async () => {
     const ops: Op[] = [];
     await writeShopeeAggregates(mockSupabase(ops), BATCH, CREATOR_IDS, PERIOD_START, PERIOD_END, summary, subcat);
     const insert = ops.find((o) => o.op === "insert" && o.table === "creator_period_summary")!;
     expect(insert.rows?.[0]).toMatchObject({
-      items_sold: 0, ctr: null, ctor: null, direct_gmv: 0, refund_gmv: 0, live_orders: 0, video_orders: 0, nmv: null,
+      ctr: null, ctor: null, direct_gmv: 0, refund_gmv: 0, live_orders: 0, video_orders: 0, nmv: null,
     });
   });
 

@@ -2,6 +2,8 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { createHash } from "crypto";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { writeAudit } from "@/lib/audit";
+import { getConfig } from "@/lib/config";
+import type { PriceBounds } from "@/lib/projection/gmv";
 import { deriveJenisCreator, rankTopNiches, resolveCreatorNamesByPlatform } from "@/lib/platform-csv";
 import { validateW1W5Period } from "@/lib/utils/date";
 import { parseShopeeFile, validateSingleShopeeWindow, type ShopeeRow, type SkippedShopeeRow } from "./shopee-csv";
@@ -192,7 +194,9 @@ export async function runShopeeIngest(input: RunShopeeIngestInput): Promise<RunS
   try {
     // ---- 4. Aggregate in-memory + write (creator_period_summary + creator_subcat_segment_gmv) ----
     const periodSummary = buildShopeePeriodSummary(resolvedRows, periodStart, periodEnd);
-    const subcatSegment = buildShopeeSubcatSegment(resolvedRows, periodEnd);
+    // Same app_config bounds the TikTok pipeline reads (CLAUDE.md #8: one segmentation).
+    const bounds = await getConfig<PriceBounds>("segments.price_bounds");
+    const subcatSegment = buildShopeeSubcatSegment(resolvedRows, periodEnd, bounds);
     await writeShopeeAggregates(admin, batchId, [...creatorIdsSet], periodStart, periodEnd, periodSummary, subcatSegment);
 
     // ---- 5. Auto-fill creators master (shared helper + niche ranking) ----
@@ -259,8 +263,8 @@ const DELETE_CHUNK = 200;
  * delete-then-insert into creator_period_summary AND creator_subcat_segment_gmv,
  * scoped to the creators present in this file and this period/window. Two CMs
  * (or a CM re-uploading the same window) never clobber each other's creators.
- * nmv/direct_gmv/refund_gmv/ctr/ctor/live_pct/live_orders/video_orders/
- * items_sold have no Shopee source in this report shape — left at their column
+ * nmv/direct_gmv/refund_gmv/ctr/ctor/live_orders/video_orders have no Shopee
+ * source in this report shape — left at their column
  * defaults (0/null), which is a neutral value (not fabricated data) since
  * those columns are NOT NOT-NULL-without-default in the schema (see
  * supabase/migrations/0016_ingest_aggregates.sql).
@@ -290,6 +294,9 @@ export async function writeShopeeAggregates(
     period_start: s.periodStart,
     period_end: s.periodEnd,
     upload_batch: batchId,
+    // Explicit: the column defaults to 'tiktok' (migration 0078 came after this
+    // writer), which mixed Shopee aggregates into every TikTok-filtered query.
+    platform: "shopee",
     gmv_total: s.gmvTotal,
     nmv: null,
     // affiliate_gmv mirrors gmv_total (same convention as the TikTok pipeline's
@@ -300,7 +307,7 @@ export async function writeShopeeAggregates(
     live_orders: 0,
     video_orders: 0,
     orders: s.orders,
-    items_sold: 0,
+    items_sold: s.itemsSold,
     direct_gmv: 0,
     refund_gmv: 0,
     ctr: null,
@@ -317,6 +324,7 @@ export async function writeShopeeAggregates(
     level2_category: s.level2Category,
     price_segment: s.priceSegment,
     upload_batch: batchId,
+    platform: "shopee",
     window_end: s.windowEnd,
     gmv: s.gmv,
     live_gmv: s.liveGmv,

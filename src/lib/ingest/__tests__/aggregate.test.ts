@@ -111,12 +111,26 @@ describe("buildSubcatSegment", () => {
     }
   });
 
-  it("items_sold=0 -> segment null, gmv still counted", () => {
-    const rows = [row({ affiliateGmv: 500_000, itemsSold: 0 })];
+  it("items_sold=0 AND orders=0 -> segment null, gmv still counted", () => {
+    const rows = [row({ affiliateGmv: 500_000, itemsSold: 0, orders: 0 })];
     const [seg] = buildSubcatSegment(rows, BOUNDS);
     expect(seg.priceSegment).toBeNull();
     expect(seg.gmv).toBe(500_000);
     expect(seg.avgPrice).toBeNull();
+  });
+
+  it("Q5: items_sold=0 but orders>0 -> segment & avg_price from gmv/orders", () => {
+    // 2 orders, Rp1.000.000 → Rp500.000/order → entry (180k–800k).
+    const [seg] = buildSubcatSegment([row({ affiliateGmv: 1_000_000, itemsSold: 0, orders: 2 })], BOUNDS);
+    expect(seg.priceSegment).toBe("entry");
+    expect(seg.avgPrice).toBe(500_000);
+    expect(seg.itemsSold).toBe(0);
+  });
+
+  it("items_sold>0 still wins over orders for the unit price", () => {
+    // 4 items over 1 order: 100k/item → low (gmv/orders would say entry).
+    const [seg] = buildSubcatSegment([row({ affiliateGmv: 400_000, itemsSold: 4, orders: 1 })], BOUNDS);
+    expect(seg.priceSegment).toBe("low");
   });
 
   it("groups by (creator, level2 category, segment) and sums", () => {

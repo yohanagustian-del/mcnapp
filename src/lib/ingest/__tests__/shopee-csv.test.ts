@@ -28,16 +28,19 @@ function row(opts: {
   cat2?: string;
   gmv?: string;
   platform?: string;
+  qty?: string;
+  unitPrice?: string;
 }): string {
   const {
     status = "Selesai", orderedAt = "2026-07-03 11:00:00", completedAt = "2026-07-03 12:00:00", affiliateName = "Nama Affiliate",
     username = "affuser", productId = "111", productName = "Produk A", shopId = "999",
     shopName = "Toko A", cat1 = "Cat1", cat2 = "Cat2", gmv = "100000", platform = "Shopeelive-Shopee",
+    qty = "1", unitPrice = "50000",
   } = opts;
   return [
     "ORDER1", status, "AFF1", orderedAt, completedAt, "2026-07-03 10:00:00",
     affiliateName, username, "1082254", shopName, shopId, "Shopee Mall", productId, productName,
-    "VAR1", "Produk", "", cat1, cat2, "SubCat", "1", "50000", "Promo MCN", "Pemilik", "COMM1",
+    "VAR1", "Produk", "", cat1, cat2, "SubCat", qty, unitPrice, "Promo MCN", "Pemilik", "COMM1",
     gmv, "0", "Selesai", "", "Pesanan Langsung", "Baru", "", "", "", "", "", platform,
   ].join(",");
 }
@@ -70,6 +73,19 @@ describe("parseShopeeFile", () => {
     expect(rows[0].bucket).toBe("live");
     expect(rows[1].bucket).toBe("video");
     expect(rows[2].bucket).toBe("other");
+  });
+
+  it("reads Qty and Harga(Rp) (unit price) for the price segment", async () => {
+    const csv = buildCsv([
+      row({ qty: "2", unitPrice: "250000" }),
+      row({ qty: "", unitPrice: "not found" }), // dirty → null, row still kept (CLAUDE.md #7)
+      row({ qty: "1", unitPrice: "Rp1.250.000" }),
+    ]);
+    const { rows } = await parseShopeeFile(csvFile(csv));
+    expect(rows).toHaveLength(3);
+    expect(rows[0]).toMatchObject({ qty: 2, unitPrice: 250_000 });
+    expect(rows[1]).toMatchObject({ qty: null, unitPrice: null });
+    expect(rows[2]).toMatchObject({ qty: 1, unitPrice: 1_250_000 });
   });
 
   it("parses GMV as a plain number (tolerant parser)", async () => {

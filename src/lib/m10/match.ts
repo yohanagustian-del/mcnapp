@@ -47,9 +47,11 @@ const cellKey = (level2: string, segment: PriceSegment) => `${level2.trim().toLo
 
 /**
  * Builds the level2 × price_segment matrix for one creator from raw
- * creator_subcat_segment_gmv rows (rows with a null price_segment — items_sold=0
- * at ingest — are excluded from the matrix cells since they carry no sellable
- * price signal, mirroring the same guard used in projection/gmv.ts).
+ * creator_subcat_segment_gmv rows (rows with a null price_segment — no readable
+ * unit price at ingest — are excluded from the matrix cells since they carry no
+ * sellable price signal, mirroring the same guard used in projection/gmv.ts).
+ * GMV with categories but zero cells (`totalGmv > 0 && cells.size === 0`) means
+ * the batch predates segment parsing — callers show a re-upload hint, not zeros.
  */
 export function creatorSegmentMap(rows: CreatorSegmentRow[]): CreatorSegmentMatrix {
   const cells = new Map<string, SegmentCell>();

@@ -41,3 +41,15 @@ describe("creatorSegmentMap", () => {
     expect(matrix.cells.size).toBe(0);
   });
 });
+
+describe("creatorSegmentMap — batch tanpa segmen (REVISI_BIZDEV T2)", () => {
+  it("GMV kategori ada tapi semua baris price_segment null → 0 cell, totalGmv tetap", () => {
+    const matrix = creatorSegmentMap([
+      { level2_category: "Dress", price_segment: null, gmv: 500_000, live_gmv: 0, items_sold: 0, avg_price: null },
+      { level2_category: "Tas", price_segment: null, gmv: 200_000, live_gmv: 0, items_sold: 0, avg_price: null },
+    ]);
+    expect(matrix.cells.size).toBe(0);
+    expect(matrix.totalGmv).toBe(700_000);
+    expect(matrix.byCategory.size).toBe(2);
+  });
+});
