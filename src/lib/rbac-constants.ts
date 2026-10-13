@@ -79,6 +79,9 @@ export const NAV_ITEMS: NavItem[] = [
   { href: "/creators", label: "Kreator", roles: "all", group: "Creator Management" },
   { href: "/workspace/cm", label: "CM Workspace", roles: [...MANAGEMENT_ROLES, ...CM_ROLES], group: "Creator Management" },
   { href: "/reports", label: "Report Kreator", roles: [...MANAGEMENT_ROLES, ...CM_ROLES], group: "Creator Management" },
+  // Alat milik CM (PRD M5 §2.5) — roles = m5.run. Dulu di grup BizDev & Deal dan ikut
+  // ditampilkan ke BizDev, yang lalu hanya mendapat pesan "tidak punya izin" (audit 2026-10).
+  { href: "/matching", label: "Creator Product Match", roles: [...MANAGEMENT_ROLES, ...CM_ROLES], group: "Creator Management" },
   // M13 Penjadwalan Live: CM + BizDev input slots; Creator Support verifies outside CM hours.
   { href: "/schedule", label: "Jadwal Live", roles: [...MANAGEMENT_ROLES, ...CM_ROLES, ...BIZDEV_ROLES, "creator_support"], group: "Creator Management" },
   // PX-M1: Product Exchange Creator Capability Registry — kapasitas match aktif
@@ -96,14 +99,16 @@ export const NAV_ITEMS: NavItem[] = [
   // dicocokkan ke kreator baru. Tambah/upload/edit tetap BizDev (leads.create/edit).
   { href: "/leads", label: "Brand Lead Bank", roles: [...MANAGEMENT_ROLES, ...BIZDEV_ROLES, ...CM_ROLES], group: "BizDev & Deal" },
   { href: "/workspace/bizdev", label: "BizDev Workspace", roles: [...MANAGEMENT_ROLES, ...BIZDEV_ROLES], group: "BizDev & Deal" },
-  { href: "/matching", label: "Creator Product Match", roles: [...MANAGEMENT_ROLES, ...CM_ROLES, "bizdev_lead", "bizdev"], group: "BizDev & Deal" },
   // Product×Creator Matching: catalog TAP (master upload + derive dari TAP) + rekomendasi.
   { href: "/products", label: "Produk TAP", roles: [...MANAGEMENT_ROLES, ...CM_ROLES, ...BIZDEV_ROLES], group: "BizDev & Deal" },
   // Un-hidden 2026-09-23: M6 diganti model pool (lib/m6/predictor.ts) —
   // lihat rencana PLAN_MCN_PRODUCT_MATCH_PREDICTOR_LEADBANK_PX.md §B.
   { href: "/predictor", label: "BD Value Predictor", roles: [...MANAGEMENT_ROLES, "bizdev_lead", "bizdev"], group: "BizDev & Deal" },
 
-  { href: "/projects", label: "Special Project (M7)", roles: [...MANAGEMENT_ROLES, "cm_lead", "bizdev_lead", "acquisition_lead", "campaign_ops", "finance"], group: "Project & Campaign" },
+  // Semua role staff: m7.participant_notes & m7.report_insight_edit (keputusan 2026-09-28/30)
+  // ⊇ m7.curate memberi hak ke role yang dulu menunya tidak tampil (audit 2026-10).
+  // od_viewer dikecualikan — menunya sendiri (/od). Dijaga test di rbac.test.ts.
+  { href: "/projects", label: "Special Project (M7)", roles: ROLES.filter((role) => role !== "od_viewer"), group: "Project & Campaign" },
   // M10: Campaign & Ads Support portal — Management + Campaign Ops (lead) + ads_support (execute).
   { href: "/workspace/ads", label: "Ads Support (M10)", roles: [...MANAGEMENT_ROLES, ...ADS_ROLES], group: "Project & Campaign" },
   // M8 §2F: metrik approach external — External ✔, BizDev view, Management ✔.
@@ -116,7 +121,7 @@ export const NAV_ITEMS: NavItem[] = [
   { href: "/workspace/acquisition/perpanjangan", label: "Perpanjangan Kreator", roles: [...MANAGEMENT_ROLES, ...ACQUISITION_ROLES, ...CM_ROLES], group: "Akuisisi" },
 
   // Module 0.5: shared ingest (MCN + TAP) — process-on-ingest, drop-raw (matrix §2.8).
-  { href: "/ingest", label: "Upload Data Platform Mingguan", roles: [...MANAGEMENT_ROLES, ...CM_ROLES, "campaign_external"], group: "Data Platform" },
+  { href: "/ingest", label: "Upload Data Platform Mingguan", roles: [...MANAGEMENT_ROLES, ...CM_ROLES, "campaign_ops", "campaign_external"], group: "Data Platform" },
   { href: "/link-leakage", label: "Link Leakage", roles: [...MANAGEMENT_ROLES, ...CM_ROLES, ...BIZDEV_ROLES, "campaign_external"], group: "Data Platform" },
 
   { href: "/tim", label: "Tim", roles: MANAGEMENT_ROLES, group: "Management & Admin" },
@@ -255,8 +260,8 @@ export const PERMISSIONS: Record<string, Role[]> = {
   "m8.brand_acc": [...MANAGEMENT_ROLES, "bizdev_lead", "bizdev"],
   // Handover req fix ke Campaign Ops (Module 1 §0.5)
   "m8.handover": [...MANAGEMENT_ROLES, "bizdev_lead", "bizdev", "campaign_ops"],
-  // Kelola pipeline deal & report brand: management + BizDev
-  "m8.pipeline": [...MANAGEMENT_ROLES, "bizdev_lead", "bizdev"],
+  // Report brand: management + BizDev. (m8.pipeline dihapus 2026-10 bersama section
+  // "Pipeline Deal Brand"; kolom brand_deals.pipeline_stage dibiarkan sebagai data lama.)
   "m8.brand_report": [...MANAGEMENT_ROLES, "bizdev_lead", "bizdev"],
   // Buat & ubah Project BD (pengelompokan beberapa shop jadi satu campaign).
   // Sejajar dengan deals.register: yang menutup deal juga yang menyusun projectnya.

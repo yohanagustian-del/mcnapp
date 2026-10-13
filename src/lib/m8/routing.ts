@@ -143,9 +143,6 @@ export function latestTwoPeriods(rows: PeriodSummaryPoint[]): GrowthPoint | null
 
 // ============ BizDev Workspace helpers ============
 
-export const PIPELINE_STAGES = ["prospek", "nego", "closing", "aktif", "selesai"] as const;
-export type PipelineStage = (typeof PIPELINE_STAGES)[number];
-
 /**
  * Upgrade-service recommendation (§2B.4, LOCKED §6.5): high ROAS + high GMV.
  * ROAS needs ads spend; without it there is no basis → no recommendation.

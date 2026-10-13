@@ -1,4 +1,5 @@
-import { requireMember, MANAGEMENT_ROLES } from "@/lib/rbac";
+import Link from "next/link";
+import { requireMember, MANAGEMENT_ROLES, NAV_ITEMS, canAccessNav } from "@/lib/rbac";
 import { createClient } from "@/lib/supabase/server";
 
 export default async function DashboardPage() {
@@ -13,6 +14,11 @@ export default async function DashboardPage() {
     ]);
 
   const isManagement = MANAGEMENT_ROLES.includes(member.role);
+  // Pintasan ke workspace yang boleh dibuka role ini — dibaca dari NAV_ITEMS (satu sumber
+  // RBAC menu), bukan daftar kedua.
+  const workspaces = NAV_ITEMS.filter(
+    (item) => item.href.startsWith("/workspace/") && canAccessNav(item, member.role),
+  );
 
   return (
     <div>
@@ -28,13 +34,23 @@ export default async function DashboardPage() {
         <StatCard label="Anggota Tim" value={memberCount ?? 0} />
       </div>
 
-      <div className="mt-8 rounded-lg border border-slate-200 bg-white p-4 text-sm text-slate-600">
-        <p className="font-medium text-slate-800">Status Fase 0</p>
-        <p className="mt-1">
-          Fondasi platform aktif: schema M1–M8, RBAC/RLS, upload tim & kreator, registrasi deal,
-          dan importer master deal lama. Module berikutnya (M4 Link Leakage, M2 Report) menyusul di Fase 1.
-        </p>
-      </div>
+      {workspaces.length > 0 && (
+        <div className="mt-8 rounded-lg border border-slate-200 bg-white p-4 text-sm text-slate-600">
+          <p className="font-medium text-slate-800">Workspace Anda</p>
+          <ul className="mt-2 flex flex-wrap gap-2">
+            {workspaces.map((w) => (
+              <li key={w.href}>
+                <Link
+                  href={w.href}
+                  className="inline-block rounded-md border border-slate-200 px-3 py-1.5 hover:bg-slate-50"
+                >
+                  {w.label} <span className="text-blue-600">→</span>
+                </Link>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
     </div>
   );
 }
