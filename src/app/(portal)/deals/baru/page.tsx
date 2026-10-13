@@ -12,10 +12,22 @@ import { uploadDealProducts } from "../actions";
 import { UploadTutorial } from "@/app/(portal)/products/upload-tutorial";
 import { DealForm, type MemberOption } from "./deal-form";
 import { UploadCampaignFields } from "./upload-campaign-fields";
+import {
+  formatLeadContacts,
+  isLeadConverted,
+  leadPlatform,
+  matchBizdevNames,
+  type LeadDealDefaults,
+} from "@/lib/leads/convert";
 
-export default async function DealBaruPage() {
+export default async function DealBaruPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ lead_id?: string }>;
+}) {
   const member = await requireMember();
   if (!hasPermission("deals.register", member.role)) redirect("/deals");
+  const { lead_id: leadIdParam } = await searchParams;
 
   const supabase = await createClient();
   const { data: picOptions } = await supabase
@@ -38,6 +50,40 @@ export default async function DealBaruPage() {
   const bizdevOptions: MemberOption[] = (dealByRows ?? [])
     .filter((m) => (BIZDEV_ROLES as Role[]).includes(m.role as Role))
     .map((m) => ({ id: m.id as string, name: m.name as string }));
+  // Dibuka dari Brand Lead Bank (REVISI_BIZDEV T8): isian diturunkan dari lead supaya
+  // BizDev tidak mengetik ulang. Gerbang leads.view; lead tak ditemukan → form kosong + pesan.
+  let leadDefaults: LeadDealDefaults | null = null;
+  let leadMessage: string | null = null;
+  const leadId = leadIdParam?.trim();
+  if (leadId && hasPermission("leads.view", member.role)) {
+    const { data: lead } = await supabase
+      .from("brand_leads")
+      .select("id, shop_name, platforms, bizdev_names, store_link, converted_deal_id, status")
+      .eq("id", leadId)
+      .maybeSingle();
+    if (!lead) {
+      leadMessage = `Lead ${leadId} tidak ditemukan — form dibuka tanpa isian lead.`;
+    } else {
+      const { data: contacts } = await supabase
+        .from("brand_lead_contacts")
+        .select("lead_name, phone, email, sort_order")
+        .eq("lead_id", leadId)
+        .order("sort_order");
+      leadDefaults = {
+        leadId: lead.id as string,
+        shopName: (lead.shop_name as string | null) ?? null,
+        platform: leadPlatform(lead.platforms as string[] | null),
+        dealBy: (BIZDEV_ROLES as Role[]).includes(member.role) ? member.id : null,
+        bizdevHandlerIds: matchBizdevNames(lead.bizdev_names as string | null, bizdevOptions),
+        contactPic: formatLeadContacts(contacts ?? []),
+        storeLink: (lead.store_link as string | null) ?? null,
+      };
+      if (isLeadConverted(lead as { converted_deal_id: string | null; status: string })) {
+        leadMessage = `Lead ${leadId} sudah berstatus deal — deal baru tetap bisa didaftarkan, tetapi lead-nya tidak akan diubah.`;
+      }
+    }
+  }
+
   const dealByOptions: MemberOption[] = (dealByRows ?? []).map((m) => ({
     id: m.id as string,
     name: m.name as string,
@@ -63,6 +109,8 @@ export default async function DealBaruPage() {
           picOptions={(picOptions ?? []) as MemberOption[]}
           dealByOptions={dealByOptions}
           bizdevOptions={bizdevOptions}
+          defaults={leadDefaults}
+          notice={leadMessage}
         />
       </div>
 
