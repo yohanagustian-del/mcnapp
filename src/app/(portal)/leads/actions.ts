@@ -11,6 +11,7 @@ import {
   type BrandLeadContactInput,
   type BrandLeadInput,
 } from "@/lib/leads/brand-lead";
+import { applyLeadConversion, type LeadRef } from "@/lib/leads/convert";
 
 export interface LeadFormState {
   ok: boolean;
@@ -239,20 +240,21 @@ export async function markLeadConverted(leadId: string, dealId: string): Promise
   if (dealError) return { ok: false, message: `Gagal memeriksa deal: ${dealError.message}` };
   if (!deal) return { ok: false, message: `Deal ${trimmedDealId} tidak ditemukan di tab Deal Brand.` };
 
-  const { error } = await admin
+  const { data: lead, error: leadError } = await admin
     .from("brand_leads")
-    .update({ converted_deal_id: trimmedDealId, status: "deal", updated_at: new Date().toISOString() })
-    .eq("id", leadId);
-  if (error) return { ok: false, message: `Gagal menandai lead: ${error.message}` };
+    .select("id, created_by, converted_deal_id, status, notes")
+    .eq("id", leadId)
+    .maybeSingle();
+  if (leadError) return { ok: false, message: `Gagal membaca lead: ${leadError.message}` };
+  if (!lead) return { ok: false, message: "Lead tidak ditemukan." };
 
-  await writeAudit({
-    actorId,
-    action: "lead.convert",
-    entityType: "brand_leads",
-    entityId: leadId,
-    after: { converted_deal_id: trimmedDealId },
-    type: "auto",
-  });
+  // Logika penandaan yang sama dengan alur "Daftarkan jadi Deal Brand" (lib/leads/convert).
+  try {
+    const audit = await applyLeadConversion(admin, actorId, lead as LeadRef, { kind: "deal", dealId: trimmedDealId }, new Date().toISOString().slice(0, 10));
+    await writeAudit(audit);
+  } catch (e) {
+    return { ok: false, message: e instanceof Error ? e.message : "Gagal menandai lead." };
+  }
 
   revalidatePath("/leads");
   revalidatePath(`/leads/${leadId}`);

@@ -6,6 +6,7 @@ import { createClient } from "@/lib/supabase/server";
 import { LeadForm } from "../lead-form";
 import { updateLead } from "../actions";
 import { ConvertToDealForm } from "./convert-form";
+import { isLeadConverted } from "@/lib/leads/convert";
 
 export default async function LeadDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const member = await requireMember();
@@ -24,6 +25,7 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
     .order("sort_order");
 
   const canEdit = hasPermission("leads.edit", member.role);
+  const canRegister = hasPermission("deals.register", member.role);
   const boundUpdate = updateLead.bind(null, id);
 
   return (
@@ -40,18 +42,40 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
         <div className="mt-4 rounded-lg border border-green-200 bg-green-50 p-4 text-sm text-green-800">
           Lead ini sudah jadi deal: <Link href={`/deals/${lead.converted_deal_id}`} className="underline font-medium">{lead.converted_deal_id}</Link>
         </div>
+      ) : isLeadConverted(lead) ? (
+        <div className="mt-4 rounded-lg border border-green-200 bg-green-50 p-4 text-sm text-green-800">
+          Lead ini sudah berstatus <strong>Deal</strong>. Kalau didaftarkan sebagai kartu Produk TAP, kunci
+          kartunya tercatat di Catatan lead di bawah.
+        </div>
       ) : (
-        canEdit && (
+        (canRegister || canEdit) && (
           <div className="mt-4 rounded-lg border border-slate-200 bg-white p-4">
             <h2 className="text-sm font-semibold text-slate-800">Buat Deal</h2>
-            <p className="mt-1 text-xs text-slate-500">
-              Daftarkan deal-nya lewat <Link href="/deals/baru" target="_blank" className="underline">Registrasi Deal</Link> (buka
-              tab baru, isi Shop Name = &ldquo;{lead.shop_name ?? "-"}&rdquo;), lalu tempel ID deal yang terbentuk di sini
-              supaya lead ini tertaut & statusnya otomatis jadi &ldquo;Deal&rdquo;.
-            </p>
-            <div className="mt-3">
-              <ConvertToDealForm leadId={lead.id} />
-            </div>
+            {canRegister && (
+              <>
+                <p className="mt-1 text-xs text-slate-500">
+                  Buka Registrasi Deal dengan Shop Name, platform, kontak PIC, dan BizDev lead ini sudah
+                  terisi. Setelah disimpan, lead ini otomatis tertaut dan statusnya jadi &ldquo;Deal&rdquo;.
+                </p>
+                <Link
+                  href={`/deals/baru?lead_id=${encodeURIComponent(lead.id)}`}
+                  className="mt-3 inline-block rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-700"
+                >
+                  Daftarkan jadi Deal Brand
+                </Link>
+              </>
+            )}
+            {canEdit && (
+              <>
+                <p className="mt-4 text-xs text-slate-500">
+                  Deal-nya sudah terlanjur didaftarkan tanpa tombol di atas? Tempel ID deal-nya di sini
+                  supaya lead ini tertaut &amp; statusnya jadi &ldquo;Deal&rdquo;.
+                </p>
+                <div className="mt-3">
+                  <ConvertToDealForm leadId={lead.id} />
+                </div>
+              </>
+            )}
           </div>
         )
       )}

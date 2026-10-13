@@ -2,6 +2,7 @@
 
 import { useActionState } from "react";
 import { registerDealCard, type DealFormState } from "../actions";
+import type { LeadDealDefaults } from "@/lib/leads/convert";
 
 export interface MemberOption {
   id: string;
@@ -27,11 +28,16 @@ export function DealForm({
   picOptions,
   dealByOptions,
   bizdevOptions = [],
+  defaults = null,
+  notice = null,
 }: {
   picOptions: MemberOption[];
   dealByOptions: MemberOption[];
   /** Anggota aktif ber-role BizDev untuk pertanyaan opsional "BizDev handler" (maks 2). */
   bizdevOptions?: MemberOption[];
+  /** Isian turunan Brand Lead Bank (`?lead_id=`); null = form kosong seperti biasa. */
+  defaults?: LeadDealDefaults | null;
+  notice?: string | null;
 }) {
   const [state, formAction, pending] = useActionState<DealFormState | null, FormData>(
     registerDealCard,
@@ -54,6 +60,26 @@ export function DealForm({
         </p>
       )}
 
+      {notice && <p className="rounded-md bg-amber-50 p-3 text-sm text-amber-800">{notice}</p>}
+      {defaults && (
+        <div className="rounded-md border border-blue-200 bg-blue-50 p-3 text-sm text-blue-800">
+          Diisi dari lead <strong>{defaults.leadId}</strong>. Setelah disimpan, lead itu otomatis
+          ditandai &ldquo;Deal&rdquo;.
+          {defaults.contactPic && <> Kontak PIC: {defaults.contactPic}.</>}
+          {defaults.storeLink && <> Link toko: {defaults.storeLink}.</>}
+          <input type="hidden" name="lead_id" value={defaults.leadId} />
+          {defaults.contactPic && <input type="hidden" name="contact_pic_brand" value={defaults.contactPic} />}
+          {defaults.storeLink && <input type="hidden" name="store_link" value={defaults.storeLink} />}
+        </div>
+      )}
+
+      <Field label="Platform" error={err("platform")}>
+        <select name="platform" defaultValue={defaults?.platform ?? "tiktok"} className={inputCls}>
+          <option value="tiktok">TikTok Shop</option>
+          <option value="shopee">Shopee</option>
+        </select>
+      </Field>
+
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <Field label="Campaign ID" error={err("campaign_id")}>
           <input name="campaign_id" className={inputCls} placeholder="7662920044527912724" />
@@ -68,7 +94,7 @@ export function DealForm({
           <input name="price" type="number" min="0" step="1" className={inputCls} placeholder="231000" />
         </Field>
         <Field label="Shop Name" error={err("shop_name")}>
-          <input name="shop_name" className={inputCls} placeholder="Skintific Official Store" />
+          <input name="shop_name" defaultValue={defaults?.shopName ?? ""} className={inputCls} placeholder="Skintific Official Store" />
         </Field>
         <Field label="Shop ID" error={err("shop_id")}>
           <input name="shop_id" inputMode="numeric" className={inputCls} placeholder="7495123456789" />
@@ -105,7 +131,7 @@ export function DealForm({
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <Field label="Deal by" error={err("deal_by")}>
-          <select name="deal_by" defaultValue="" className={inputCls}>
+          <select name="deal_by" defaultValue={defaults?.dealBy ?? ""} className={inputCls}>
             <option value="">Pilih nama…</option>
             {dealByGroups.map((g) => (
               <optgroup key={g} label={g || "Lainnya"}>
@@ -136,7 +162,11 @@ export function DealForm({
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           {[1, 2].map((i) => (
             <Field key={i} label={`BizDev handler ${i} (opsional)`}>
-              <select name={`bizdev_handler_${i}`} defaultValue="" className={inputCls}>
+              <select
+                name={`bizdev_handler_${i}`}
+                defaultValue={defaults?.bizdevHandlerIds[i - 1] ?? ""}
+                className={inputCls}
+              >
                 <option value="">— kosong —</option>
                 {bizdevOptions.map((o) => (
                   <option key={o.id} value={o.id}>

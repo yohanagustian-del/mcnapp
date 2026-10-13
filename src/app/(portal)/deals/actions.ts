@@ -5,7 +5,8 @@ import { z } from "zod";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import { writeAudit } from "@/lib/audit";
-import { requirePermission } from "@/lib/rbac";
+import { requirePermission, hasPermission } from "@/lib/rbac";
+import type { TeamMember } from "@/lib/rbac-constants";
 import { genId } from "@/lib/utils/id";
 import { isSummaryRow } from "@/lib/utils/csv";
 import { parseSheet } from "@/lib/utils/sheet";
@@ -33,11 +34,41 @@ import { NO_CAMPAIGN, uploadProductMasterList } from "@/lib/m10/products";
 import { groupKeysByCampaign } from "@/lib/m10/product-keys";
 import type { UploadReport } from "@/app/(portal)/tim/actions";
 import { assignHandlersOnRegister, handlerIdsFromForm } from "@/lib/deals/bizdev-handlers";
+import { convertLeadOnRegister, parseDealPlatform, type ConversionTarget } from "@/lib/leads/convert";
 
 export interface DealFormState {
   ok: boolean;
   message: string;
   fieldErrors?: Record<string, string>;
+}
+
+/** Registrasi Deal yang dibuka dari Brand Lead Bank (`?lead_id=`, REVISI_BIZDEV T8). */
+interface LeadContext {
+  member: TeamMember;
+  leadId: string | null;
+  /** Kontak PIC lead (hidden field) → brand_deals.contact_pic_brand untuk jalur deal shop. */
+  contactPic: string | null;
+  /** Link toko lead → dititipkan ke notes deal shop (brand_deals tak punya kolomnya). */
+  storeLink: string | null;
+}
+
+/** Tandai lead setelah registrasi berhasil; catatan (bukan error) bila tidak bisa. */
+async function convertLeadAfterRegister(
+  ctx: LeadContext,
+  admin: ReturnType<typeof createAdminClient>,
+  target: ConversionTarget
+): Promise<string | null> {
+  if (!ctx.leadId) return null;
+  const { note, audit } = await convertLeadOnRegister(
+    admin, ctx.member, hasPermission("leads.edit", ctx.member.role), ctx.leadId, target,
+    new Date().toISOString().slice(0, 10)
+  );
+  if (audit) {
+    await writeAudit(audit);
+    revalidatePath("/leads");
+    revalidatePath(`/leads/${ctx.leadId}`);
+  }
+  return note;
 }
 
 /**
@@ -112,10 +143,20 @@ export async function registerDealCard(
   const admin = createAdminClient();
 
   const handlerIds = handlerIdsFromForm(formData);
+  // Registrasi dari Brand Lead Bank (REVISI_BIZDEV T8): platform & lead_id ikut di form,
+  // di luar productCardSchema (tidak ada field wajib baru, CLAUDE.md #6).
+  const platform = parseDealPlatform(formData.get("platform"));
+  const leadId = String(formData.get("lead_id") ?? "").trim() || null;
+  const leadCtx: LeadContext = {
+    member: actor,
+    leadId,
+    contactPic: String(formData.get("contact_pic_brand") ?? "").trim() || null,
+    storeLink: String(formData.get("store_link") ?? "").trim() || null,
+  };
 
   // ---------- Deal shop: produknya belum diketahui ----------
   if (target === "brand_deal") {
-    return registerShopDeal(d, actor.id, admin, handlerIds);
+    return registerShopDeal(d, actor.id, admin, handlerIds, platform, leadCtx);
   }
 
   // ---------- Kartu produk ----------
@@ -156,6 +197,8 @@ export async function registerDealCard(
     // tanpa nama tak bisa dikenali manusia di tabel. Keduanya perlu dilengkapi lewat
     // Edit di tab Produk TAP, jadi keduanya menandai baris "perlu review".
     needs_review: generatedProductId || d.product_name === undefined,
+    // Tanpa pilihan platform → default kolom (tiktok), sama seperti sebelum T8.
+    ...(platform ? { platform } : {}),
     first_seen: new Date().toISOString().slice(0, 10),
     last_seen: new Date().toISOString().slice(0, 10),
     updated_at: new Date().toISOString(),
@@ -190,14 +233,22 @@ export async function registerDealCard(
   // BizDev handler opsional (REVISI_BIZDEV T5): shop_key dibaca dari kolom generated,
   // bukan dihitung ulang di aplikasi (CLAUDE.md #4).
   let handlerNote: string | null = null;
-  if (handlerIds.length > 0) {
+  let savedShopKey: string | null = null;
+  if (handlerIds.length > 0 || leadId) {
     const { data: saved } = await admin
       .from("products_tap").select("shop_key")
       .eq("campaign_id", campaignId).eq("product_id", productId).maybeSingle();
-    const assigned = await assignHandlersOnRegister(admin, actor.id, (saved?.shop_key as string | null) ?? null, handlerIds);
+    savedShopKey = (saved?.shop_key as string | null) ?? null;
+  }
+  if (handlerIds.length > 0) {
+    const assigned = await assignHandlersOnRegister(admin, actor.id, savedShopKey, handlerIds);
     handlerNote = assigned.note;
     if (assigned.audit) await writeAudit(assigned.audit);
   }
+  // Kartu produk tidak punya deal_id: lead ditandai status 'deal' + kunci kartu di notes.
+  const leadNote = await convertLeadAfterRegister(leadCtx, admin, {
+    kind: "card", cardKey: `${campaignId}|${productId}`, shopKey: savedShopKey,
+  });
 
   revalidatePath("/products");
   revalidatePath("/deals");
@@ -209,6 +260,7 @@ export async function registerDealCard(
     notes.push("Product Name belum diisi → kartu ditandai perlu review, lengkapi lewat tab Produk TAP");
   }
   if (handlerNote) notes.push(handlerNote);
+  if (leadNote) notes.push(leadNote);
   return {
     ok: true,
     message:
@@ -235,7 +287,9 @@ async function registerShopDeal(
   d: ProductCardInput,
   actorId: string,
   admin: ReturnType<typeof createAdminClient>,
-  handlerIds: string[] = []
+  handlerIds: string[] = [],
+  platform: "tiktok" | "shopee" | null = null,
+  leadCtx: LeadContext | null = null
 ): Promise<DealFormState> {
   const shopId = d.shop_id ?? null;
   const expDate = d.effective_end ?? null;
@@ -277,6 +331,7 @@ async function registerShopDeal(
   // bisa dipindahkan ke kartu produk begitu produknya turun.
   const titipan: string[] = [];
   if (d.product_link) titipan.push(`Product Link: ${d.product_link}`);
+  if (leadCtx?.storeLink) titipan.push(`Link toko (lead ${leadCtx.leadId}): ${leadCtx.storeLink}`);
   if (d.creator_shop_ads_commission_pct !== undefined) {
     titipan.push(`Creator Shop Ads commission: ${d.creator_shop_ads_commission_pct}%`);
   }
@@ -306,6 +361,9 @@ async function registerShopDeal(
     exp_date: expDate,
     deal_end: expDate, // deal_end = exp_date, sama seperti jalur import & Edit deal
     pic_tap: d.pic_tap ?? null,
+    // Kontak PIC dari Brand Lead Bank (T8); form biasa tidak mengirimnya → null.
+    contact_pic_brand: leadCtx?.contactPic ?? null,
+    ...(platform ? { platform } : {}),
     status: "running", // deal yang baru ditutup memang sedang berjalan
     notes:
       "Didaftarkan lewat Registrasi Deal; produknya belum diketahui." +
@@ -350,6 +408,10 @@ async function registerShopDeal(
     const assigned = await assignHandlersOnRegister(admin, actorId, (saved?.shop_key as string | null) ?? null, handlerIds);
     if (assigned.note) extras.push(assigned.note);
     if (assigned.audit) await writeAudit(assigned.audit);
+  }
+  if (leadCtx) {
+    const leadNote = await convertLeadAfterRegister(leadCtx, admin, { kind: "deal", dealId });
+    if (leadNote) extras.push(leadNote);
   }
 
   revalidatePath("/deals");
