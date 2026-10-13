@@ -10,7 +10,8 @@ import {
 import type { PriceBounds } from "@/lib/projection/gmv";
 import { validateW1W5Period } from "@/lib/utils/date";
 import { derivePeriod, parseMcnFile, parseTapFile, type ParseResult, type SkippedRow } from "./parse";
-import { buildPeriodSummary, buildSubcatSegment, buildTopProducts } from "./aggregate";
+import { buildCreatorShopPeriod, buildPeriodSummary, buildSubcatSegment, buildTopProducts } from "./aggregate";
+import { writeCreatorShopPeriod } from "./shop-period-write";
 import { MCN_COLUMNS, type McnRow, type TapRow } from "./schema";
 import { upsertDerivedFromTap } from "@/lib/m10/products";
 import {
@@ -46,7 +47,7 @@ export interface RunIngestResult {
   creatorsCount: number;
   createdProspects: string[];
   skipped: SkippedRow[];
-  aggregateRows: { periodSummary: number; subcatSegment: number; topProducts: number };
+  aggregateRows: { periodSummary: number; subcatSegment: number; topProducts: number; shopPeriod: number };
   /** Always true: this pipeline is aggregates-only — raw rows are never written to the DB. */
   droppedRaw: boolean;
   /**
@@ -321,6 +322,27 @@ export async function runIngest(input: RunIngestInput): Promise<RunIngestResult>
       admin, batchId, [...creatorIdsSet], periodStart, periodEnd, periodSummary, subcatSegment, topProducts
     );
 
+    // ---- 4b. Agregat kreator × shop × periode (migrasi 0087, REVISI_BIZDEV T4) ----
+    // Dari baris MCN + TAP yang SAMA (tanpa parse ulang). Nama kreator TAP di-resolve
+    // lewat peta MCN yang sama; "" = export TAP 1-kreator tanpa kolom kreator.
+    const tapForShop = tapParsed.rows.map((t) => {
+      const name = t.creatorName.trim();
+      return { ...t, creatorName: name ? byName.get(name.toLowerCase()) ?? null : "" };
+    });
+    const shopPeriod = buildCreatorShopPeriod(resolvedMcnRows, tapForShop, tapParsed.rows.length > 0);
+    const shopPeriodWrite = await writeCreatorShopPeriod(
+      admin, "tiktok", batchId, [...creatorIdsSet], periodStart, periodEnd, shopPeriod.rows
+    );
+    if (shopPeriodWrite.skipped) skipped.push({ row: -1, reason: shopPeriodWrite.skipped });
+    if (shopPeriod.unattributedTapGmv > 0) {
+      skipped.push({
+        row: -1,
+        reason:
+          `GMV TAP Rp${Math.round(shopPeriod.unattributedTapGmv).toLocaleString("id-ID")} tidak bisa ` +
+          `diatribusikan ke kreator di file MCN ini — tidak masuk agregat per shop.`,
+      });
+    }
+
     // ---- 5. Auto-fill creators master ----
     // Follower count per creator from the MCN file ("Creator follower count",
     // 2026-07 export — legacy exports lack the column → map stays empty and the
@@ -365,6 +387,7 @@ export async function runIngest(input: RunIngestInput): Promise<RunIngestResult>
           period_summary: periodSummary.length,
           subcat_segment: subcatSegment.length,
           top_products: topProducts.length,
+          shop_period: shopPeriodWrite.written,
         },
         dropped_raw: true,
         leak_engine: "in_platform_compute",
@@ -427,6 +450,7 @@ export async function runIngest(input: RunIngestInput): Promise<RunIngestResult>
         periodSummary: periodSummary.length,
         subcatSegment: subcatSegment.length,
         topProducts: topProducts.length,
+        shopPeriod: shopPeriodWrite.written,
       },
       droppedRaw: true,
       leak,

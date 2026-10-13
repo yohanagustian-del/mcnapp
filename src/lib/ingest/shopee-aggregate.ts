@@ -16,7 +16,8 @@
  * production (same convention as McnRow.creatorName in aggregate.ts).
  */
 import type { ShopeeRow } from "./shopee-csv";
-import type { SubcatSegmentRow } from "./aggregate";
+import type { CreatorShopPeriodRow, SubcatSegmentRow } from "./aggregate";
+import { normalizeShopId } from "@/lib/m4/leak-compute";
 import { priceSegmentOf, type PriceBounds, type PriceSegment } from "@/lib/projection/gmv";
 import { normalizeShopeeCategory } from "./shopee-category";
 
@@ -161,3 +162,34 @@ export function buildShopeeSubcatSegment(
     avgPrice: acc.itemsSold > 0 ? acc.gmv / acc.itemsSold : null,
   }));
 }
+
+/**
+ * creator_shop_period_gmv rows for Shopee (migrasi 0087, REVISI_BIZDEV T4): GMV
+ * MCN per (creator, shop) from the same Selesai rows. TAP columns stay NULL —
+ * fase 1 = TikTok saja (Q4): the SAP marker column is not confirmed yet, so the
+ * UI must say "GMV TAP belum tersedia untuk Shopee", never show 0.
+ */
+export function buildShopeeCreatorShopPeriod(rows: ShopeeRow[]): CreatorShopPeriodRow[] {
+  const byKey = new Map<string, CreatorShopPeriodRow>();
+  for (const r of rows) {
+    if (!r.affiliateUsername || !r.shopId) continue;
+    const shop = normalizeShopId(r.shopId);
+    const key = `${r.affiliateUsername}|${shop}`;
+    const acc = byKey.get(key) ?? {
+      creatorId: r.affiliateUsername, shopId: shop, shopName: r.shopName,
+      gmvMcn: 0, gmvMcnLive: 0, gmvMcnVideo: 0, ordersMcn: 0, itemsSoldMcn: 0,
+      gmvTap: null, gmvTapLive: null, gmvTapVideo: null, ordersTap: null,
+      estPartnerCommission: null, actualPartnerCommission: null,
+      estCreatorCommission: null, actualCreatorCommission: null,
+    };
+    if (!acc.shopName && r.shopName) acc.shopName = r.shopName;
+    acc.gmvMcn += r.gmv;
+    if (r.bucket === "live") acc.gmvMcnLive += r.gmv;
+    else if (r.bucket === "video") acc.gmvMcnVideo += r.gmv;
+    acc.ordersMcn += 1;
+    acc.itemsSoldMcn += r.qty ?? 0;
+    byKey.set(key, acc);
+  }
+  return [...byKey.values()];
+}
+
