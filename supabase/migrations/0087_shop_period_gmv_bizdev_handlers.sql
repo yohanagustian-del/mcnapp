@@ -10,7 +10,8 @@
 --    bukan nol.
 -- 2. brand_bizdev_handlers — BizDev penanggung jawab brand (maks 2 per shop_key).
 --    Shop tanpa baris = "Non BD Handle".
--- 3. View shop_period_summary & bizdev_brand_perf (security_invoker) — agregasi di SQL.
+-- 3. View shop_period_summary (grain minggu & bulan), shop_key_map, bizdev_brand_perf
+--    (security_invoker) — agregasi di SQL.
 -- 4. brand_reports v2 (Report Brand berbasis shop, 0 LLM) + tambal restrictive deny
 --    is_creator_user() yang tertinggal sejak 0006.
 -- 5. Seed app_config m8.brand_report_rules & m8.bizdev_summary.
@@ -104,62 +105,75 @@ comment on table brand_bizdev_handlers is
   'BizDev penanggung jawab brand per shop_key (= products_tap/brand_deals.shop_key), maks 2. Tanpa baris = "Non BD Handle".';
 
 -- ============ 3a. shop_period_summary ============
+-- Satu view, dua grain periode (keputusan Q2: bulan berjalan + pilih bulan/minggu):
+--   period_kind = 'week'  → period_key = period_start minggu W1–W5
+--   period_kind = 'month' → period_key = tanggal 1 bulan itu
+-- Agregasi (termasuk distinct kreator lintas minggu dalam sebulan) di SQL, bukan JS.
 create or replace view shop_period_summary
 with (security_invoker = on) as
+with grained as (
+  select 'week'::text as period_kind, g.period_start as period_key, g.* from creator_shop_period_gmv g
+  union all
+  select 'month'::text, date_trunc('month', g.period_start)::date, g.* from creator_shop_period_gmv g
+)
 select
-  g.platform,
-  g.shop_id,
-  max(nullif(btrim(g.shop_name), '')) as shop_name,
-  g.period_start,
-  max(g.period_end) as period_end,
-  count(distinct g.creator_id) as creator_count,
-  count(distinct g.creator_id) filter (where coalesce(g.gmv_tap, 0) > 0) as creator_tap_count,
-  sum(g.gmv_mcn) as gmv_mcn,
-  sum(g.gmv_mcn_live) as gmv_mcn_live,
-  sum(g.gmv_mcn_video) as gmv_mcn_video,
-  sum(g.orders_mcn) as orders_mcn,
-  sum(g.items_sold_mcn) as items_sold_mcn,
+  x.platform,
+  x.shop_id,
+  max(nullif(btrim(x.shop_name), '')) as shop_name,
+  x.period_kind,
+  x.period_key,
+  max(x.period_end) as period_end,
+  count(distinct x.creator_id) as creator_count,
+  count(distinct x.creator_id) filter (where coalesce(x.gmv_tap, 0) > 0) as creator_tap_count,
+  sum(x.gmv_mcn) as gmv_mcn,
+  sum(x.gmv_mcn_live) as gmv_mcn_live,
+  sum(x.gmv_mcn_video) as gmv_mcn_video,
+  sum(x.orders_mcn) as orders_mcn,
+  sum(x.items_sold_mcn) as items_sold_mcn,
   -- sum() atas semua NULL = NULL → "GMV TAP belum tersedia" tetap jujur, bukan 0.
-  sum(g.gmv_tap) as gmv_tap,
-  sum(g.gmv_tap_live) as gmv_tap_live,
-  sum(g.gmv_tap_video) as gmv_tap_video,
-  sum(g.orders_tap) as orders_tap,
-  sum(g.est_partner_commission) as est_partner_commission,
-  sum(g.actual_partner_commission) as actual_partner_commission,
-  sum(g.est_creator_commission) as est_creator_commission,
-  sum(g.actual_creator_commission) as actual_creator_commission
-from creator_shop_period_gmv g
-group by g.platform, g.shop_id, g.period_start;
+  sum(x.gmv_tap) as gmv_tap,
+  sum(x.gmv_tap_live) as gmv_tap_live,
+  sum(x.gmv_tap_video) as gmv_tap_video,
+  sum(x.orders_tap) as orders_tap,
+  sum(x.est_partner_commission) as est_partner_commission,
+  sum(x.actual_partner_commission) as actual_partner_commission,
+  sum(x.est_creator_commission) as est_creator_commission,
+  sum(x.actual_creator_commission) as actual_creator_commission
+from grained x
+group by x.platform, x.shop_id, x.period_kind, x.period_key;
 
--- ============ 3b. bizdev_brand_perf ============
+-- ============ 3b. shop_key_map ============
 -- (platform, shop_id) → shop_key lewat products_tap/brand_deals di SQL (ekspresi
 -- shop_key TIDAK disalin ke aplikasi, CLAUDE.md #4/#6). Satu shop_id bisa muncul di
 -- beberapa kartu dengan ejaan nama berbeda → distinct on memilih satu shop_key
--- (kartu produk didahulukan) supaya GMV tidak terhitung dua kali. Shop yang tidak
--- punya kartu/deal (bukan brand ber-deal) tidak masuk view ini. Brand dengan 2
--- handler muncul 2 baris (dihitung penuh di keduanya); tanpa handler → member_id NULL
--- ("Non BD Handle").
+-- (kartu produk didahulukan) supaya GMV tidak terhitung dua kali (K5).
+create or replace view shop_key_map
+with (security_invoker = on) as
+select distinct on (m.platform, m.shop_id) m.platform, m.shop_id, m.shop_key
+from (
+  select p.platform, btrim(p.shop_id) as shop_id, p.shop_key, 1 as pri
+    from products_tap p
+   where p.shop_id is not null and btrim(p.shop_id) <> ''
+  union all
+  select d.platform, btrim(d.shop_id) as shop_id, d.shop_key, 2 as pri
+    from brand_deals d
+   where d.shop_id is not null and btrim(d.shop_id) <> ''
+) m
+order by m.platform, m.shop_id, m.pri, m.shop_key;
+
+-- ============ 3c. bizdev_brand_perf ============
+-- Shop yang tidak punya kartu/deal (bukan brand ber-deal) tidak masuk view ini (K4).
+-- Brand dengan 2 handler muncul 2 baris (dihitung penuh di keduanya); tanpa handler →
+-- member_id NULL ("Non BD Handle").
 create or replace view bizdev_brand_perf
 with (security_invoker = on) as
-with shop_map as (
-  select distinct on (m.platform, m.shop_id) m.platform, m.shop_id, m.shop_key
-  from (
-    select p.platform, btrim(p.shop_id) as shop_id, p.shop_key, 1 as pri
-      from products_tap p
-     where p.shop_id is not null and btrim(p.shop_id) <> ''
-    union all
-    select d.platform, btrim(d.shop_id) as shop_id, d.shop_key, 2 as pri
-      from brand_deals d
-     where d.shop_id is not null and btrim(d.shop_id) <> ''
-  ) m
-  order by m.platform, m.shop_id, m.pri, m.shop_key
-)
 select
   s.platform,
   s.shop_id,
   s.shop_name,
   m.shop_key,
-  s.period_start,
+  s.period_kind,
+  s.period_key,
   s.period_end,
   s.creator_count,
   s.creator_tap_count,
@@ -176,7 +190,7 @@ select
   h.member_id,
   tm.name as member_name
 from shop_period_summary s
-join shop_map m on m.platform = s.platform and m.shop_id = s.shop_id
+join shop_key_map m on m.platform = s.platform and m.shop_id = s.shop_id
 left join brand_bizdev_handlers h on h.shop_key = m.shop_key
 left join team_members tm on tm.id = h.member_id;
 

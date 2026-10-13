@@ -11,6 +11,12 @@ import { CompactScheduleList, type CompactSlotRow } from "../../schedule/compact
 import type { LiveScheduleSlot } from "@/lib/schedule/types";
 import { getWeekStart, getWeekDays } from "@/lib/schedule/week";
 import { todayWib } from "@/lib/utils/date";
+import { PeriodPicker } from "@/components/period-picker";
+import { parsePeriodParam, periodOptions } from "@/lib/m8/period";
+import { buildBizdevSummary, type BizdevPerfRow } from "@/lib/m8/bizdev-summary";
+import { hasLegacyPeriodData, LEGACY_PERIOD_MESSAGE, loadPeriodView } from "@/lib/m8/shop-perf-data";
+import { MIGRATION_0087_MISSING } from "@/lib/db/missing-migration";
+import { BizdevSummary } from "./bizdev-summary";
 
 export const dynamic = "force-dynamic";
 
@@ -24,8 +30,13 @@ interface BrandReportData {
   upgrade_recommendation?: boolean;
 }
 
-export default async function BizdevWorkspacePage() {
+export default async function BizdevWorkspacePage({
+  searchParams,
+}: {
+  searchParams: Promise<{ period?: string }>;
+}) {
   const member = await requireMember();
+  const { period: periodParam } = await searchParams;
   const canRoute = hasPermission("m8.route_campaign", member.role);
   const canBrandAcc = hasPermission("m8.brand_acc", member.role);
   const canHandover = hasPermission("m8.handover", member.role);
@@ -36,6 +47,18 @@ export default async function BizdevWorkspacePage() {
 
   const supabase = await createClient();
 
+  // ===== Summary per BizDev (REVISI_BIZDEV T6) — angka dari view bizdev_brand_perf =====
+  const todayIso = todayWib();
+  const period = parsePeriodParam(periodParam, todayIso);
+  const perf = await loadPeriodView<BizdevPerfRow>(
+    supabase,
+    "bizdev_brand_perf",
+    "platform, shop_id, shop_name, shop_key, creator_count, creator_tap_count, gmv_mcn, gmv_tap, actual_partner_commission, member_id, member_name",
+    period
+  );
+  const summary = buildBizdevSummary(perf.rows);
+  const legacyOnly = !perf.missing && perf.rows.length === 0 && (await hasLegacyPeriodData(supabase, period));
+
   // ===== Ringkasan Brand Lead Bank =====
   const { count: leadsBaru } = canViewLeads
     ? await supabase.from("brand_leads").select("id", { count: "exact", head: true }).eq("status", "baru")
@@ -45,7 +68,6 @@ export default async function BizdevWorkspacePage() {
     : { count: null };
 
   // ===== M13 Jadwal Live (deal BD) — minggu berjalan, deals_by='bd' atau deal_id terisi =====
-  const todayIso = todayWib();
   const bdWeekStart = getWeekStart(new Date());
   const bdWeekDays = getWeekDays(bdWeekStart);
   const bdWeekEnd = bdWeekDays[6];
@@ -160,6 +182,32 @@ export default async function BizdevWorkspacePage() {
           report brand. Deterministik — LLM hanya opsional untuk ringkasan report brand (pola M2).
         </p>
       </div>
+
+      {/* ===== Summary per BizDev — section paling atas (REVISI_BIZDEV T6) ===== */}
+      <section>
+        <div className="flex flex-wrap items-end justify-between gap-3">
+          <div>
+            <h2 className="text-lg font-medium">Summary per BizDev</h2>
+            <p className="mt-1 text-xs text-slate-500">
+              Brand dihandle, GMV MCN, GMV TAP, Actual Revenue Partner, dan % TAP/MCN per BizDev untuk{" "}
+              <strong>{period.label}</strong>. Brand tanpa BizDev tampil sebagai Non BD Handle — assign lewat
+              tombol BizDev di tab <Link href="/deals" className="underline">Deal Brand</Link>.
+            </p>
+          </div>
+          <PeriodPicker value={period.value} options={periodOptions(todayIso)} />
+        </div>
+        <div className="mt-3">
+          {perf.missing ? (
+            <p className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">{MIGRATION_0087_MISSING}</p>
+          ) : perf.rows.length === 0 ? (
+            <p className="rounded-md border border-slate-200 bg-white p-4 text-sm text-slate-500">
+              {legacyOnly ? LEGACY_PERIOD_MESSAGE : `Belum ada data upload brand ber-deal untuk ${period.label}.`}
+            </p>
+          ) : (
+            <BizdevSummary cards={summary.cards} breakdown={summary.breakdown} periodLabel={period.label} />
+          )}
+        </div>
+      </section>
 
       {canViewLeads && (
         <Link
