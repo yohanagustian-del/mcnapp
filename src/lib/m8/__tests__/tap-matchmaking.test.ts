@@ -24,7 +24,7 @@ describe("buildTapMatch", () => {
       totalCreatorTap: 1, totalGmvTap: 600, totalGmvMcnTapUsers: 1000, totalGmvAllCreators: 1500, totalCreators: 3,
     });
     expect(res.tapCreators.map((c) => c.creatorId)).toEqual(["C1"]);
-    expect(res.tapCreators[0]).toMatchObject({ gap: 400, livePct: 0.75, videoPct: 0.25, cmName: "Rina" });
+    expect(res.tapCreators[0]).toMatchObject({ gap: 400, livePct: 0.8, videoPct: 0, cmName: "Rina" });
     expect(res.allCreators.map((c) => c.status)).toEqual(["tap", "no_tap", "no_tap"]);
     expect(res.allCreators[1]).toMatchObject({ cmName: "—", videoPct: 1 });
     expect(res.allCreators[2].name).toBe("C3"); // kreator tanpa profil → id, bukan crash

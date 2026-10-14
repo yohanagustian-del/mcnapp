@@ -5,6 +5,8 @@
  *  - Kreator "pakai TAP" = GMV TAP > 0 di periode itu.
  *  - GAP = GMV MCN − GMV TAP (GMV kreator itu di shop ini yang TIDAK lewat link agency).
  *  - Shopee fase 1 (Q4): GMV TAP null → status "GMV TAP belum tersedia", bukan 0.
+ *  - Live/Video % SELALU dari GMV MCN, juga untuk kreator pakai TAP (K13 = B, keputusan
+ *    user 2026-10-14): sumber konten kreator di shop ini secara keseluruhan.
  */
 
 export interface CreatorShopPerfRow {
@@ -36,7 +38,7 @@ export interface MatchCreatorRow {
   gmvMcn: number;
   gmvTap: number | null;
   gap: number | null;
-  /** Pecahan sumber GMV TAP (kreator pakai TAP) atau GMV MCN (lainnya). */
+  /** Pecahan sumber GMV MCN (live vs video), untuk semua kreator. */
   livePct: number | null;
   videoPct: number | null;
   status: TapStatus;
@@ -76,7 +78,7 @@ const share = (part: number | null, total: number | null) =>
 export function buildTapMatch(rows: CreatorShopPerfRow[], creators: Map<string, CreatorInfo>): TapMatchResult {
   // Satu shop bisa tercatat dengan 2 baris per kreator bila shop_id-nya sama di 2
   // platform — pemanggil sudah memfilter satu platform, tapi tetap dijumlah per kreator.
-  const byCreator = new Map<string, MatchCreatorRow & { liveSrc: number; videoSrc: number; tapLive: number | null; tapVideo: number | null }>();
+  const byCreator = new Map<string, MatchCreatorRow & { liveSrc: number; videoSrc: number }>();
   let shopName = "";
   let platform = "";
   for (const r of rows) {
@@ -88,31 +90,22 @@ export function buildTapMatch(rows: CreatorShopPerfRow[], creators: Map<string, 
       {
         creatorId: r.creator_id, name: info?.name ?? r.creator_id, username: info?.username ?? null,
         cmName: info?.cmName ?? "—", gmvMcn: 0, gmvTap: null, gap: null, livePct: null, videoPct: null,
-        status: "unknown" as TapStatus, liveSrc: 0, videoSrc: 0, tapLive: null, tapVideo: null,
+        status: "unknown" as TapStatus, liveSrc: 0, videoSrc: 0,
       };
     acc.gmvMcn += n(r.gmv_mcn) ?? 0;
     acc.liveSrc += n(r.gmv_mcn_live) ?? 0;
     acc.videoSrc += n(r.gmv_mcn_video) ?? 0;
     const tap = n(r.gmv_tap);
-    if (tap !== null) {
-      acc.gmvTap = (acc.gmvTap ?? 0) + tap;
-      acc.tapLive = (acc.tapLive ?? 0) + (n(r.gmv_tap_live) ?? 0);
-      acc.tapVideo = (acc.tapVideo ?? 0) + (n(r.gmv_tap_video) ?? 0);
-    }
+    if (tap !== null) acc.gmvTap = (acc.gmvTap ?? 0) + tap;
     byCreator.set(r.creator_id, acc);
   }
 
   const all: MatchCreatorRow[] = [];
-  for (const { liveSrc, videoSrc, tapLive, tapVideo, ...c } of byCreator.values()) {
+  for (const { liveSrc, videoSrc, ...c } of byCreator.values()) {
     c.status = c.gmvTap === null ? "unknown" : c.gmvTap > 0 ? "tap" : "no_tap";
     c.gap = c.gmvTap === null ? null : c.gmvMcn - c.gmvTap;
-    if (c.status === "tap") {
-      c.livePct = share(tapLive, c.gmvTap);
-      c.videoPct = share(tapVideo, c.gmvTap);
-    } else {
-      c.livePct = share(liveSrc, c.gmvMcn);
-      c.videoPct = share(videoSrc, c.gmvMcn);
-    }
+    c.livePct = share(liveSrc, c.gmvMcn);
+    c.videoPct = share(videoSrc, c.gmvMcn);
     all.push(c);
   }
   all.sort((a, b) => b.gmvMcn - a.gmvMcn);
