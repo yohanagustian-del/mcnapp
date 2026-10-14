@@ -43,11 +43,15 @@ export default async function BizdevWorkspacePage({
   // ===== Summary per BizDev (REVISI_BIZDEV T6) — angka dari view bizdev_brand_perf =====
   const todayIso = todayWib();
   const period = parsePeriodParam(periodParam, todayIso);
+  // K11 = B: tanpa m8.bizdev_summary_all, hanya brand yang di-handle akun ini (filter di
+  // query server, bukan cuma disembunyikan di UI).
+  const summaryAll = hasPermission("m8.bizdev_summary_all", member.role);
   const perf = await loadPeriodView<BizdevPerfRow>(
     supabase,
     "bizdev_brand_perf",
     "platform, shop_id, shop_name, shop_key, creator_count, creator_tap_count, gmv_mcn, gmv_tap, actual_partner_commission, member_id, member_name",
-    period
+    period,
+    summaryAll ? undefined : (q) => q.eq("member_id", member.id)
   );
   const summary = buildBizdevSummary(perf.rows);
   const legacyOnly = !perf.missing && perf.rows.length === 0 && (await hasLegacyPeriodData(supabase, period));
@@ -177,9 +181,18 @@ export default async function BizdevWorkspacePage({
           <div>
             <h2 className="text-lg font-medium">Summary per BizDev</h2>
             <p className="mt-1 text-xs text-slate-500">
-              Brand dihandle, GMV MCN, GMV TAP, Actual Revenue Partner, dan % TAP/MCN per BizDev untuk{" "}
-              <strong>{period.label}</strong>. Brand tanpa BizDev tampil sebagai Non BD Handle — assign lewat
-              tombol BizDev di tab <Link href="/deals" className="underline">Deal Brand</Link>.
+              {summaryAll ? (
+                <>
+                  Brand dihandle, GMV MCN, GMV TAP, Actual Revenue Partner, dan % TAP/MCN per BizDev untuk{" "}
+                  <strong>{period.label}</strong>. Brand tanpa BizDev tampil sebagai Non BD Handle — assign lewat
+                  tombol BizDev di tab <Link href="/deals" className="underline">Deal Brand</Link>.
+                </>
+              ) : (
+                <>
+                  Brand yang Anda handle untuk <strong>{period.label}</strong>. Summary semua BizDev hanya
+                  terlihat oleh Management &amp; BizDev Lead.
+                </>
+              )}
             </p>
           </div>
           <PeriodPicker value={period.value} options={periodOptions(todayIso)} />
@@ -189,7 +202,9 @@ export default async function BizdevWorkspacePage({
             <p className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">{MIGRATION_0087_MISSING}</p>
           ) : perf.rows.length === 0 ? (
             <p className="rounded-md border border-slate-200 bg-white p-4 text-sm text-slate-500">
-              {legacyOnly ? LEGACY_PERIOD_MESSAGE : `Belum ada data upload brand ber-deal untuk ${period.label}.`}
+              {legacyOnly ? LEGACY_PERIOD_MESSAGE : summaryAll
+                ? `Belum ada data upload brand ber-deal untuk ${period.label}.`
+                : `Belum ada brand yang Anda handle dengan data upload untuk ${period.label}.`}
             </p>
           ) : (
             <BizdevSummary cards={summary.cards} breakdown={summary.breakdown} periodLabel={period.label} />
