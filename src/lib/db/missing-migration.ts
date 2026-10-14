@@ -30,3 +30,7 @@ export function isMissingRelationError(error: SupabaseLikeError | null | undefin
 /** Pesan UI standar untuk fitur Revisi BizDev 2026-10 yang butuh migrasi 0087. */
 export const MIGRATION_0087_MISSING =
   "Migrasi 0087 belum di-apply — fitur ini butuh tabel creator_shop_period_gmv / brand_bizdev_handlers / kolom Report Brand v2. Hubungi admin untuk menjalankan migrasinya.";
+
+/** Pesan untuk GMV TAP tanpa nama kreator (K6) yang butuh migrasi 0088. */
+export const MIGRATION_0088_MISSING =
+  "Migrasi 0088 belum di-apply (tabel creator_shop_period_unattributed_tap). Hubungi admin untuk menjalankan migrasinya.";

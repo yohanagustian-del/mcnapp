@@ -184,7 +184,8 @@ export default async function BizdevWorkspacePage({
               {summaryAll ? (
                 <>
                   Brand dihandle, GMV MCN, GMV TAP, Actual Revenue Partner, dan % TAP/MCN per BizDev untuk{" "}
-                  <strong>{period.label}</strong>. Brand tanpa BizDev tampil sebagai Non BD Handle — assign lewat
+                  <strong>{period.label}</strong>. Brand tanpa BizDev — termasuk shop yang belum punya kartu/deal — tampil
+                  sebagai Non BD Handle. Shop dengan beberapa ejaan nama tampil di tiap nama (GMV dobel). Assign lewat
                   tombol BizDev di tab <Link href="/deals" className="underline">Deal Brand</Link>.
                 </>
               ) : (
@@ -203,7 +204,7 @@ export default async function BizdevWorkspacePage({
           ) : perf.rows.length === 0 ? (
             <p className="rounded-md border border-slate-200 bg-white p-4 text-sm text-slate-500">
               {legacyOnly ? LEGACY_PERIOD_MESSAGE : summaryAll
-                ? `Belum ada data upload brand ber-deal untuk ${period.label}.`
+                ? `Belum ada data upload shop untuk ${period.label}.`
                 : `Belum ada brand yang Anda handle dengan data upload untuk ${period.label}.`}
             </p>
           ) : (

@@ -76,7 +76,7 @@ export default async function TapMatchmakingPage({
     );
     missing = res.missing;
     if (!missing && res.rows.length > 0) {
-      const ids = [...new Set(res.rows.map((r) => r.creator_id))];
+      const ids = [...new Set(res.rows.map((r) => r.creator_id).filter((id): id is string => id !== null))];
       const creators = await fetchAllIn<{ id: string; name: string; username: string | null; owner_cpm_id: string | null }>(
         supabase, "creators", "id, name, username, owner_cpm_id", "id", ids
       );

@@ -50,6 +50,18 @@ describe("buildBrandReportData", () => {
     expect(d.upgrade_recommendation).toBe(false);
   });
 
+  it("baris tanpa nama kreator (creator_id NULL, K6): GMV TAP terhitung, bukan kreator, tanpa tautan", () => {
+    const base = input();
+    const d = buildBrandReportData(input({
+      creators: [...base.creators, { ...row("X", { gmv_tap: 700_000, gmv_tap_live: 700_000, orders_tap: 3 }), creator_id: null }],
+      topCreators: 10,
+    }));
+    expect(d.totals).toMatchObject({ gmv_mcn: 15_500_000, gmv_tap: 2_700_000, creator_count: 3, creator_tap_count: 1 });
+    const none = d.top_creators.find((c) => c.creatorId === null)!;
+    expect(none).toMatchObject({ name: "Nama kreator tidak ada", gmvMcn: 0, gmvTap: 700_000 });
+    expect(d.untapped.creators.some((c) => c.creatorId === null)).toBe(false);
+  });
+
   it("GMV TAP null (Shopee fase 1) tetap null, bukan nol; kandidat TAP tidak dinilai", () => {
     const d = buildBrandReportData(input({
       creators: [row("A", { gmv_mcn: 3_000_000, gmv_tap: null, gmv_tap_live: null, gmv_tap_video: null, orders_tap: null })],

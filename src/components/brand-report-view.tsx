@@ -80,7 +80,11 @@ export function BrandReportView({ data, texts }: { data: BrandReportData; texts:
             <Table
               head={["Kreator", "CM", "GMV MCN", "GMV TAP", "Live", "Video", "Order"]}
               rows={data.top_creators.map((c) => [
-                <Link key={c.creatorId} href={`/creators/${c.creatorId}`} className="underline">{c.name}</Link>,
+                c.creatorId ? (
+                  <Link key={c.creatorId} href={`/creators/${c.creatorId}`} className="underline">{c.name}</Link>
+                ) : (
+                  <span key="__no_creator__" className="italic text-slate-500">{c.name}</span>
+                ),
                 c.cmName ?? "—",
                 rp(c.gmvMcn),
                 c.gmvTap === null ? NA_TAP : rp(c.gmvTap),

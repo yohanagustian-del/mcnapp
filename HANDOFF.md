@@ -1,6 +1,6 @@
 # HANDOFF — MCN MEA Platform
 
-Status per sesi 2026-10-13 (Revisi BizDev T1–T10). Baca ini + `CLAUDE.md` sebelum lanjut.
+Status per sesi 2026-10-14 (Revisi BizDev T1–T10 + F1–F3). Baca ini + `CLAUDE.md` sebelum lanjut.
 
 ## ⚡ SESI 2026-10-13 — Revisi BizDev T1–T10 (plan `docs/plans/REVISI_BIZDEV_2026-10.md`, mode full-auto)
 1. **Merged**: T1 #106 nav audit + hapus section Pipeline · T2 #107 segmentasi harga Shopee (Qty/Harga) · T3 #108 file migrasi 0087 · T4 #109 ingest menulis `creator_shop_period_gmv` · T5 #110 BizDev handler per brand (maks 2, Edit/Registrasi Deal/upload Excel, "Non BD Handle") · T6 #111 summary per BizDev di `/workspace/bizdev` · T7 #112 `/tap-matchmaking` · T8 #113 Brand Lead Bank → Registrasi Deal (`lib/leads/convert.ts`) · T9 #114 Report Brand v2 `/brand-reports` (0 LLM). T10 = PR dokumen ini.
@@ -8,6 +8,8 @@ Status per sesi 2026-10-13 (Revisi BizDev T1–T10). Baca ini + `CLAUDE.md` sebe
 3. **Backfill (execute_sql, tercatat di audit_logs type auto)**: production `platform='shopee'` → `creator_subcat_segment_gmv` 124.928 baris, `creator_period_summary` 11.042 baris; seed `brand_bizdev_handlers` 59 baris / 58 brand (dari `products_tap.deal_by` + `brand_deals.created_by`, hanya member aktif ber-role BIZDEV, maks 2, urut jumlah kartu). Staging: 0/0/0 (tidak ada data yang cocok).
 4. **Aksi user**: upload ulang file mingguan September W1–W5 via `/ingest` berurutan (Q6) — sampai itu summary BizDev, TAP Matchmaking, Report Brand v2 menampilkan "belum diupload dengan versi baru". Setelah upload: cek `select count(*) from creator_shop_period_gmv` > 0.
 5. Keputusan konservatif K1–K23 ada di plan §7, menunggu jawaban user; jawaban yang berbeda = PR lanjutan.
+6. **Jawaban user 2026-10-14** (K lain = A): F1 #116 K3=B catatan asal segmen di Product Match + K13=B Live/Video % TAP Matchmaking selalu dari GMV MCN · F2 #117 K11=B summary BizDev: Management + BizDev Lead semua brand, BizDev lain hanya brand miliknya (`m8.bizdev_summary_all`) · F3 (PR berikutnya) K4=B semua toko masuk summary (non-deal = Non BD Handle), K5=C shop_id dengan beberapa ejaan Shop Name tampil di tiap `shop_key` (GMV dobel, disengaja), K6 GMV TAP tanpa nama kreator → tabel `creator_shop_period_unattributed_tap`, tampil "Nama kreator tidak ada" dan tetap terhitung di GMV TAP shop (tidak lagi dibagi proporsional).
+7. **Migrasi 0088 SUDAH APPLY** (staging + production, satu entri ledger `0088_shop_period_unattributed_all_shops`) — ditulis TANPA pernyataan hapus policy/trigger (policy lewat blok `do $$ … if not exists`), sesuai catatan K23. Production setelah apply: `bizdev_brand_perf` 12.016 → 18.056 baris (6.010 baris shop non-deal), 31 shop_id punya >1 `shop_key`. `get_advisors` security tanpa temuan baru. GMV "Nama kreator tidak ada" baru terisi setelah upload ulang September W1–W5.
 
 ## ⚡ SESI 2026-10-01 — Portal Kreator: password sementara + Reset Password (opsi A+B)
 1. User meminta password default "@Mcnmea" untuk semua kreator + lupa password otomatis kembali ke "@Mcnmea". Ditolak karena siapa pun yang tahu email kreator bisa masuk ke akunnya; user memilih pengganti A+B (lihat CLAUDE.md #9).
