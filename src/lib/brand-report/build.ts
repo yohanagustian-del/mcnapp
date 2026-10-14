@@ -1,4 +1,5 @@
 import { shouldRecommendUpgrade } from "@/lib/m8/routing";
+import { NO_CREATOR_LABEL } from "@/lib/m8/shop-perf-data";
 
 /**
  * Report Brand v2 (REVISI_BIZDEV T9) — angka. Murni, 0 LLM.
@@ -15,7 +16,8 @@ import { shouldRecommendUpgrade } from "@/lib/m8/routing";
 export const BRAND_REPORT_SCHEMA_VERSION = 2;
 
 export interface BrandReportCreatorRow {
-  creator_id: string;
+  /** NULL = GMV TAP tanpa nama kreator (migrasi 0088, K6). */
+  creator_id: string | null;
   gmv_mcn: number | string | null;
   gmv_mcn_live: number | string | null;
   gmv_mcn_video: number | string | null;
@@ -61,7 +63,8 @@ export interface BrandReportInput {
 }
 
 export interface BrandReportCreator {
-  creatorId: string;
+  /** null = baris "Nama kreator tidak ada" (GMV TAP tetap terhitung, bukan kreator). */
+  creatorId: string | null;
   name: string;
   cmName: string | null;
   gmvMcn: number;
@@ -124,10 +127,10 @@ const sumNullable = (vals: (number | null)[]): number | null =>
 
 export function buildBrandReportData(input: BrandReportInput): BrandReportData {
   const creators: BrandReportCreator[] = input.creators.map((r) => {
-    const info = input.creatorInfo.get(r.creator_id);
+    const info = r.creator_id ? input.creatorInfo.get(r.creator_id) : undefined;
     return {
       creatorId: r.creator_id,
-      name: info?.name ?? r.creator_id,
+      name: r.creator_id ? info?.name ?? r.creator_id : NO_CREATOR_LABEL,
       cmName: info?.cmName ?? null,
       gmvMcn: num(r.gmv_mcn),
       gmvTap: numOrNull(r.gmv_tap),
@@ -185,8 +188,8 @@ export function buildBrandReportData(input: BrandReportInput): BrandReportData {
       gmv_tap_video: tapVideo,
       orders_mcn: creators.reduce((s, c) => s + c.orders, 0),
       orders_tap: ordersTap,
-      creator_count: creators.filter((c) => c.gmvMcn > 0 || (c.gmvTap ?? 0) > 0).length,
-      creator_tap_count: creators.filter((c) => (c.gmvTap ?? 0) > 0).length,
+      creator_count: creators.filter((c) => c.creatorId !== null && (c.gmvMcn > 0 || (c.gmvTap ?? 0) > 0)).length,
+      creator_tap_count: creators.filter((c) => c.creatorId !== null && (c.gmvTap ?? 0) > 0).length,
       actual_partner_commission: input.creators.reduce((s, r) => s + num(r.actual_partner_commission), 0),
     },
     top_creators: byGmv.slice(0, Math.max(0, input.topCreators)),

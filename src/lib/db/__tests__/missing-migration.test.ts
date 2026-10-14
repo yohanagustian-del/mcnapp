@@ -43,3 +43,26 @@ describe("migrasi 0087 — penjaga CLAUDE.md #9", () => {
     expect(sql).not.toMatch(/alter table platform_alerts/);
   });
 });
+
+describe("migrasi 0088 — penjaga CLAUDE.md #9 & apply_migration (K23)", () => {
+  const sql = readFileSync(
+    join(process.cwd(), "supabase/migrations/0088_shop_period_unattributed_all_shops.sql"),
+    "utf8"
+  );
+
+  it("tabel baru punya restrictive deny is_creator_user()", () => {
+    const tables = [...sql.matchAll(/create table if not exists (\w+)/g)].map((m) => m[1]);
+    expect(tables).toEqual(["creator_shop_period_unattributed_tap"]);
+    expect(sql).toMatch(/on creator_shop_period_unattributed_tap as restrictive for select\s+using \(not is_creator_user\(\)\)/);
+  });
+
+  it("keempat view tetap security_invoker", () => {
+    for (const v of ["shop_period_summary", "shop_key_map", "bizdev_brand_perf", "creator_shop_perf"]) {
+      expect(sql).toMatch(new RegExp(`create or replace view ${v}\\s+with \\(security_invoker = on\\)`));
+    }
+  });
+
+  it("tanpa DROP POLICY/TRIGGER (apply_migration menggantung, HANDOFF 2026-10-13)", () => {
+    expect(sql).not.toMatch(/drop\s+(policy|trigger)/i);
+  });
+});

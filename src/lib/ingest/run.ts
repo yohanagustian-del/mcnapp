@@ -331,15 +331,16 @@ export async function runIngest(input: RunIngestInput): Promise<RunIngestResult>
     });
     const shopPeriod = buildCreatorShopPeriod(resolvedMcnRows, tapForShop, tapParsed.rows.length > 0);
     const shopPeriodWrite = await writeCreatorShopPeriod(
-      admin, "tiktok", batchId, [...creatorIdsSet], periodStart, periodEnd, shopPeriod.rows
+      admin, "tiktok", batchId, [...creatorIdsSet], periodStart, periodEnd, shopPeriod.rows, shopPeriod.unattributed
     );
     if (shopPeriodWrite.skipped) skipped.push({ row: -1, reason: shopPeriodWrite.skipped });
     if (shopPeriod.unattributedTapGmv > 0) {
       skipped.push({
         row: -1,
         reason:
-          `GMV TAP Rp${Math.round(shopPeriod.unattributedTapGmv).toLocaleString("id-ID")} tidak bisa ` +
-          `diatribusikan ke kreator di file MCN ini — tidak masuk agregat per shop.`,
+          `GMV TAP Rp${Math.round(shopPeriod.unattributedTapGmv).toLocaleString("id-ID")} tidak punya nama ` +
+          `kreator yang dikenali di file MCN ini — dicatat per shop sebagai "Nama kreator tidak ada" ` +
+          `(tetap terhitung di GMV TAP shop).`,
       });
     }
 

@@ -11,6 +11,19 @@ const creators = new Map([
 ]);
 
 describe("buildTapMatch", () => {
+  it("baris creator_id NULL (K6) → \"Nama kreator tidak ada\": GMV TAP ikut total, tidak dihitung kreator, tanpa GAP", () => {
+    const res = buildTapMatch(
+      [
+        r({ creator_id: "C1", gmv_mcn: 1000, gmv_tap: 600 }),
+        r({ creator_id: null, gmv_mcn: 0, gmv_tap: 400 }),
+      ],
+      creators
+    );
+    expect(res.header).toMatchObject({ totalCreatorTap: 1, totalGmvTap: 1000, totalCreators: 1 });
+    const none = res.allCreators.find((c) => c.creatorId === null)!;
+    expect(none).toMatchObject({ name: "Nama kreator tidak ada", status: "tap", gmvTap: 400, gap: null, livePct: null });
+  });
+
   it("header + tabel kiri (pakai TAP) + kanan (semua) + GAP + sumber live/video", () => {
     const res = buildTapMatch(
       [

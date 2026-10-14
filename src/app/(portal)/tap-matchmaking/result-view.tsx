@@ -104,7 +104,7 @@ export function TapMatchResultView({ result, fileName }: { result: TapMatchResul
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {left.visibleRows.map((c) => (
-                  <tr key={c.creatorId}>
+                  <tr key={c.creatorId ?? "__no_creator__"}>
                     <td className={`${td} font-medium`}>{c.username ? `@${c.username}` : c.name}</td>
                     <td className={tdNum}>{rp(c.gmvTap)}</td>
                     <td className={tdNum}>{rp(c.gmvMcn)}</td>
@@ -151,7 +151,7 @@ export function TapMatchResultView({ result, fileName }: { result: TapMatchResul
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {right.visibleRows.map((c) => (
-                  <tr key={c.creatorId}>
+                  <tr key={c.creatorId ?? "__no_creator__"}>
                     <td className={`${td} font-medium`}>{c.username ? `@${c.username}` : c.name}</td>
                     <td className={tdNum}>{rp(c.gmvMcn)}</td>
                     <td className={td}>

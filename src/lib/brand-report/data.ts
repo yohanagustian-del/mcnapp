@@ -85,16 +85,21 @@ export async function loadBrandReportSource(
     throw new Error(`Gagal memuat tren mingguan: ${weekErr.message}`);
   }
 
-  const { data: keyRow } = await client
-    .from("shop_key_map").select("shop_key").eq("platform", platform).eq("shop_id", shopId).maybeSingle();
-  const shopKey = (keyRow?.shop_key as string | null) ?? null;
+  // Satu shop_id bisa punya beberapa shop_key (ejaan Shop Name berbeda, K5 = C): report
+  // memakai kunci pertama (urut abjad) sebagai pemilik, produk dari SEMUA kuncinya.
+  const { data: keyRows } = await client
+    .from("shop_key_map").select("shop_key").eq("platform", platform).eq("shop_id", shopId).order("shop_key");
+  const shopKeys = ((keyRows ?? []) as { shop_key: string | null }[])
+    .map((k) => k.shop_key)
+    .filter((k): k is string => !!k);
+  const shopKey = shopKeys[0] ?? null;
 
   let products: BrandReportProductRow[] = [];
-  if (shopKey) {
+  if (shopKeys.length > 0) {
     const { data: prod, error: prodErr } = await client
       .from("products_tap")
       .select("campaign_id, product_id, product_name, price, commission_pct, partner_commission_pct, effective_end, affiliate_gmv, active")
-      .eq("shop_key", shopKey)
+      .in("shop_key", shopKeys)
       .or(`effective_end.is.null,effective_end.gte.${todayIso}`);
     if (prodErr) throw new Error(`Gagal memuat Produk TAP: ${prodErr.message}`);
     products = ((prod ?? []) as (BrandReportProductRow & { active: boolean | null })[])
@@ -102,7 +107,7 @@ export async function loadBrandReportSource(
       .map(({ active: _active, ...p }) => p);
   }
 
-  const ids = [...new Set(perf.rows.map((r) => r.creator_id))];
+  const ids = [...new Set(perf.rows.map((r) => r.creator_id).filter((id): id is string => id !== null))];
   const creators = await fetchAllIn<{ id: string; name: string; owner_cpm_id: string | null }>(
     client, "creators", "id, name, owner_cpm_id", "id", ids
   );

@@ -111,7 +111,7 @@ export function BizdevSummary({
               {controls.visibleRows.map((r) => (
                 <tr key={r.key} className="hover:bg-slate-50">
                   <td className={`${td} ${r.memberId ? "" : "text-slate-500"}`}>{r.memberName}</td>
-                  <td className={`${td} max-w-[16rem] truncate font-medium`} title={r.shopKey}>{r.shopName}</td>
+                  <td className={`${td} max-w-[16rem] truncate font-medium`} title={r.shopKey ?? "Shop tanpa kartu/deal"}>{r.shopName}</td>
                   <td className={td}>{r.platform}</td>
                   <td className={tdNum} title={`${r.creatorTapCount} kreator memakai TAP`}>
                     {r.creatorCount.toLocaleString("id-ID")}

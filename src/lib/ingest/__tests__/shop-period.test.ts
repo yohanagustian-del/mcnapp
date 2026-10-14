@@ -91,27 +91,36 @@ describe("buildCreatorShopPeriod (TikTok MCN + TAP)", () => {
     expect(rows.find((r) => r.shopId === "7001")!.gmvTap).toBe(300_000);
   });
 
-  it("TAP tanpa kreator di file multi-kreator → dibagi proporsional GMV MCN di shop itu", () => {
-    const { rows, unattributedTapGmv } = buildCreatorShopPeriod(
-      MCN, [{ ...tap({ affiliateGmv: 400_000 }), creatorName: "" }], true
-    );
-    // Shop 7001: A = 1.500.000, B = 500.000 → 75% / 25%.
-    expect(rows.find((r) => r.creatorId === "CRT-A" && r.shopId === "7001")!.gmvTap).toBe(300_000);
-    expect(rows.find((r) => r.creatorId === "CRT-B" && r.shopId === "7001")!.gmvTap).toBe(100_000);
-    expect(unattributedTapGmv).toBe(0);
-  });
-
-  it("nama TAP tak ter-resolve (null) atau shop tanpa GMV MCN → dilaporkan, tidak ditebak", () => {
-    const { rows, unattributedTapGmv } = buildCreatorShopPeriod(
+  it("TAP tanpa kreator di file multi-kreator → TIDAK dibagi: per shop sebagai \"Nama kreator tidak ada\" (K6)", () => {
+    const { rows, unattributed, unattributedTapGmv } = buildCreatorShopPeriod(
       MCN,
-      [
-        { ...tap({ affiliateGmv: 100_000 }), creatorName: null },
-        { ...tap({ affiliateGmv: 50_000, shopId: "7999" }), creatorName: "" },
-      ],
+      [{ ...tap({ affiliateGmv: 400_000, affiliateLiveGmv: 100_000, orders: 4, actualPartnerCommission: 20_000 }), creatorName: "" }],
       true
     );
+    // Kreator shop 7001 tetap 0 (file TAP ada, baris bernama tidak ada).
+    expect(rows.find((r) => r.creatorId === "CRT-A" && r.shopId === "7001")!.gmvTap).toBe(0);
+    expect(rows.find((r) => r.creatorId === "CRT-B" && r.shopId === "7001")!.gmvTap).toBe(0);
+    expect(unattributed).toEqual([
+      expect.objectContaining({
+        shopId: "7001", shopName: "Toko Satu", gmvTap: 400_000, gmvTapLive: 100_000, ordersTap: 4,
+        actualPartnerCommission: 20_000, estPartnerCommission: null,
+      }),
+    ]);
+    expect(unattributedTapGmv).toBe(400_000);
+  });
+
+  it("nama TAP tak ter-resolve (null) & shop tanpa GMV MCN → ikut dicatat per shop, tidak ditebak", () => {
+    const tapRows = [
+      { ...tap({ affiliateGmv: 100_000 }), creatorName: null },
+      { ...tap({ affiliateGmv: 50_000, shopId: "7999", shopName: "Toko Lain" }), creatorName: "" },
+    ];
+    const { rows, unattributed, unattributedTapGmv } = buildCreatorShopPeriod(MCN, tapRows, true);
     expect(unattributedTapGmv).toBe(150_000);
+    expect(unattributed.map((u) => [u.shopId, u.gmvTap]).sort()).toEqual([["7001", 100_000], ["7999", 50_000]]);
     expect(rows.every((r) => r.shopId !== "7999")).toBe(true);
+    // Invariant: Σ gmvTap kreator + Σ tanpa kreator = Σ TAP file.
+    const sumRows = rows.reduce((a, r) => a + (r.gmvTap ?? 0), 0);
+    expect(sumRows + unattributedTapGmv).toBe(150_000);
   });
 });
 
@@ -137,19 +146,25 @@ describe("buildShopeeCreatorShopPeriod", () => {
 
 // ─── writer ───
 interface Op { table: string; op: "delete" | "insert"; filters: [string, unknown][]; rows?: unknown[] }
-function mockAdmin(ops: Op[], error: { code?: string; message: string } | null = null): SupabaseClient {
+type MockErr = { code?: string; message: string } | null;
+function mockAdmin(ops: Op[], error: MockErr | ((table: string) => MockErr) = null): SupabaseClient {
   return {
     from: (table: string) => ({
       delete: () => {
         const entry: Op = { table, op: "delete", filters: [] };
         ops.push(entry);
+        const err = typeof error === "function" ? error(table) : error;
         const chain = {
           eq: (c: string, v: unknown) => { entry.filters.push([c, v]); return chain; },
-          in: (c: string, v: unknown) => { entry.filters.push([c, v]); return Promise.resolve({ error }); },
+          in: (c: string, v: unknown) => { entry.filters.push([c, v]); return Promise.resolve({ error: err }); },
+          overlaps: (c: string, v: unknown) => { entry.filters.push([c, v]); return Promise.resolve({ error: err }); },
         };
         return chain;
       },
-      insert: (rows: unknown[]) => { ops.push({ table, op: "insert", filters: [], rows }); return Promise.resolve({ error }); },
+      insert: (rows: unknown[]) => {
+        ops.push({ table, op: "insert", filters: [], rows });
+        return Promise.resolve({ error: typeof error === "function" ? error(table) : error });
+      },
     }),
   } as unknown as SupabaseClient;
 }
@@ -170,6 +185,45 @@ describe("writeCreatorShopPeriod", () => {
       platform: "tiktok", period_start: "2026-09-01", period_end: "2026-09-07",
       upload_batch: "ingest:2026-09-01:abcd", creator_id: "CRT-A", shop_id: "7001", gmv_mcn: 1_500_000, gmv_tap: 800_000,
     });
+  });
+
+  it("GMV TAP tanpa kreator → hapus batch yang sama + upload lama yang memuat kreator file ini (overlap), lalu insert per shop", async () => {
+    const res0 = buildCreatorShopPeriod(MCN, [{ ...tap({ affiliateGmv: 400_000 }), creatorName: "" }], true);
+    const ops: Op[] = [];
+    const res = await writeCreatorShopPeriod(
+      mockAdmin(ops), "tiktok", "ingest:2026-09-01:abcd", ["CRT-A", "CRT-B"], "2026-09-01", "2026-09-07", res0.rows, res0.unattributed
+    );
+    expect(res.skipped).toBeNull();
+    const u = ops.filter((o) => o.table === "creator_shop_period_unattributed_tap");
+    expect(u[0]).toMatchObject({
+      op: "delete",
+      filters: [["platform", "tiktok"], ["upload_batch", "ingest:2026-09-01:abcd"]],
+    });
+    expect(u[1]).toMatchObject({
+      op: "delete",
+      filters: [["platform", "tiktok"], ["period_start", "2026-09-01"], ["source_creator_ids", ["CRT-A", "CRT-B"]]],
+    });
+    expect(u[2].op).toBe("insert");
+    expect(u[2].rows).toEqual([
+      expect.objectContaining({
+        platform: "tiktok", shop_id: "7001", period_start: "2026-09-01", upload_batch: "ingest:2026-09-01:abcd",
+        source_creator_ids: ["CRT-A", "CRT-B"], gmv_tap: 400_000,
+      }),
+    ]);
+  });
+
+  it("migrasi 0088 belum ada → agregat per kreator tetap tertulis, GMV tanpa kreator dilaporkan", async () => {
+    const res0 = buildCreatorShopPeriod(MCN, [{ ...tap({ affiliateGmv: 400_000 }), creatorName: "" }], true);
+    const missing = (t: string) =>
+      t === "creator_shop_period_unattributed_tap" ? { code: "PGRST205", message: "Could not find the table" } : null;
+    const res = await writeCreatorShopPeriod(
+      mockAdmin([], missing), "tiktok", "b", ["CRT-A", "CRT-B"], "2026-09-01", "2026-09-07", res0.rows, res0.unattributed
+    );
+    expect(res.written).toBe(res0.rows.length);
+    expect(res.skipped).toMatch(/Migrasi 0088 belum di-apply/);
+    // Tanpa baris tanpa-kreator, tabel yang belum ada tidak perlu dilaporkan.
+    const quiet = await writeCreatorShopPeriod(mockAdmin([], missing), "tiktok", "b", ["CRT-A"], "2026-09-01", "2026-09-07", res0.rows);
+    expect(quiet.skipped).toBeNull();
   });
 
   it("tabel belum ada (migrasi 0087 belum di-apply) → dilewati dengan pesan, TIDAK melempar", async () => {

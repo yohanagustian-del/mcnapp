@@ -7,7 +7,9 @@ import { NON_BD_HANDLE_LABEL } from "@/lib/deals/bizdev-handler-spec";
  *
  * Aturan:
  * - Brand dengan 2 BizDev dihitung PENUH di keduanya (bukan dibagi dua) — ditulis di UI.
- * - member_id null = "Non BD Handle", selalu kartu terakhir.
+ * - member_id null = "Non BD Handle", selalu kartu terakhir. Sejak 0088 (K4 = B) ini
+ *   juga memuat shop tanpa kartu/deal (shop_key null), dikenali per (platform, shop_id).
+ * - Satu shop_id dengan beberapa shop_key (K5 = C) tampil di tiap shop_key — dobel disengaja.
  * - GMV TAP null (Shopee fase 1, Q4) tidak dianggap 0: GMV TAP & %TAP/MCN hanya dari
  *   baris yang data TAP-nya ada; GMV MCN baris tanpa data TAP dilaporkan terpisah.
  */
@@ -16,7 +18,8 @@ export interface BizdevPerfRow {
   platform: string;
   shop_id: string;
   shop_name: string | null;
-  shop_key: string;
+  /** NULL = shop tanpa kartu/deal (K4 = B, migrasi 0088) — selalu "Non BD Handle". */
+  shop_key: string | null;
   creator_count: number | string | null;
   creator_tap_count: number | string | null;
   gmv_mcn: number | string | null;
@@ -47,7 +50,7 @@ export interface BizdevBreakdownRow extends Totals {
   key: string;
   memberId: string | null;
   memberName: string;
-  shopKey: string;
+  shopKey: string | null;
   shopName: string;
   platform: string;
   creatorCount: number;
@@ -88,26 +91,27 @@ export function buildBizdevSummary(rows: BizdevPerfRow[]): { cards: BizdevCard[]
 
   for (const r of rows) {
     const memberKey = r.member_id ?? "__non_bd__";
+    const brandKey = r.shop_key ?? `shop:${r.platform}:${r.shop_id}`;
     const memberName = r.member_id ? (r.member_name ?? "—") : NON_BD_HANDLE_LABEL;
 
     const card =
       cards.get(memberKey) ??
       { ...emptyTotals(), memberId: r.member_id, memberName, brandCount: 0, shops: new Set<string>() };
     addRow(card, r);
-    card.shops.add(r.shop_key);
+    card.shops.add(brandKey);
     cards.set(memberKey, card);
 
-    const bKey = `${memberKey}|${r.shop_key}`;
+    const bKey = `${memberKey}|${brandKey}`;
     const b =
       breakdown.get(bKey) ??
       {
         ...emptyTotals(), key: bKey, memberId: r.member_id, memberName, shopKey: r.shop_key,
-        shopName: r.shop_name ?? r.shop_key, platform: r.platform, creatorCount: 0, creatorTapCount: 0,
+        shopName: r.shop_name ?? r.shop_key ?? `#${r.shop_id}`, platform: r.platform, creatorCount: 0, creatorTapCount: 0,
       };
     addRow(b, r);
     b.creatorCount += num(r.creator_count) ?? 0;
     b.creatorTapCount += num(r.creator_tap_count) ?? 0;
-    if (b.shopName === b.shopKey && r.shop_name) b.shopName = r.shop_name;
+    if ((b.shopName === b.shopKey || b.shopName === `#${r.shop_id}`) && r.shop_name) b.shopName = r.shop_name;
     breakdown.set(bKey, b);
   }
 

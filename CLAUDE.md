@@ -57,6 +57,12 @@ Platform internal MCN MEA (agency creator TikTok/Shopee). Menggabungkan tools te
   bulan di SQL) lewat `lib/m8/shop-perf-data.ts` + util periode `lib/m8/period.ts` — jangan hitung
   ulang GMV per shop di JS dan jangan bikin parser periode kedua. `gmv_tap` NULL = data TAP tidak
   ada (Shopee fase 1), bukan nol. Batch sebelum 0087 tidak punya baris → UI bilang "upload ulang".
+  Sejak 0088 (jawaban user 2026-10-14): GMV TAP yang tidak bisa dikaitkan ke kreator file MCN TIDAK
+  dibagi proporsional — ditulis ke `creator_shop_period_unattributed_tap` dan masuk view sebagai
+  `creator_id` NULL = label "Nama kreator tidak ada" (`NO_CREATOR_LABEL`), terhitung di GMV TAP shop
+  tapi tidak di jumlah kreator. `bizdev_brand_perf` memuat SEMUA shop (non-deal = `shop_key` NULL =
+  "Non BD Handle"); `shop_key_map` boleh memetakan satu `shop_id` ke beberapa `shop_key` (ejaan Shop
+  Name berbeda → GMV tampil dobel, disengaja) — jangan `maybeSingle()` ke view itu.
 - **Report Kreator (M2) v2 = 0 LLM.** Angka dari `lib/report/build.ts`, SEMUA kalimat (ringkasan,
   insight box, badge produk, rekomendasi) dari `lib/report/rules.ts` + ambang `app_config`
   (`m2.report_rules`, `m2.live_benchmarks`). `token_used` selalu 0. Tim hanya boleh menyunting

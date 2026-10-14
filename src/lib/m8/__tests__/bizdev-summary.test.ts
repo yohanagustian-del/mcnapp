@@ -7,6 +7,21 @@ const r = (o: Partial<BizdevPerfRow>): BizdevPerfRow => ({
   member_id: null, member_name: null, ...o,
 });
 
+describe("buildBizdevSummary — shop tanpa kartu/deal & ejaan ganda (K4 = B, K5 = C)", () => {
+  it("shop_key NULL masuk Non BD Handle, dikenali per (platform, shop_id); shop_id dengan 2 shop_key tampil dobel", () => {
+    const { cards, breakdown } = buildBizdevSummary([
+      r({ shop_key: null, shop_name: "Toko Non Deal", shop_id: "9001", gmv_mcn: 300 }),
+      r({ shop_key: null, shop_name: null, shop_id: "9002", gmv_mcn: 200 }),
+      r({ shop_key: "tiktok:DVARA", shop_name: "DVARA", shop_id: "5", gmv_mcn: 100, member_id: "u1", member_name: "Rina" }),
+      r({ shop_key: "tiktok:Dvara Official", shop_name: "DVARA", shop_id: "5", gmv_mcn: 100, member_id: "u1", member_name: "Rina" }),
+    ]);
+    expect(cards.find((c) => c.memberId === null)).toMatchObject({ brandCount: 2, gmvMcn: 500 });
+    expect(cards.find((c) => c.memberId === "u1")).toMatchObject({ brandCount: 2, gmvMcn: 200 });
+    expect(breakdown.find((b) => b.shopKey === null && b.shopName === "#9002")).toBeTruthy();
+    expect(breakdown).toHaveLength(4);
+  });
+});
+
 describe("buildBizdevSummary", () => {
   const rows: BizdevPerfRow[] = [
     // Brand A dipegang Rina & Budi → dihitung penuh di keduanya.

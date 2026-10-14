@@ -5,13 +5,18 @@
  *  - Kreator "pakai TAP" = GMV TAP > 0 di periode itu.
  *  - GAP = GMV MCN − GMV TAP (GMV kreator itu di shop ini yang TIDAK lewat link agency).
  *  - Shopee fase 1 (Q4): GMV TAP null → status "GMV TAP belum tersedia", bukan 0.
+ *  - creator_id NULL (migrasi 0088, K6) = GMV TAP tanpa nama kreator: tampil sebagai
+ *    "Nama kreator tidak ada", GMV TAP-nya ikut total, tapi tidak dihitung sebagai kreator.
  *  - Live/Video % SELALU dari GMV MCN, juga untuk kreator pakai TAP (K13 = B, keputusan
  *    user 2026-10-14): sumber konten kreator di shop ini secara keseluruhan.
  */
 
+import { NO_CREATOR_LABEL } from "./shop-perf-data";
+
 export interface CreatorShopPerfRow {
   platform: string;
-  creator_id: string;
+  /** NULL = GMV TAP tanpa nama kreator (migrasi 0088). */
+  creator_id: string | null;
   shop_id: string;
   shop_name: string | null;
   gmv_mcn: number | string | null;
@@ -31,7 +36,8 @@ export interface CreatorInfo {
 export type TapStatus = "tap" | "no_tap" | "unknown";
 
 export interface MatchCreatorRow {
-  creatorId: string;
+  /** null = baris "Nama kreator tidak ada". */
+  creatorId: string | null;
   name: string;
   username: string | null;
   cmName: string;
@@ -72,6 +78,7 @@ const n = (v: unknown): number | null => {
   const x = Number(v);
   return Number.isFinite(x) ? x : null;
 };
+const NO_CREATOR_KEY = "__no_creator__";
 const share = (part: number | null, total: number | null) =>
   part !== null && total !== null && total > 0 ? part / total : null;
 
@@ -84,11 +91,12 @@ export function buildTapMatch(rows: CreatorShopPerfRow[], creators: Map<string, 
   for (const r of rows) {
     if (!shopName && r.shop_name) shopName = r.shop_name;
     if (!platform) platform = r.platform;
-    const info = creators.get(r.creator_id);
+    const mapKey = r.creator_id ?? NO_CREATOR_KEY;
+    const info = r.creator_id ? creators.get(r.creator_id) : undefined;
     const acc =
-      byCreator.get(r.creator_id) ??
+      byCreator.get(mapKey) ??
       {
-        creatorId: r.creator_id, name: info?.name ?? r.creator_id, username: info?.username ?? null,
+        creatorId: r.creator_id, name: r.creator_id ? info?.name ?? r.creator_id : NO_CREATOR_LABEL, username: info?.username ?? null,
         cmName: info?.cmName ?? "—", gmvMcn: 0, gmvTap: null, gap: null, livePct: null, videoPct: null,
         status: "unknown" as TapStatus, liveSrc: 0, videoSrc: 0,
       };
@@ -97,13 +105,14 @@ export function buildTapMatch(rows: CreatorShopPerfRow[], creators: Map<string, 
     acc.videoSrc += n(r.gmv_mcn_video) ?? 0;
     const tap = n(r.gmv_tap);
     if (tap !== null) acc.gmvTap = (acc.gmvTap ?? 0) + tap;
-    byCreator.set(r.creator_id, acc);
+    byCreator.set(mapKey, acc);
   }
 
   const all: MatchCreatorRow[] = [];
   for (const { liveSrc, videoSrc, ...c } of byCreator.values()) {
     c.status = c.gmvTap === null ? "unknown" : c.gmvTap > 0 ? "tap" : "no_tap";
-    c.gap = c.gmvTap === null ? null : c.gmvMcn - c.gmvTap;
+    // Baris tanpa kreator tidak punya GMV MCN pembanding → GAP tidak berarti.
+    c.gap = c.gmvTap === null || c.creatorId === null ? null : c.gmvMcn - c.gmvTap;
     c.livePct = share(liveSrc, c.gmvMcn);
     c.videoPct = share(videoSrc, c.gmvMcn);
     all.push(c);
@@ -117,11 +126,11 @@ export function buildTapMatch(rows: CreatorShopPerfRow[], creators: Map<string, 
     platform,
     tapKnown,
     header: {
-      totalCreatorTap: tapCreators.length,
+      totalCreatorTap: tapCreators.filter((c) => c.creatorId !== null).length,
       totalGmvTap: tapKnown ? tapCreators.reduce((s, c) => s + (c.gmvTap ?? 0), 0) : null,
       totalGmvMcnTapUsers: tapCreators.reduce((s, c) => s + c.gmvMcn, 0),
       totalGmvAllCreators: all.reduce((s, c) => s + c.gmvMcn, 0),
-      totalCreators: all.length,
+      totalCreators: all.filter((c) => c.creatorId !== null).length,
     },
     tapCreators,
     allCreators: all,

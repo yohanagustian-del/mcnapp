@@ -60,3 +60,9 @@ export async function hasLegacyPeriodData(client: SupabaseClient, sel: PeriodSel
 
 export const LEGACY_PERIOD_MESSAGE =
   "Data periode ini belum diupload dengan versi baru — upload ulang file mingguan periode ini di menu Upload Data Platform Mingguan supaya angka per shop terisi.";
+
+/**
+ * Label baris creator_id NULL di view per kreator (migrasi 0088, K6): GMV TAP yang tidak
+ * bisa dikaitkan ke kreator file MCN — tetap terhitung, tidak dibagi/ditebak.
+ */
+export const NO_CREATOR_LABEL = "Nama kreator tidak ada";
