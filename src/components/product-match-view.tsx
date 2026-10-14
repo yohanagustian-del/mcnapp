@@ -103,6 +103,12 @@ export function ProductMatchView({ result }: { result: ProductMatchResult }) {
           </span>
         ))}
       </div>
+      {/* K3 = B (keputusan user 2026-10-14): jelaskan asal segmen — engine memakai AOV
+          (GMV ÷ order) per kategori, bukan kolom segmen per transaksi. */}
+      <p className="mt-2 text-xs text-slate-500">
+        Segmen harga dihitung dari AOV (GMV ÷ order) per kategori Level 2 dalam window berjalan, bukan dari
+        segmen per transaksi — jadi tetap terisi untuk data Shopee lama.
+      </p>
 
       <div className="mt-4 space-y-4">
         {result.categories.map((cat) => (
