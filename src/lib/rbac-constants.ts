@@ -267,6 +267,10 @@ export const PERMISSIONS: Record<string, Role[]> = {
   // Report brand: management + BizDev. (m8.pipeline dihapus 2026-10 bersama section
   // "Pipeline Deal Brand"; kolom brand_deals.pipeline_stage dibiarkan sebagai data lama.)
   "m8.brand_report": [...MANAGEMENT_ROLES, "bizdev_lead", "bizdev"],
+  // Summary per BizDev (REVISI_BIZDEV K11 = B, keputusan user 2026-10-14): Management +
+  // BizDev Lead melihat SEMUA BizDev (termasuk Non BD Handle); role BizDev lain hanya
+  // baris brand yang di-handle akun itu sendiri.
+  "m8.bizdev_summary_all": [...MANAGEMENT_ROLES, "bizdev_lead"],
   // Buat & ubah Project BD (pengelompokan beberapa shop jadi satu campaign).
   // Sejajar dengan deals.register: yang menutup deal juga yang menyusun projectnya.
   // Menghapus project TIDAK menyentuh kartu produk mana pun — project cuma

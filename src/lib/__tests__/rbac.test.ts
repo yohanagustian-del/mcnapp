@@ -178,3 +178,14 @@ describe("nav Report Brand (REVISI_BIZDEV T9)", () => {
     expect([...item.roles].sort()).toEqual([...PERMISSIONS["m8.brand_report"]].sort());
   });
 });
+
+describe("summary per BizDev (REVISI_BIZDEV K11 = B)", () => {
+  it("hanya Management + BizDev Lead melihat semua BizDev; BizDev lain hanya miliknya", () => {
+    for (const r of [...MANAGEMENT_ROLES, "bizdev_lead"] as Role[]) {
+      expect(hasPermission("m8.bizdev_summary_all", r)).toBe(true);
+    }
+    for (const r of ["bizdev", "campaign_ops", "bd_admin"] as Role[]) {
+      expect(hasPermission("m8.bizdev_summary_all", r)).toBe(false);
+    }
+  });
+});
