@@ -11,6 +11,7 @@ import {
   shopDealState,
 } from "@/lib/m4/classify";
 import { buildLeakageProductRows, type ClassifiedPair } from "@/lib/m4/leakage-detail";
+import { BD_LEADS_CONFLICT } from "@/lib/m4/bd-leads";
 
 /** upload_batch convention: one batch per (file kind, week) → re-upload replaces.
  *  Shared with src/app/(portal)/link-leakage/actions.ts and src/lib/ingest/run.ts —
@@ -235,7 +236,7 @@ export async function runLeakageEngineCore(
   for (let i = 0; i < leadShopIds.length; i += 200) {
     const chunk = leadShopIds.slice(i, i + 200);
     const rows = await fetchAll<{ shop_id: string }>(
-      admin, "bd_leads", "shop_id", (q) => q.in("shop_id", chunk));
+      admin, "bd_leads", "shop_id", (q) => q.eq("platform", "tiktok").in("shop_id", chunk));
     for (const r of rows) existingSet.add(r.shop_id);
   }
   const newLeads = leadShopIds
@@ -243,7 +244,7 @@ export async function runLeakageEngineCore(
     .map((shopId) => {
       const { frequency, totalGmv } = leadAgg.get(shopId)!;
       return {
-        shop_id: shopId, shop_name: shopNameById.get(shopId) ?? null,
+        platform: "tiktok", shop_id: shopId, shop_name: shopNameById.get(shopId) ?? null,
         frequency, total_gmv: totalGmv,
         priority_score: leadPriority(frequency, totalGmv),
         first_seen_week: week, source: "auto_m4", status: "baru",
@@ -265,7 +266,7 @@ export async function runLeakageEngineCore(
     .map((shopId) => {
       const { frequency, totalGmv } = leadAgg.get(shopId)!;
       return {
-        shop_id: shopId, shop_name: shopNameById.get(shopId) ?? null,
+        platform: "tiktok", shop_id: shopId, shop_name: shopNameById.get(shopId) ?? null,
         frequency, total_gmv: totalGmv,
         priority_score: leadPriority(frequency, totalGmv),
       };
@@ -273,7 +274,7 @@ export async function runLeakageEngineCore(
   for (let i = 0; i < updatedLeads.length; i += 500) {
     const { error } = await admin
       .from("bd_leads")
-      .upsert(updatedLeads.slice(i, i + 500), { onConflict: "shop_id" });
+      .upsert(updatedLeads.slice(i, i + 500), { onConflict: BD_LEADS_CONFLICT });
     if (error) throw new Error(`Gagal update bd_leads: ${error.message}`);
   }
 
@@ -288,6 +289,7 @@ export async function runLeakageEngineCore(
     const { error } = await admin
       .from("bd_leads")
       .delete()
+      .eq("platform", "tiktok")
       .eq("source", "auto_m4")
       .in("shop_id", berDealShopIds.slice(i, i + 200));
     if (error) throw new Error(`Gagal membersihkan lead usang: ${error.message}`);

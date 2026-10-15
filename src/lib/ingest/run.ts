@@ -12,6 +12,7 @@ import { validateW1W5Period } from "@/lib/utils/date";
 import { derivePeriod, mergeExtraMcn, parseMcnFile, parseTapFile, type ParseResult, type SkippedRow } from "./parse";
 import { buildCreatorShopPeriod, buildPeriodSummary, buildSubcatSegment, buildTopProducts } from "./aggregate";
 import { writeCreatorShopPeriod } from "./shop-period-write";
+import { fillMissingCategories } from "./category-fill";
 import { MCN_COLUMNS, type McnRow, type TapRow } from "./schema";
 import { upsertDerivedFromTap } from "@/lib/m10/products";
 import {
@@ -312,6 +313,23 @@ export async function runIngest(input: RunIngestInput): Promise<RunIngestResult>
 
   try {
     const week = periodStart; // catalog/audit week key = period_start (task spec §5)
+
+    // ---- 2b. Category fill (exports without Level 1/2 category columns, Sep 2026) ----
+    // Before step 3: the derived products_tap catalog is rewritten from TAP rows, and
+    // a null category there would erase a category the catalog already knew.
+    const categoryFill = await fillMissingCategories(admin, resolvedMcnRows, tapParsed.rows);
+    if (categoryFill.skipped) skipped.push({ row: -1, reason: categoryFill.skipped });
+    if (categoryFill.rowsMissing > 0) {
+      skipped.push({
+        row: -1,
+        reason:
+          `${categoryFill.rowsMissing} baris MCN tanpa kategori produk — ` +
+          `${categoryFill.rowsFilled} diisi otomatis dari katalog produk (per Product ID); ` +
+          `GMV Rp${Math.round(categoryFill.gmvStillMissing).toLocaleString("id-ID")} tetap tanpa kategori ` +
+          `(tidak masuk subkategori×segmen). Bila export memang tanpa kolom kategori, tambahkan kolom ` +
+          `Level 1/Level 2 category di custom report TikTok.`,
+      });
+    }
 
     // ---- 3. Derive products_tap entries from TAP weekly rows (deterministic, 0 LLM) ----
     // Master-upload rows in products_tap are never clobbered (see upsertDerivedFromTap doc);
