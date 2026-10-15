@@ -14,21 +14,20 @@ interface Op {
   rows?: unknown[];
 }
 
-function mockSupabase(ops: Op[]): SupabaseClient {
+function mockSupabase(ops: Op[], deleteError: { message: string } | null = null): SupabaseClient {
   return {
     from: (table: string) => ({
       delete: () => {
         const entry: Op = { table, op: "delete", filters: [] };
         ops.push(entry);
+        const result = Promise.resolve({ error: deleteError });
+        const add = (column: string, value: unknown) => {
+          entry.filters!.push({ column, value });
+          return chain;
+        };
         const chain = {
-          in: (column: string, value: unknown) => {
-            entry.filters!.push({ column, value });
-            return chain;
-          },
-          eq: (column: string, value: unknown) => {
-            entry.filters!.push({ column, value });
-            return Promise.resolve({ error: null });
-          },
+          in: add, eq: add, gte: add, lte: add,
+          then: result.then.bind(result),
         };
         return chain;
       },
@@ -87,12 +86,14 @@ describe("writeAggregates (idempotensi per creator x periode, bukan per upload_b
       expect(d.filters).toEqual([
         { column: "creator_id", value: CREATOR_IDS },
         { column: "period_start", value: PERIOD_START },
+        { column: "period_start", value: PERIOD_END },
       ]);
     }
     // creator_subcat_segment_gmv has no period_start column — scoped by window_end instead.
     const subcatDelete = deletes.find((x) => x.table === "creator_subcat_segment_gmv")!;
     expect(subcatDelete.filters).toEqual([
       { column: "creator_id", value: CREATOR_IDS },
+      { column: "window_end", value: PERIOD_START },
       { column: "window_end", value: PERIOD_END },
     ]);
     // delete-then-insert ordering: last delete precedes first insert.
@@ -130,6 +131,14 @@ describe("writeAggregates (idempotensi per creator x periode, bukan per upload_b
     expect(topInsert?.rows?.[0]).toMatchObject({
       creator_id: "CRT-001", rank: 1, product_id: "P1", shop_id: "S1",
     });
+  });
+
+  it("a failed delete aborts before any insert (no silent duplicate rows)", async () => {
+    const ops: Op[] = [];
+    await expect(
+      writeAggregates(mockSupabase(ops, { message: "statement timeout" }), BATCH, CREATOR_IDS, PERIOD_START, PERIOD_END, summary, subcat, top)
+    ).rejects.toThrow(/Gagal menghapus creator_period_summary lama: statement timeout/);
+    expect(ops.filter((o) => o.op === "insert")).toHaveLength(0);
   });
 
   it("does not insert when a batch has no rows (idempotent empty overwrite still clears)", async () => {
