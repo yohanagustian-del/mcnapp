@@ -145,11 +145,28 @@ describe("buildShopeeCreatorShopPeriod", () => {
 });
 
 // ─── writer ───
-interface Op { table: string; op: "delete" | "insert"; filters: [string, unknown][]; rows?: unknown[] }
+interface Op { table: string; op: "delete" | "insert" | "select"; filters: [string, unknown][]; rows?: unknown[] }
 type MockErr = { code?: string; message: string } | null;
-function mockAdmin(ops: Op[], error: MockErr | ((table: string) => MockErr) = null): SupabaseClient {
+function mockAdmin(
+  ops: Op[],
+  error: MockErr | ((table: string) => MockErr) = null,
+  selectData: Record<string, unknown>[] = []
+): SupabaseClient {
   return {
     from: (table: string) => ({
+      select: () => {
+        const entry: Op = { table, op: "select", filters: [] };
+        ops.push(entry);
+        const err = typeof error === "function" ? error(table) : error;
+        const chain = {
+          eq: (c: string, v: unknown) => { entry.filters.push([c, v]); return chain; },
+          in: (c: string, v: unknown) => {
+            entry.filters.push([c, v]);
+            return Promise.resolve({ data: err ? null : selectData, error: err });
+          },
+        };
+        return chain;
+      },
       delete: () => {
         const entry: Op = { table, op: "delete", filters: [] };
         ops.push(entry);
@@ -187,40 +204,58 @@ describe("writeCreatorShopPeriod", () => {
     });
   });
 
-  it("GMV TAP tanpa kreator → hapus batch yang sama + upload lama yang memuat kreator file ini (overlap), lalu insert per shop", async () => {
+  it("GMV TAP tanpa kreator → hapus batch ini + batch lama yang memuat kreator file ini, tulis lingkup per kreator lalu baris per shop", async () => {
     const res0 = buildCreatorShopPeriod(MCN, [{ ...tap({ affiliateGmv: 400_000 }), creatorName: "" }], true);
     const ops: Op[] = [];
     const res = await writeCreatorShopPeriod(
-      mockAdmin(ops), "tiktok", "ingest:2026-09-01:abcd", ["CRT-A", "CRT-B"], "2026-09-01", "2026-09-07", res0.rows, res0.unattributed
+      mockAdmin(ops, null, [{ upload_batch: "ingest:2026-09-01:old1" }]),
+      "tiktok", "ingest:2026-09-01:abcd", ["CRT-A", "CRT-B"], "2026-09-01", "2026-09-07", res0.rows, res0.unattributed
     );
     expect(res.skipped).toBeNull();
-    const u = ops.filter((o) => o.table === "creator_shop_period_unattributed_tap");
+    const u = ops.filter((o) => o.table.startsWith("creator_shop_period_unattributed"));
     expect(u[0]).toMatchObject({
-      op: "delete",
-      filters: [["platform", "tiktok"], ["upload_batch", "ingest:2026-09-01:abcd"]],
+      table: "creator_shop_period_unattributed_scope", op: "select",
+      filters: [["platform", "tiktok"], ["period_start", "2026-09-01"], ["creator_id", ["CRT-A", "CRT-B"]]],
     });
-    expect(u[1]).toMatchObject({
-      op: "delete",
-      filters: [["platform", "tiktok"], ["period_start", "2026-09-01"], ["source_creator_ids", ["CRT-A", "CRT-B"]]],
-    });
-    expect(u[2].op).toBe("insert");
-    expect(u[2].rows).toEqual([
+    const batches = [["platform", "tiktok"], ["upload_batch", ["ingest:2026-09-01:abcd", "ingest:2026-09-01:old1"]]];
+    expect(u[1]).toMatchObject({ table: "creator_shop_period_unattributed_tap", op: "delete", filters: batches });
+    expect(u[2]).toMatchObject({ table: "creator_shop_period_unattributed_scope", op: "delete", filters: batches });
+    expect(u[3]).toMatchObject({ table: "creator_shop_period_unattributed_scope", op: "insert" });
+    expect(u[3].rows).toEqual([
+      { platform: "tiktok", upload_batch: "ingest:2026-09-01:abcd", period_start: "2026-09-01", creator_id: "CRT-A" },
+      { platform: "tiktok", upload_batch: "ingest:2026-09-01:abcd", period_start: "2026-09-01", creator_id: "CRT-B" },
+    ]);
+    expect(u[4].op).toBe("insert");
+    expect(u[4].table).toBe("creator_shop_period_unattributed_tap");
+    expect(u[4].rows).toEqual([
       expect.objectContaining({
-        platform: "tiktok", shop_id: "7001", period_start: "2026-09-01", upload_batch: "ingest:2026-09-01:abcd",
-        source_creator_ids: ["CRT-A", "CRT-B"], gmv_tap: 400_000,
+        platform: "tiktok", shop_id: "7001", period_start: "2026-09-01", upload_batch: "ingest:2026-09-01:abcd", gmv_tap: 400_000,
       }),
+    ]);
+    // Per-shop rows no longer carry the creator list (0089).
+    expect(u[4].rows![0]).not.toHaveProperty("source_creator_ids");
+  });
+
+  it("tanpa baris tanpa-kreator → batch lama tetap dihapus, tidak ada lingkup yang ditulis", async () => {
+    const ops: Op[] = [];
+    await writeCreatorShopPeriod(mockAdmin(ops), "tiktok", "b", ["CRT-A"], "2026-09-01", "2026-09-07", rows);
+    const u = ops.filter((o) => o.table.startsWith("creator_shop_period_unattributed"));
+    expect(u.map((o) => `${o.op}:${o.table}`)).toEqual([
+      "select:creator_shop_period_unattributed_scope",
+      "delete:creator_shop_period_unattributed_tap",
+      "delete:creator_shop_period_unattributed_scope",
     ]);
   });
 
-  it("migrasi 0088 belum ada → agregat per kreator tetap tertulis, GMV tanpa kreator dilaporkan", async () => {
+  it("migrasi 0088/0089 belum ada → agregat per kreator tetap tertulis, GMV tanpa kreator dilaporkan", async () => {
     const res0 = buildCreatorShopPeriod(MCN, [{ ...tap({ affiliateGmv: 400_000 }), creatorName: "" }], true);
     const missing = (t: string) =>
-      t === "creator_shop_period_unattributed_tap" ? { code: "PGRST205", message: "Could not find the table" } : null;
+      t === "creator_shop_period_unattributed_scope" ? { code: "PGRST205", message: "Could not find the table" } : null;
     const res = await writeCreatorShopPeriod(
       mockAdmin([], missing), "tiktok", "b", ["CRT-A", "CRT-B"], "2026-09-01", "2026-09-07", res0.rows, res0.unattributed
     );
     expect(res.written).toBe(res0.rows.length);
-    expect(res.skipped).toMatch(/Migrasi 0088 belum di-apply/);
+    expect(res.skipped).toMatch(/Migrasi 0088\/0089 belum di-apply/);
     // Tanpa baris tanpa-kreator, tabel yang belum ada tidak perlu dilaporkan.
     const quiet = await writeCreatorShopPeriod(mockAdmin([], missing), "tiktok", "b", ["CRT-A"], "2026-09-01", "2026-09-07", res0.rows);
     expect(quiet.skipped).toBeNull();

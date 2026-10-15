@@ -60,7 +60,9 @@ Platform internal MCN MEA (agency creator TikTok/Shopee). Menggabungkan tools te
   Sejak 0088 (jawaban user 2026-10-14): GMV TAP yang tidak bisa dikaitkan ke kreator file MCN TIDAK
   dibagi proporsional — ditulis ke `creator_shop_period_unattributed_tap` dan masuk view sebagai
   `creator_id` NULL = label "Nama kreator tidak ada" (`NO_CREATOR_LABEL`), terhitung di GMV TAP shop
-  tapi tidak di jumlah kreator. `bizdev_brand_perf` memuat SEMUA shop (non-deal = `shop_key` NULL =
+  tapi tidak di jumlah kreator. Lingkup hapus-ulangnya = tabel `creator_shop_period_unattributed_scope` (batch ×
+  kreator, 0089) — JANGAN simpan daftar kreator di tiap baris shop (array `source_creator_ids` 0088 membuat
+  upload mingguan penuh timeout; kolomnya dibiarkan, tidak ditulis/dibaca). `bizdev_brand_perf` memuat SEMUA shop (non-deal = `shop_key` NULL =
   "Non BD Handle"); `shop_key_map` boleh memetakan satu `shop_id` ke beberapa `shop_key` (ejaan Shop
   Name berbeda → GMV tampil dobel, disengaja) — jangan `maybeSingle()` ke view itu.
 - **Report Kreator (M2) v2 = 0 LLM.** Angka dari `lib/report/build.ts`, SEMUA kalimat (ringkasan,

@@ -66,3 +66,20 @@ describe("migrasi 0088 — penjaga CLAUDE.md #9 & apply_migration (K23)", () => 
     expect(sql).not.toMatch(/drop\s+(policy|trigger)/i);
   });
 });
+
+describe("migrasi 0089 — penjaga CLAUDE.md #9 & apply_migration (K23)", () => {
+  const sql = readFileSync(
+    join(process.cwd(), "supabase/migrations/0089_unattributed_tap_scope_table.sql"),
+    "utf8"
+  );
+
+  it("tabel lingkup baru punya restrictive deny is_creator_user()", () => {
+    const tables = [...sql.matchAll(/create table if not exists (\w+)/g)].map((m) => m[1]);
+    expect(tables).toEqual(["creator_shop_period_unattributed_scope"]);
+    expect(sql).toMatch(/on creator_shop_period_unattributed_scope as restrictive for select\s+using \(not is_creator_user\(\)\)/);
+  });
+
+  it("tanpa DROP apa pun (apply_migration menggantung, HANDOFF 2026-10-13 & 2026-10-15)", () => {
+    expect(sql).not.toMatch(/^\s*drop\s/im);
+  });
+});
