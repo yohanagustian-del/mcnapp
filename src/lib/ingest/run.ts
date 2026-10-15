@@ -268,7 +268,11 @@ export async function runIngest(input: RunIngestInput): Promise<RunIngestResult>
       skipped.push({ row: -1, reason: `creator "${r.creatorName || "(kosong)"}" tidak dapat di-resolve` });
       continue;
     }
-    resolvedMcnRows.push({ ...r, creatorName: creatorId });
+    // Every row belongs to the batch week. Since 2026-09 TikTok exports carry a per-row
+    // Date range (often a single day, e.g. "2026-09-09-2026-09-09"), so a creator whose
+    // rows all start mid-week would otherwise get period_start = that day: invisible to
+    // week views and not cleaned up by the per-week replace.
+    resolvedMcnRows.push({ ...r, creatorName: creatorId, periodStart, periodEnd });
   }
 
   // ---- 2. upload_batches: staging ----
@@ -504,10 +508,10 @@ const DELETE_CHUNK = 200;
  * global-batch_id era for those same creators/period.
  *
  * - creator_period_summary / creator_top_products: delete where creator_id IN
- *   (creators in this file) AND period_start = periodStart.
+ *   (creators in this file) AND period_start within [periodStart, periodEnd].
  * - creator_subcat_segment_gmv: this table has no period_start column — it
  *   only carries window_end (= periodEnd, per buildSubcatSegment in
- *   aggregate.ts), so the delete is scoped by window_end instead.
+ *   aggregate.ts), so the delete is scoped by window_end within the week instead.
  *
  * Deletes are chunked by DELETE_CHUNK creator ids per `.in()` call (bulk style
  * consistent with upsertDerivedFromTap in src/lib/m10/products.ts) so a large
@@ -527,15 +531,21 @@ export async function writeAggregates(
 ): Promise<void> {
   // Idempotent per (creator × week): delete-then-insert, scoped to this file's
   // creators + period — NOT the whole upload_batch (design decision above).
+  // Range (not equality) on the week: also clears rows an older ingest wrote with a
+  // mid-week period_start/window_end (per-row Date ranges, before rows were pinned to
+  // the batch week) — otherwise a re-upload collides on creator_period_summary_uniq.
   for (let i = 0; i < creatorIds.length; i += DELETE_CHUNK) {
     const chunk = creatorIds.slice(i, i + DELETE_CHUNK);
     if (chunk.length === 0) continue;
-    await admin.from("creator_period_summary").delete()
-      .in("creator_id", chunk).eq("period_start", periodStart);
-    await admin.from("creator_top_products").delete()
-      .in("creator_id", chunk).eq("period_start", periodStart);
-    await admin.from("creator_subcat_segment_gmv").delete()
-      .in("creator_id", chunk).eq("window_end", periodEnd);
+    for (const [table, column] of [
+      ["creator_period_summary", "period_start"],
+      ["creator_top_products", "period_start"],
+      ["creator_subcat_segment_gmv", "window_end"],
+    ] as const) {
+      const { error } = await admin.from(table).delete()
+        .in("creator_id", chunk).gte(column, periodStart).lte(column, periodEnd);
+      if (error) throw new Error(`Gagal menghapus ${table} lama: ${error.message}`);
+    }
   }
 
   const summaryRows = periodSummary.map((s) => ({
