@@ -125,6 +125,12 @@ Platform internal MCN MEA (agency creator TikTok/Shopee). Menggabungkan tools te
 - MEA Academy (akun MCN kedua, kreator inkubasi) diupload di /ingest sebagai "File MCN tambahan" minggu yang SAMA
   (`mergeExtraMcn`) → satu batch dengan TAP. Jangan diupload sebagai batch terpisah dengan TAP yang sama (GMV TAP
   tanpa kreator jadi dobel).
+- Export TikTok September 2026 (MCN, Academy, TAP) TIDAK punya kolom Level 1/2 category. Ingest mengisi kategori
+  yang kosong per Product ID lewat RPC `product_category_lookup` (migrasi 0090: creator_top_products terbaru, lalu
+  products_tap) di `lib/ingest/category-fill.ts` — SEBELUM katalog products_tap diturunkan dari TAP (kalau tidak,
+  kategori katalog tertimpa null). Kategori dari file selalu menang. Sisa GMV tanpa kategori dilaporkan di catatan upload.
+- `bd_leads` unik per (platform, shop_id) sejak 0078 — upsert WAJIB `onConflict: BD_LEADS_CONFLICT`
+  (`lib/m4/bd-leads.ts`) + kolom `platform` di payload; target `shop_id` saja = error "no unique constraint".
 
 ### 8. Proyeksi GMV & prediksi deal — dua implementasi TERPISAH (sejak 2026-09-23)
 - `lib/projection/gmv.ts`/`project-gmv.ts` (`priceSegmentOf`, `loadProjectionConfig`, `windowStart`,

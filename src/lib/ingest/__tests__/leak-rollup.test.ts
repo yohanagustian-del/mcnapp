@@ -213,8 +213,10 @@ describe("writeLeakWeekSummary (CM-level totals, delete-then-insert on week+uplo
 
 interface CaptureBd {
   selectedChunks: string[][];
+  selectFilters: [string, unknown][];
   inserted: unknown[];
   upserted: unknown[];
+  conflict?: string;
 }
 
 /** Mock supabase for writeBdLeadsFromArtifact with a preset of existing shop ids. */
@@ -222,18 +224,26 @@ function mockBdClient(existing: string[], capture: CaptureBd): SupabaseClient {
   const set = new Set(existing);
   return {
     from: () => ({
-      select: () => ({
-        in: (_col: string, chunk: string[]) => {
-          capture.selectedChunks.push(chunk);
-          const data = chunk.filter((id) => set.has(id)).map((id) => ({ shop_id: id }));
-          return Promise.resolve({ data, error: null });
-        },
-      }),
+      select: () => {
+        const chain = {
+          eq: (col: string, value: unknown) => {
+            capture.selectFilters.push([col, value]);
+            return chain;
+          },
+          in: (_col: string, chunk: string[]) => {
+            capture.selectedChunks.push(chunk);
+            const data = chunk.filter((id) => set.has(id)).map((id) => ({ shop_id: id }));
+            return Promise.resolve({ data, error: null });
+          },
+        };
+        return chain;
+      },
       insert: (rows: unknown[]) => {
         if (Array.isArray(rows)) capture.inserted.push(...rows);
         return Promise.resolve({ error: null });
       },
-      upsert: (rows: unknown[]) => {
+      upsert: (rows: unknown[], opts?: { onConflict?: string }) => {
+        capture.conflict = opts?.onConflict;
         if (Array.isArray(rows)) capture.upserted.push(...rows);
         return Promise.resolve({ error: null });
       },
@@ -256,11 +266,12 @@ function bdShop(overrides: Partial<BdShopRow> = {}): BdShopRow {
 
 describe("writeBdLeadsFromArtifact (engine semantics: new=full, existing=metrics only)", () => {
   it("new shop inserted with source='artifact', first_seen_week, frequency=Num Creators", async () => {
-    const capture: CaptureBd = { selectedChunks: [], inserted: [], upserted: [] };
+    const capture: CaptureBd = { selectedChunks: [], selectFilters: [], inserted: [], upserted: [] };
     const res = await writeBdLeadsFromArtifact(mockBdClient([], capture), "2026-06-01", [bdShop()]);
     expect(res).toEqual({ created: 1, updated: 0 });
     const row = capture.inserted[0] as Record<string, unknown>;
     expect(row.source).toBe("artifact");
+    expect(row.platform).toBe("tiktok");
     expect(row.first_seen_week).toBe("2026-06-01");
     expect(row.frequency).toBe(1);
     expect(row.total_gmv).toBe(105_983_915);
@@ -268,19 +279,23 @@ describe("writeBdLeadsFromArtifact (engine semantics: new=full, existing=metrics
   });
 
   it("existing shop updated via metrics-only upsert (no source/status/first_seen in payload)", async () => {
-    const capture: CaptureBd = { selectedChunks: [], inserted: [], upserted: [] };
+    const capture: CaptureBd = { selectedChunks: [], selectFilters: [], inserted: [], upserted: [] };
     const res = await writeBdLeadsFromArtifact(
       mockBdClient(["7496144953400855459"], capture), "2026-06-01", [bdShop({ numCreators: 3 })]);
     expect(res).toEqual({ created: 0, updated: 1 });
     const row = capture.upserted[0] as Record<string, unknown>;
     expect(row.frequency).toBe(3);
+    // bd_leads unique key is (platform, shop_id) since 0078 — shop_id alone matches no constraint.
+    expect(capture.conflict).toBe("platform,shop_id");
+    expect(row.platform).toBe("tiktok");
+    expect(capture.selectFilters).toEqual([["platform", "tiktok"]]);
     expect(row.source).toBeUndefined();
     expect(row.status).toBeUndefined();
     expect(row.first_seen_week).toBeUndefined();
   });
 
   it("empty shop list is a no-op", async () => {
-    const capture: CaptureBd = { selectedChunks: [], inserted: [], upserted: [] };
+    const capture: CaptureBd = { selectedChunks: [], selectFilters: [], inserted: [], upserted: [] };
     const res = await writeBdLeadsFromArtifact(mockBdClient([], capture), "2026-06-01", []);
     expect(res).toEqual({ created: 0, updated: 0 });
     expect(capture.selectedChunks).toHaveLength(0);

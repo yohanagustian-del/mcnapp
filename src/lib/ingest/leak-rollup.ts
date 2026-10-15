@@ -2,6 +2,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { getConfig } from "@/lib/config";
 import { rollupCreatorStatus } from "@/lib/m4/classify";
 import type { ArtifactFormat, BdShopRow, LeakArtifactCreator, LeakWeekTotals } from "./leak-artifact";
+import { BD_LEADS_CONFLICT } from "@/lib/m4/bd-leads";
 
 /**
  * Writers for the "Agency Leaked Generator" artifact rollup (deterministic, 0 LLM).
@@ -223,7 +224,8 @@ export async function writeBdLeadsFromArtifact(
   const existingSet = new Set<string>();
   for (let i = 0; i < shopIds.length; i += 200) {
     const chunk = shopIds.slice(i, i + 200);
-    const { data, error } = await admin.from("bd_leads").select("shop_id").in("shop_id", chunk);
+    const { data, error } = await admin.from("bd_leads").select("shop_id")
+      .eq("platform", "tiktok").in("shop_id", chunk);
     if (error) throw new Error(`Gagal membaca bd_leads: ${error.message}`);
     for (const r of data ?? []) existingSet.add(String(r.shop_id));
   }
@@ -231,6 +233,7 @@ export async function writeBdLeadsFromArtifact(
   const newLeads = uniqueShops
     .filter((s) => !existingSet.has(s.shopId))
     .map((s) => ({
+      platform: "tiktok",
       shop_id: s.shopId,
       shop_name: s.shopName,
       frequency: s.numCreators,
@@ -245,11 +248,12 @@ export async function writeBdLeadsFromArtifact(
     if (error) throw new Error(`Gagal menulis bd_leads baru: ${error.message}`);
   }
 
-  // Existing leads: refresh metrics only via chunked upsert (onConflict shop_id).
+  // Existing leads: refresh metrics only via chunked upsert (onConflict platform+shop_id, 0078).
   // Payload omits first_seen_week/source/status so BizDev-managed fields are kept.
   const updatedLeads = uniqueShops
     .filter((s) => existingSet.has(s.shopId))
     .map((s) => ({
+      platform: "tiktok",
       shop_id: s.shopId,
       shop_name: s.shopName,
       frequency: s.numCreators,
@@ -259,7 +263,7 @@ export async function writeBdLeadsFromArtifact(
   for (let i = 0; i < updatedLeads.length; i += 500) {
     const { error } = await admin
       .from("bd_leads")
-      .upsert(updatedLeads.slice(i, i + 500), { onConflict: "shop_id" });
+      .upsert(updatedLeads.slice(i, i + 500), { onConflict: BD_LEADS_CONFLICT });
     if (error) throw new Error(`Gagal update bd_leads: ${error.message}`);
   }
 

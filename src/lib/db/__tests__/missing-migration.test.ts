@@ -83,3 +83,13 @@ describe("migrasi 0089 — penjaga CLAUDE.md #9 & apply_migration (K23)", () => 
     expect(sql).not.toMatch(/^\s*drop\s/im);
   });
 });
+
+describe("migrasi 0090 — fungsi lookup kategori", () => {
+  const sql = readFileSync(join(process.cwd(), "supabase/migrations/0090_product_category_lookup.sql"), "utf8");
+
+  it("security invoker (RLS tabel dasar tetap berlaku) dan tanpa DROP", () => {
+    expect(sql).toMatch(/security invoker/);
+    expect(sql).not.toMatch(/^\s*drop\s/im);
+    expect(sql).not.toMatch(/create table/i);
+  });
+});

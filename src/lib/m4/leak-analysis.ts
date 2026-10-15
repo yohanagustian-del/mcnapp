@@ -13,6 +13,7 @@ import {
   type BdOpportunityShop, type CreatorLeakRollup, type LeakComputeResult, type MasterShopEntry,
 } from "./leak-compute";
 import { parseMasterShopFile } from "./master-shop-file";
+import { BD_LEADS_CONFLICT } from "./bd-leads";
 import {
   buildBdCsv, buildDetailCsv, buildSummaryCsv, pruneLeakExports, writeLeakExports,
   type LeakExportFile, type LeakExportKind,
@@ -259,6 +260,7 @@ async function writeBdLeads(
     const { data, error } = await admin
       .from("bd_leads")
       .select("shop_id")
+      .eq("platform", "tiktok")
       .in("shop_id", shopIds.slice(i, i + 200));
     if (error) throw new Error(`Gagal membaca bd_leads: ${error.message}`);
     for (const r of data ?? []) existing.add(String(r.shop_id));
@@ -267,6 +269,7 @@ async function writeBdLeads(
   const newLeads = shops
     .filter((s) => !existing.has(s.shopId))
     .map((s) => ({
+      platform: "tiktok",
       shop_id: s.shopId,
       shop_name: s.shopName,
       frequency: s.creators.length,
@@ -284,6 +287,7 @@ async function writeBdLeads(
   const updatedLeads = shops
     .filter((s) => existing.has(s.shopId))
     .map((s) => ({
+      platform: "tiktok",
       shop_id: s.shopId,
       shop_name: s.shopName,
       frequency: s.creators.length,
@@ -293,7 +297,7 @@ async function writeBdLeads(
   for (let i = 0; i < updatedLeads.length; i += 500) {
     const { error } = await admin
       .from("bd_leads")
-      .upsert(updatedLeads.slice(i, i + 500), { onConflict: "shop_id" });
+      .upsert(updatedLeads.slice(i, i + 500), { onConflict: BD_LEADS_CONFLICT });
     if (error) throw new Error(`Gagal update bd_leads: ${error.message}`);
   }
 
@@ -303,6 +307,7 @@ async function writeBdLeads(
     const { error } = await admin
       .from("bd_leads")
       .delete()
+      .eq("platform", "tiktok")
       .in("source", ["auto_m4", "artifact", "platform"])
       .in("shop_id", partneredShopIds.slice(i, i + 200));
     if (error) throw new Error(`Gagal membersihkan lead usang: ${error.message}`);
