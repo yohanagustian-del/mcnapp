@@ -1,5 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { isMissingRelationError, MIGRATION_0087_MISSING, MIGRATION_0088_MISSING } from "@/lib/db/missing-migration";
+import { isMissingRelationError, MIGRATION_0087_MISSING, MIGRATION_0089_MISSING } from "@/lib/db/missing-migration";
 import type { CreatorShopPeriodRow, UnattributedTapShopRow } from "./aggregate";
 
 /** Bulk-delete chunk size for `.in(creator_id, [...])` (consistent with run.ts). */
@@ -75,11 +75,16 @@ export async function writeCreatorShopPeriod(
   return { written: payload.length, skipped };
 }
 
+const UNATTRIBUTED = "creator_shop_period_unattributed_tap";
+const UNATTRIBUTED_SCOPE = "creator_shop_period_unattributed_scope";
+
 /**
- * GMV TAP tanpa kreator per shop (K6, migrasi 0088). Lingkup hapus = upload lama yang
- * memuat kreator mana pun dari file ini untuk minggu yang sama (`source_creator_ids`
- * overlap) — sama dengan creator_shop_period_gmv yang dihapus per kreator × minggu,
- * jadi upload ulang file yang dikoreksi tidak menggandakan angka.
+ * GMV TAP tanpa kreator per shop (K6, migrasi 0088/0089). Lingkup hapus = batch ini +
+ * upload lama minggu yang sama yang memuat kreator mana pun dari file ini (dicari di
+ * creator_shop_period_unattributed_scope) — sama dengan creator_shop_period_gmv yang
+ * dihapus per kreator × minggu, jadi upload ulang file yang dikoreksi tidak menggandakan
+ * angka. Lingkup disimpan per batch × kreator (0089), BUKAN sebagai array di tiap baris
+ * shop: ±1.600 kreator × puluhan ribu shop membuat insert 0088 timeout.
  * Tabel belum ada → pesan (bila ada yang mau ditulis), ingest tetap jalan.
  */
 async function writeUnattributedTap(
@@ -92,25 +97,43 @@ async function writeUnattributedTap(
   rows: UnattributedTapShopRow[]
 ): Promise<string | null> {
   const missing = () =>
-    rows.length > 0 ? `GMV TAP tanpa nama kreator tidak disimpan: ${MIGRATION_0088_MISSING}` : null;
-  // Same batch re-run (e.g. no creator resolved → empty overlap scope) must not hit the PK.
-  const { error: batchError } = await admin.from("creator_shop_period_unattributed_tap").delete()
-    .eq("platform", platform).eq("upload_batch", batchId);
-  if (batchError) {
-    if (isMissingRelationError(batchError)) return missing();
-    throw new Error(`Gagal menghapus creator_shop_period_unattributed_tap lama: ${batchError.message}`);
-  }
+    rows.length > 0 ? `GMV TAP tanpa nama kreator tidak disimpan: ${MIGRATION_0089_MISSING}` : null;
+  const fail = (what: string, error: { message: string }) => {
+    throw new Error(`Gagal ${what} ${UNATTRIBUTED}: ${error.message}`);
+  };
+
+  // 1. Batches to replace: this one (re-run of the same file) + older uploads of this
+  //    week sharing any creator with this file.
+  const batches = new Set<string>([batchId]);
   for (let i = 0; i < creatorIds.length; i += DELETE_CHUNK) {
     const chunk = creatorIds.slice(i, i + DELETE_CHUNK);
-    if (chunk.length === 0) continue;
-    const { error } = await admin.from("creator_shop_period_unattributed_tap").delete()
-      .eq("platform", platform).eq("period_start", periodStart).overlaps("source_creator_ids", chunk);
+    const { data, error } = await admin.from(UNATTRIBUTED_SCOPE).select("upload_batch")
+      .eq("platform", platform).eq("period_start", periodStart).in("creator_id", chunk);
     if (error) {
       if (isMissingRelationError(error)) return missing();
-      throw new Error(`Gagal menghapus creator_shop_period_unattributed_tap lama: ${error.message}`);
+      fail("membaca lingkup", error);
+    }
+    for (const r of (data ?? []) as { upload_batch: string }[]) batches.add(r.upload_batch);
+  }
+
+  // 2. Remove those batches' rows and scopes.
+  const batchList = [...batches];
+  for (let i = 0; i < batchList.length; i += DELETE_CHUNK) {
+    const chunk = batchList.slice(i, i + DELETE_CHUNK);
+    for (const table of [UNATTRIBUTED, UNATTRIBUTED_SCOPE]) {
+      const { error } = await admin.from(table).delete().eq("platform", platform).in("upload_batch", chunk);
+      if (error) {
+        if (isMissingRelationError(error)) return missing();
+        fail("menghapus", error);
+      }
     }
   }
   if (rows.length === 0) return null;
+
+  // 3. Write this batch's scope, then its rows.
+  const scope = creatorIds.map((creatorId) => ({
+    platform, upload_batch: batchId, period_start: periodStart, creator_id: creatorId,
+  }));
   const payload = rows.map((u) => ({
     platform,
     shop_id: u.shopId,
@@ -118,7 +141,6 @@ async function writeUnattributedTap(
     period_start: periodStart,
     period_end: periodEnd,
     upload_batch: batchId,
-    source_creator_ids: creatorIds,
     gmv_tap: u.gmvTap,
     gmv_tap_live: u.gmvTapLive,
     gmv_tap_video: u.gmvTapVideo,
@@ -128,11 +150,14 @@ async function writeUnattributedTap(
     est_creator_commission: u.estCreatorCommission,
     actual_creator_commission: u.actualCreatorCommission,
   }));
-  for (let i = 0; i < payload.length; i += 500) {
-    const { error } = await admin.from("creator_shop_period_unattributed_tap").insert(payload.slice(i, i + 500));
-    if (error) {
-      if (isMissingRelationError(error)) return missing();
-      throw new Error(`Gagal menulis creator_shop_period_unattributed_tap: ${error.message}`);
+  const writes: [string, Record<string, unknown>[]][] = [[UNATTRIBUTED_SCOPE, scope], [UNATTRIBUTED, payload]];
+  for (const [table, list] of writes) {
+    for (let i = 0; i < list.length; i += 500) {
+      const { error } = await admin.from(table).insert(list.slice(i, i + 500));
+      if (error) {
+        if (isMissingRelationError(error)) return missing();
+        fail("menulis", error);
+      }
     }
   }
   return null;
