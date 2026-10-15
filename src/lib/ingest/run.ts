@@ -177,6 +177,12 @@ function describeMcnParseFailure(mcnParsed: ParseResult<McnRow>): string {
 export async function runIngest(input: RunIngestInput): Promise<RunIngestResult> {
   const admin = createAdminClient();
   const { mcnFile, extraMcnFile, tapFile, masterShopFile, actorId } = input;
+  // Step timings in the function log: a full TikTok week (MCN + Academy + TAP, ~1M rows)
+  // runs close to the route's maxDuration, and a timeout kills the request without any
+  // other trace of where the time went.
+  const startedAt = Date.now();
+  const lap = (step: string) =>
+    console.info(`[ingest] ${step} +${Math.round((Date.now() - startedAt) / 1000)}s`);
 
   // ---- 1. Parse ----
   const mcnParsed = await parseMcnFile(mcnFile);
@@ -191,6 +197,7 @@ export async function runIngest(input: RunIngestInput): Promise<RunIngestResult>
     ? await parseTapFile(tapFile)
     : { rows: [] as TapRow[], skipped: [] as SkippedRow[], rawHeadersFound: [] as string[] };
   const skipped: SkippedRow[] = [...mcnParsed.skipped, ...tapParsed.skipped];
+  lap(`parse (${mcnParsed.rows.length} MCN, ${tapParsed.rows.length} TAP)`);
 
   const period = derivePeriod(mcnParsed.rows);
   if (!period) {
@@ -310,6 +317,7 @@ export async function runIngest(input: RunIngestInput): Promise<RunIngestResult>
     { onConflict: "batch_id" }
   );
   if (batchInsertError) throw new Error(`Gagal mencatat upload_batches: ${batchInsertError.message}`);
+  lap(`staging ${batchId}`);
 
   try {
     const week = periodStart; // catalog/audit week key = period_start (task spec §5)
@@ -318,6 +326,7 @@ export async function runIngest(input: RunIngestInput): Promise<RunIngestResult>
     // Before step 3: the derived products_tap catalog is rewritten from TAP rows, and
     // a null category there would erase a category the catalog already knew.
     const categoryFill = await fillMissingCategories(admin, resolvedMcnRows, tapParsed.rows);
+    lap("category fill");
     if (categoryFill.skipped) skipped.push({ row: -1, reason: categoryFill.skipped });
     if (categoryFill.rowsMissing > 0) {
       skipped.push({
@@ -352,6 +361,8 @@ export async function runIngest(input: RunIngestInput): Promise<RunIngestResult>
       }
     }
 
+    lap("products_tap");
+
     // ---- 4. Aggregate in-memory (1-pass) ----
     const bounds = await getConfig<PriceBounds>("segments.price_bounds");
     const topN = await getConfig<number>("ingest.top_n_products");
@@ -362,6 +373,7 @@ export async function runIngest(input: RunIngestInput): Promise<RunIngestResult>
     await writeAggregates(
       admin, batchId, [...creatorIdsSet], periodStart, periodEnd, periodSummary, subcatSegment, topProducts
     );
+    lap("aggregates");
 
     // ---- 4b. Agregat kreator × shop × periode (migrasi 0087, REVISI_BIZDEV T4) ----
     // Dari baris MCN + TAP yang SAMA (tanpa parse ulang). Nama kreator TAP di-resolve
@@ -374,6 +386,7 @@ export async function runIngest(input: RunIngestInput): Promise<RunIngestResult>
     const shopPeriodWrite = await writeCreatorShopPeriod(
       admin, "tiktok", batchId, [...creatorIdsSet], periodStart, periodEnd, shopPeriod.rows, shopPeriod.unattributed
     );
+    lap("creator x shop");
     if (shopPeriodWrite.skipped) skipped.push({ row: -1, reason: shopPeriodWrite.skipped });
     if (shopPeriod.unattributedTapGmv > 0) {
       skipped.push({
@@ -399,6 +412,7 @@ export async function runIngest(input: RunIngestInput): Promise<RunIngestResult>
       }
     }
     await autoFillCreators(admin, actorId, periodSummary, subcatSegment, followersByCreator);
+    lap("creators master");
 
     // ---- 6. upload_batches: processed ----
     const { error: doneError } = await admin
@@ -410,6 +424,7 @@ export async function runIngest(input: RunIngestInput): Promise<RunIngestResult>
     // ---- 7. PX-M1: recompute bridge.px_creator_capability.proven_* (own try/catch,
     // never fails the ingest — see step doc above and capability-recompute.ts) ----
     const capabilityResult = await recomputeCapabilityForBatch(admin, [...creatorIdsSet], actorId);
+    lap("capability");
 
     // ---- 8. Audit ----
     // rows_tap = number of TAP rows actually parsed (no staging round-trip anymore).
@@ -473,11 +488,13 @@ export async function runIngest(input: RunIngestInput): Promise<RunIngestResult>
       } catch (e) {
         leakError = e instanceof Error ? e.message : String(e);
       }
+      lap("leak analysis");
     }
 
     // ---- 10. PX-M3-A: push the full coverage snapshot to CDPS (own try/catch,
     // never fails the ingest — see step doc above and coverage-push.ts) ----
     const coveragePushResult = await pushCoverageForBatch(admin, actorId);
+    lap("coverage push");
 
     return {
       batchId,

@@ -10,8 +10,10 @@ import { ShopeeIngestForm } from "./shopee-ingest-form";
 import { BatchHistoryTable, type BatchRow } from "./batch-history-table";
 
 // Server actions on this page (Shopee/TikTok ingest) download, inflate and parse
-// exports up to ~200MB CSV — give them the full Vercel window instead of the default.
-export const maxDuration = 300;
+// exports up to ~200MB CSV. A full TikTok week (MCN + Academy + TAP, ~1M rows) needs
+// ±150s just to parse and timed out at 300s (W2 Sep 2026) — use the Pro + Fluid
+// compute maximum.
+export const maxDuration = 800;
 
 const STATUS_LABELS: Record<string, string> = {
   processed: "Selesai",
