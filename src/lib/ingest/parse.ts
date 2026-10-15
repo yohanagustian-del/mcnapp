@@ -1,5 +1,5 @@
 import { isSummaryRow } from "@/lib/utils/csv";
-import { parseSheet } from "@/lib/utils/sheet";
+import { forEachSheetRow } from "@/lib/utils/sheet";
 import { parseRupiah } from "@/lib/utils/rupiah";
 import { parsePeriodRange } from "@/lib/utils/date";
 import { parseCount } from "@/lib/platform-csv";
@@ -25,6 +25,29 @@ function translateRowKeys(row: Record<string, string>, aliases: Record<string, s
     if (idKey in row) out[enKey] = row[idKey];
   }
   return out;
+}
+
+/**
+ * Per-file string pool for the text fields kept on typed rows. The same creator,
+ * shop, product and category text repeats across hundreds of thousands of rows;
+ * pooling keeps one copy each. The pooled copy is a fresh flat string, so it does
+ * not pin the large decoded XML chunk a cell value was sliced from (V8 sliced
+ * strings keep their parent alive — on a 500k-row export that is GBs).
+ */
+function internOrNull(intern: (s: string) => string, s: string | undefined): string | null {
+  return s ? intern(s) : null;
+}
+
+function createStringPool(): (s: string) => string {
+  const pool = new Map<string, string>();
+  return (s) => {
+    let v = pool.get(s);
+    if (v === undefined) {
+      v = s.length > 12 ? (JSON.parse(JSON.stringify(s)) as string) : s;
+      pool.set(v, v);
+    }
+    return v;
+  };
 }
 
 export interface SkippedRow {
@@ -53,37 +76,41 @@ export interface ParseResult<T> {
  * left undefined downstream (aggregate.ts guards div-by-zero).
  */
 export async function parseMcnFile(file: File): Promise<ParseResult<McnRow>> {
-  const { rows: raw, errors } = await parseSheet(file);
-  const skipped: SkippedRow[] = errors.map((e) => ({ row: -1, reason: e }));
-  const rawHeadersFound = raw.length > 0 ? Object.keys(raw[0]) : [];
+  const skipped: SkippedRow[] = [];
+  let rawHeadersFound: string[] = [];
   const rows: McnRow[] = [];
+  let i = 0;
+  const intern = createStringPool();
 
-  for (const [i, raw0] of raw.entries()) {
-    const rowNum = i + 2;
-    if (isSummaryRow(raw0)) continue;
+  // Row by row: a weekly export is up to 500k rows, the raw string records are
+  // dropped as soon as each typed row is built.
+  const { errors } = await forEachSheetRow(file, (raw0) => {
+    const rowNum = i++ + 2;
+    if (rowNum === 2) rawHeadersFound = Object.keys(raw0);
+    if (isSummaryRow(raw0)) return;
     const r = translateRowKeys(raw0, MCN_HEADER_ALIASES);
 
     const productId = (r[MCN_COLUMNS.productId] ?? "").trim();
     const shopId = (r[MCN_COLUMNS.shopId] ?? "").trim();
     if (!productId || !shopId) {
       skipped.push({ row: rowNum, reason: "ID Produk / ID Toko kosong" });
-      continue;
+      return;
     }
     const creatorName = (r[MCN_COLUMNS.creator] ?? "").trim();
     const range = parsePeriodRange(r[MCN_COLUMNS.date]);
 
     rows.push({
-      date: r[MCN_COLUMNS.date] ?? "",
+      date: intern(r[MCN_COLUMNS.date] ?? ""),
       periodStart: range?.start ?? null,
       periodEnd: range?.end ?? null,
-      creatorName,
+      creatorName: intern(creatorName),
       followerCount: parseCount(r[MCN_COLUMNS.followerCount] ?? ""),
-      productId,
-      productInfo: r[MCN_COLUMNS.productInfo]?.trim() || null,
-      shopId,
-      shopName: r[MCN_COLUMNS.shopName]?.trim() || null,
-      level1Category: r[MCN_COLUMNS.cat1]?.trim() || null,
-      level2Category: r[MCN_COLUMNS.cat2]?.trim() || null,
+      productId: intern(productId),
+      productInfo: internOrNull(intern, r[MCN_COLUMNS.productInfo]?.trim()),
+      shopId: intern(shopId),
+      shopName: internOrNull(intern, r[MCN_COLUMNS.shopName]?.trim()),
+      level1Category: internOrNull(intern, r[MCN_COLUMNS.cat1]?.trim()),
+      level2Category: internOrNull(intern, r[MCN_COLUMNS.cat2]?.trim()),
       affiliateGmv: parseRupiah(r[MCN_COLUMNS.gmv]) ?? 0,
       affiliateLiveGmv: parseRupiah(r[MCN_COLUMNS.gmvLive]) ?? 0,
       affiliateVideoGmv: parseRupiah(r[MCN_COLUMNS.gmvVideo]) ?? 0,
@@ -99,7 +126,8 @@ export async function parseMcnFile(file: File): Promise<ParseResult<McnRow>> {
       liveDirectOrders: parseCount(r[MCN_COLUMNS.liveDirectOrders] ?? "") ?? 0,
       liveItemsSold: parseCount(r[MCN_COLUMNS.liveItemsSold] ?? "") ?? 0,
     });
-  }
+  });
+  skipped.unshift(...errors.map((e) => ({ row: -1, reason: e })));
   return { rows, skipped, rawHeadersFound };
 }
 
@@ -108,21 +136,25 @@ export async function parseMcnFile(file: File): Promise<ParseResult<McnRow>> {
  * rules as MCN (Summary row, missing product/shop identity).
  */
 export async function parseTapFile(file: File): Promise<ParseResult<TapRow>> {
-  const { rows: raw, errors } = await parseSheet(file);
-  const skipped: SkippedRow[] = errors.map((e) => ({ row: -1, reason: e }));
-  const rawHeadersFound = raw.length > 0 ? Object.keys(raw[0]) : [];
+  const skipped: SkippedRow[] = [];
+  let rawHeadersFound: string[] = [];
   const rows: TapRow[] = [];
+  let i = 0;
+  const intern = createStringPool();
 
-  for (const [i, raw0] of raw.entries()) {
-    const rowNum = i + 2;
-    if (isSummaryRow(raw0)) continue;
+  // Row by row: a weekly export is up to 500k rows, the raw string records are
+  // dropped as soon as each typed row is built.
+  const { errors } = await forEachSheetRow(file, (raw0) => {
+    const rowNum = i++ + 2;
+    if (rowNum === 2) rawHeadersFound = Object.keys(raw0);
+    if (isSummaryRow(raw0)) return;
     const r = translateRowKeys(raw0, TAP_HEADER_ALIASES);
 
     const productId = (r[TAP_COLUMNS.productId] ?? "").trim();
     const shopId = (r[TAP_COLUMNS.shopId] ?? "").trim();
     if (!productId || !shopId) {
       skipped.push({ row: rowNum, reason: "ID Produk / ID Toko kosong" });
-      continue;
+      return;
     }
     const creatorName = (r[TAP_COLUMNS.creator] ?? "").trim();
     const range = parsePeriodRange(r[TAP_COLUMNS.date]);
@@ -130,12 +162,12 @@ export async function parseTapFile(file: File): Promise<ParseResult<TapRow>> {
     rows.push({
       periodStart: range?.start ?? null,
       periodEnd: range?.end ?? null,
-      creatorName,
-      productId,
-      productInfo: r[TAP_COLUMNS.productInfo]?.trim() || null,
-      shopId,
-      shopName: r[TAP_COLUMNS.shopName]?.trim() || null,
-      level2Category: r[TAP_COLUMNS.cat2]?.trim() || null,
+      creatorName: intern(creatorName),
+      productId: intern(productId),
+      productInfo: internOrNull(intern, r[TAP_COLUMNS.productInfo]?.trim()),
+      shopId: intern(shopId),
+      shopName: internOrNull(intern, r[TAP_COLUMNS.shopName]?.trim()),
+      level2Category: internOrNull(intern, r[TAP_COLUMNS.cat2]?.trim()),
       affiliateGmv: parseRupiah(r[TAP_COLUMNS.gmv]) ?? 0,
       affiliateLiveGmv: parseRupiah(r[TAP_COLUMNS.gmvLive]) ?? 0,
       affiliateVideoGmv: parseRupiah(r[TAP_COLUMNS.gmvVideo]) ?? 0,
@@ -147,7 +179,8 @@ export async function parseTapFile(file: File): Promise<ParseResult<TapRow>> {
       actualCreatorCommission: parseRupiah(r[TAP_COLUMNS.actualCreatorCommission]),
       refundGmv: parseRupiah(r[TAP_COLUMNS.refundGmv]) ?? 0,
     });
-  }
+  });
+  skipped.unshift(...errors.map((e) => ({ row: -1, reason: e })));
   return { rows, skipped, rawHeadersFound };
 }
 
@@ -160,4 +193,26 @@ export function derivePeriod(rows: McnRow[]): { periodStart: string; periodEnd: 
     if (r.periodEnd && (!end || r.periodEnd > end)) end = r.periodEnd;
   }
   return start && end ? { periodStart: start, periodEnd: end } : null;
+}
+
+/**
+ * Appends a second MCN export of the SAME week (e.g. MEA Academy) to `main`, in
+ * place, so one ingest batch covers both creator sets. Throws when the two files
+ * cover different periods. Skip reasons of the extra file are prefixed so the
+ * row numbers stay unambiguous.
+ */
+export function mergeExtraMcn(main: ParseResult<McnRow>, extra: ParseResult<McnRow>): void {
+  const mainPeriod = derivePeriod(main.rows);
+  const extraPeriod = derivePeriod(extra.rows);
+  if (
+    mainPeriod && extraPeriod &&
+    (mainPeriod.periodStart !== extraPeriod.periodStart || mainPeriod.periodEnd !== extraPeriod.periodEnd)
+  ) {
+    throw new Error(
+      `Periode file MCN tambahan (${extraPeriod.periodStart} s/d ${extraPeriod.periodEnd}) berbeda dengan ` +
+        `file MCN utama (${mainPeriod.periodStart} s/d ${mainPeriod.periodEnd}) — keduanya harus minggu yang sama.`
+    );
+  }
+  for (const r of extra.rows) main.rows.push(r);
+  for (const s of extra.skipped) main.skipped.push({ ...s, reason: `File MCN tambahan: ${s.reason}` });
 }

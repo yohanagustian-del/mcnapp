@@ -116,6 +116,13 @@ Platform internal MCN MEA (agency creator TikTok/Shopee). Menggabungkan tools te
 - Baris "Summary" (baris pertama data platform) → SKIP.
 - Countdown negatif = deal lewat exp_date → active_flag=false.
 - creator_name (multi-file) → resolve ke creators.id; belum ada → buat prospek + flag.
+- Export TikTok besar (.xlsx, XML sheet ≥64MB: MCN ±360k baris, TAP 500k baris) melewati batas string V8 di
+  SheetJS → sheet terbaca KOSONG tanpa error. `parseSheet`/`forEachSheetRow` (`lib/utils/sheet.ts`) membaca file
+  itu lewat `lib/utils/xlsx-stream.ts` (streaming, output sama dengan SheetJS, dijaga test). Parser ingest memakai
+  `forEachSheetRow` (baris per baris) + pool string — jangan kembali mengumpulkan semua baris mentah ke array.
+- MEA Academy (akun MCN kedua, kreator inkubasi) diupload di /ingest sebagai "File MCN tambahan" minggu yang SAMA
+  (`mergeExtraMcn`) → satu batch dengan TAP. Jangan diupload sebagai batch terpisah dengan TAP yang sama (GMV TAP
+  tanpa kreator jadi dobel).
 
 ### 8. Proyeksi GMV & prediksi deal — dua implementasi TERPISAH (sejak 2026-09-23)
 - `lib/projection/gmv.ts`/`project-gmv.ts` (`priceSegmentOf`, `loadProjectionConfig`, `windowStart`,

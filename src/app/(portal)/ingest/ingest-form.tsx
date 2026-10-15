@@ -33,6 +33,8 @@ export function IngestForm() {
       setError("File MCN report (semua transaksi) wajib diunggah");
       return;
     }
+    const extraRaw = formData.get("extra_mcn_file");
+    const extraMcnFile = extraRaw instanceof File && extraRaw.size > 0 ? extraRaw : null;
     const tapRaw = formData.get("tap_file");
     const tapFile = tapRaw instanceof File && tapRaw.size > 0 ? tapRaw : null;
     const masterRaw = formData.get("master_file");
@@ -44,13 +46,14 @@ export function IngestForm() {
         //    body limit so ~61k-row exports go up in one piece).
         setStage("Mengunggah file ke storage…");
         const mcnRef = await uploadIngestFile(mcnFile, "mcn");
+        const extraMcnRef = extraMcnFile ? await uploadIngestFile(extraMcnFile, "mcn-extra") : null;
         const tapRef = tapFile ? await uploadIngestFile(tapFile, "tap") : null;
         const masterRef = masterFile ? await uploadIngestFile(masterFile, "master") : null;
 
         // 2. Server downloads + processes the file WHOLE (no splitting → no
         //    replace-loss) then removes the transient objects.
         setStage("Memproses agregat + analisa kebocoran di server…");
-        const res = await runIngestFromStorageAction(mcnRef, tapRef, masterRef);
+        const res = await runIngestFromStorageAction(mcnRef, tapRef, masterRef, extraMcnRef);
         if (res.ok) {
           setResult(res.result);
         } else {
@@ -75,6 +78,21 @@ export function IngestForm() {
             type="file" name="mcn_file" required accept={FILE_ACCEPT}
             className="mt-1 text-sm file:mr-3 file:rounded-md file:border-0 file:bg-slate-100 file:px-3 file:py-2 file:text-sm"
           />
+        </div>
+        <div>
+          <label className="block text-sm font-medium text-slate-700">
+            File MCN tambahan (mis. MEA Academy) — opsional
+          </label>
+          <input
+            type="file" name="extra_mcn_file" accept={FILE_ACCEPT}
+            className="mt-1 text-sm file:mr-3 file:rounded-md file:border-0 file:bg-slate-100 file:px-3 file:py-2 file:text-sm"
+          />
+          <p className="mt-1 rounded-md bg-slate-50 p-2 text-xs text-slate-500">
+            Export MCN akun kedua untuk MINGGU YANG SAMA (kreator inkubasi). Digabung dengan file MCN utama
+            jadi satu batch, sehingga file TAP dicocokkan ke kedua daftar kreator sekaligus. Jangan upload
+            akun kedua sebagai batch terpisah dengan TAP yang sama — GMV TAP kreator akun lain akan terhitung
+            dua kali sebagai &quot;Nama kreator tidak ada&quot;.
+          </p>
         </div>
         <div>
           <label className="block text-sm font-medium text-slate-700">

@@ -9,7 +9,7 @@ import {
 } from "@/lib/platform-csv";
 import type { PriceBounds } from "@/lib/projection/gmv";
 import { validateW1W5Period } from "@/lib/utils/date";
-import { derivePeriod, parseMcnFile, parseTapFile, type ParseResult, type SkippedRow } from "./parse";
+import { derivePeriod, mergeExtraMcn, parseMcnFile, parseTapFile, type ParseResult, type SkippedRow } from "./parse";
 import { buildCreatorShopPeriod, buildPeriodSummary, buildSubcatSegment, buildTopProducts } from "./aggregate";
 import { writeCreatorShopPeriod } from "./shop-period-write";
 import { MCN_COLUMNS, type McnRow, type TapRow } from "./schema";
@@ -27,6 +27,13 @@ export { enforceLeakRetention } from "./leak-retention";
 
 export interface RunIngestInput {
   mcnFile: File;
+  /**
+   * Optional second MCN export for the SAME week (e.g. the MEA Academy / incubation
+   * account), merged with `mcnFile` into one batch so the TAP file is matched
+   * against BOTH creator sets at once. Uploading them as two batches with the same
+   * TAP would count the other set's TAP GMV as "Nama kreator tidak ada" twice.
+   */
+  extraMcnFile?: File | null;
   tapFile?: File | null;
   /**
    * Optional "Master Data Shop" file for the leak analysis (the third input of the
@@ -79,10 +86,15 @@ export interface RunIngestResult {
   coveragePushError: string | null;
 }
 
-/** sha256 of the raw file bytes — cheap provenance record in upload_batches (no row content kept). */
-async function fileHash(file: File): Promise<string> {
-  const buf = Buffer.from(await file.arrayBuffer());
-  return createHash("sha256").update(buf).digest("hex");
+/**
+ * sha256 of the raw file bytes — cheap provenance record in upload_batches (no row
+ * content kept). Several files (MCN + extra MCN) hash in order; one file hashes
+ * exactly as before, so re-uploading a single-file week keeps its batch_id.
+ */
+async function fileHash(...files: File[]): Promise<string> {
+  const h = createHash("sha256");
+  for (const file of files) h.update(new Uint8Array(await file.arrayBuffer()));
+  return h.digest("hex");
 }
 
 /** Expected (normalized, English) headers this module reads from the MCN file. */
@@ -163,10 +175,17 @@ function describeMcnParseFailure(mcnParsed: ParseResult<McnRow>): string {
  */
 export async function runIngest(input: RunIngestInput): Promise<RunIngestResult> {
   const admin = createAdminClient();
-  const { mcnFile, tapFile, masterShopFile, actorId } = input;
+  const { mcnFile, extraMcnFile, tapFile, masterShopFile, actorId } = input;
 
   // ---- 1. Parse ----
   const mcnParsed = await parseMcnFile(mcnFile);
+  if (extraMcnFile) {
+    const extra = await parseMcnFile(extraMcnFile);
+    if (extra.rows.length === 0) {
+      throw new Error(`File MCN tambahan: ${describeMcnParseFailure(extra)}`);
+    }
+    mergeExtraMcn(mcnParsed, extra);
+  }
   const tapParsed = tapFile
     ? await parseTapFile(tapFile)
     : { rows: [] as TapRow[], skipped: [] as SkippedRow[], rawHeadersFound: [] as string[] };
@@ -188,7 +207,7 @@ export async function runIngest(input: RunIngestInput): Promise<RunIngestResult>
   // batch_id, so the upsert (onConflict batch_id) + per-creator delete-then-insert in
   // writeAggregates below stays idempotent (CLAUDE.md replace semantics, scoped per
   // creator × week — see writeAggregates doc).
-  const hash = await fileHash(mcnFile);
+  const hash = extraMcnFile ? await fileHash(mcnFile, extraMcnFile) : await fileHash(mcnFile);
   const hash8 = hash.slice(0, 8);
   const batchId = `ingest:${periodStart}:${hash8}`;
 

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import * as XLSX from "xlsx";
-import { parseMcnFile, parseTapFile, derivePeriod } from "../parse";
+import { parseMcnFile, parseTapFile, derivePeriod, mergeExtraMcn } from "../parse";
 import { parsePercent } from "../schema";
 
 function xlsxFile(rows: Record<string, unknown>[], name = "data.xlsx"): File {
@@ -455,5 +455,27 @@ describe("English header path unaffected by ID alias translation", () => {
     expect(rows).toHaveLength(1);
     expect(rows[0].estCreatorCommission).toBe(4_038_376);
     expect(rows[0].creatorName).toBe("toko_makmur58");
+  });
+});
+
+describe("mergeExtraMcn (MCN utama + MCN tambahan, mis. MEA Academy)", () => {
+  it("appends the extra file's rows and prefixes its skip reasons", async () => {
+    const main = await parseMcnFile(xlsxFile([MCN_SUMMARY_ROW, MCN_DATA_ROW]));
+    const extra = await parseMcnFile(
+      xlsxFile([
+        { ...MCN_DATA_ROW, "Creator username": "akademi_01" },
+        { ...MCN_DATA_ROW, "Product ID": "" },
+      ])
+    );
+    mergeExtraMcn(main, extra);
+    expect(main.rows.map((r) => r.creatorName)).toEqual(["toko_makmur58", "akademi_01"]);
+    expect(main.skipped).toEqual([{ row: 3, reason: "File MCN tambahan: ID Produk / ID Toko kosong" }]);
+  });
+
+  it("rejects an extra file from a different week", async () => {
+    const main = await parseMcnFile(xlsxFile([MCN_DATA_ROW]));
+    const extra = await parseMcnFile(xlsxFile([{ ...MCN_DATA_ROW, Date: "2026-07-05-2026-07-11" }]));
+    expect(() => mergeExtraMcn(main, extra)).toThrow(/minggu yang sama/);
+    expect(main.rows).toHaveLength(1);
   });
 });

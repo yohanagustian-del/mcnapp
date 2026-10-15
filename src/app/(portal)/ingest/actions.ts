@@ -34,12 +34,14 @@ export async function runIngestAction(formData: FormData): Promise<RunIngestActi
     if (!(mcnFile instanceof File) || mcnFile.size === 0) {
       throw new Error("File MCN report (semua transaksi) wajib diunggah");
     }
+    const extraRaw = formData.get("extra_mcn_file");
+    const extraMcnFile = extraRaw instanceof File && extraRaw.size > 0 ? extraRaw : null;
     const tapRaw = formData.get("tap_file");
     const tapFile = tapRaw instanceof File && tapRaw.size > 0 ? tapRaw : null;
     const masterRaw = formData.get("master_file");
     const masterShopFile = masterRaw instanceof File && masterRaw.size > 0 ? masterRaw : null;
 
-    const result = await runIngest({ mcnFile, tapFile, masterShopFile, actorId: actor.id });
+    const result = await runIngest({ mcnFile, extraMcnFile, tapFile, masterShopFile, actorId: actor.id });
 
     revalidatePath("/ingest");
     // Leak analysis runs in this pipeline again (in-platform compute) → refresh the
@@ -69,7 +71,8 @@ export async function runIngestAction(formData: FormData): Promise<RunIngestActi
 export async function runIngestFromStorageAction(
   mcnRef: unknown,
   tapRef: unknown,
-  masterRef?: unknown
+  masterRef?: unknown,
+  extraMcnRef?: unknown
 ): Promise<RunIngestActionResult> {
   const paths: string[] = [];
   try {
@@ -78,6 +81,14 @@ export async function runIngestFromStorageAction(
     assertValidObjectRef(mcnRef, "MCN");
     const mcn: IngestObjectRef = mcnRef;
     paths.push(...ingestObjectPaths(mcn));
+
+    // Optional second MCN export of the same week (e.g. MEA Academy), merged into one batch.
+    let extraMcn: IngestObjectRef | null = null;
+    if (extraMcnRef != null) {
+      assertValidObjectRef(extraMcnRef, "MCN tambahan");
+      extraMcn = extraMcnRef;
+      paths.push(...ingestObjectPaths(extraMcn));
+    }
 
     let tap: IngestObjectRef | null = null;
     if (tapRef != null) {
@@ -96,10 +107,11 @@ export async function runIngestFromStorageAction(
 
     const admin = createAdminClient();
     const mcnFile = await downloadIngestFile(admin, mcn);
+    const extraMcnFile = extraMcn ? await downloadIngestFile(admin, extraMcn) : null;
     const tapFile = tap ? await downloadIngestFile(admin, tap) : null;
     const masterShopFile = master ? await downloadIngestFile(admin, master) : null;
 
-    const result = await runIngest({ mcnFile, tapFile, masterShopFile, actorId: actor.id });
+    const result = await runIngest({ mcnFile, extraMcnFile, tapFile, masterShopFile, actorId: actor.id });
 
     revalidatePath("/ingest");
     revalidatePath("/link-leakage");
