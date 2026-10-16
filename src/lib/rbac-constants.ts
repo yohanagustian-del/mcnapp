@@ -228,6 +228,11 @@ export const PERMISSIONS: Record<string, Role[]> = {
   // permintaan user 2026-10-02. SENGAJA lebih sempit dari m7.manage (tanpa campaign_ops)
   // dan hanya mengubah target_gmv — edit penuh/hapus project & hapus peserta tetap management.
   "m7.edit_target": [...MANAGEMENT_ROLES, "cm_lead", "bizdev_lead", "acquisition_lead"],
+  // Brand bergabung di Special Project (migrasi 0091, request user 2026-10-16): brand-nya
+  // dicari BizDev, jadi seluruh BIZDEV_ROLES ikut mencatat — di atas pengelola project
+  // (m7.manage). Man power yang di-assign ke project itu juga boleh (lib/m7/access).
+  // Target jumlah brand ikut m7.edit_target (inline) / form Buat & Edit Project.
+  "m7.brands": [...MANAGEMENT_ROLES, "cm_lead", "acquisition_lead", ...BIZDEV_ROLES],
   // M7 report insight (Special Project): editing/finalizing narasi report dibuka untuk
   // SEMUA role staff (permintaan user 2026-09-28) — beda dari m7.manage (yang tetap
   // membatasi buat/edit project & man power). od_viewer sengaja dikecualikan: read-only

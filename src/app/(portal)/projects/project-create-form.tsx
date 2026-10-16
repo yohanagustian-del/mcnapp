@@ -57,6 +57,10 @@ export function ProjectCreateForm({
       <Field error={err("target_creators")}>
         <input name="target_creators" type="number" min="1" placeholder="Target jumlah creator" className={inputCls} />
       </Field>
+      <Field error={err("target_brands")}>
+        <input name="target_brands" type="number" min="1" placeholder="Target jumlah brand (opsional)"
+          title="Target brand yang bergabung — dicari oleh BizDev" className={inputCls} />
+      </Field>
       <input name="ads_budget_cap" placeholder="Ads budget cap (Rp, opsional)" className={inputCls} />
       <select name="curve_shape" className={inputCls}>
         <option value="ramp">Kurva target: ramp-up (default)</option>

@@ -165,7 +165,7 @@ export default async function CreatorDetailPage({
           <h1 className="text-2xl font-semibold">{creator.name}</h1>
           <p className="mt-1 text-sm text-slate-500">
             {creator.username ? `@${creator.username} · ` : ""}
-            {creator.platform ?? "—"} · {creator.jenis_creator ?? "—"} · Level {creator.level ?? "—"} ·{" "}
+            {creator.platform === "shopee" ? "Shopee" : "TikTok"} · {creator.jenis_creator ?? "—"} · Level {creator.level ?? "—"} ·{" "}
             {creator.status}
           </p>
         </div>

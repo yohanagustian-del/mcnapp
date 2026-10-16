@@ -14,6 +14,8 @@ import { slugifyProjectName } from "@/lib/m7/slug";
 import { suggestParticipantTargetGmv } from "@/lib/m7/participant-target";
 import { genId } from "@/lib/utils/id";
 import { endOfDayWib } from "@/lib/utils/date";
+import { isMissingRelationError } from "@/lib/db/missing-migration";
+import { MIGRATION_0091_MISSING, parseTargetBrands } from "@/lib/m7/project-brands";
 
 const isIsoDate = (s: string) => /^\d{4}-\d{2}-\d{2}$/.test(s);
 
@@ -83,9 +85,11 @@ export async function createProject(
   const targetCreatorsRaw = String(formData.get("target_creators") ?? "").trim();
   const targetCreators = targetCreatorsRaw ? Number(targetCreatorsRaw) : null;
   const shape: CurveShape = formData.get("curve_shape") === "flat" ? "flat" : "ramp";
+  const targetBrands = parseTargetBrands(formData.get("target_brands"));
 
   const fieldErrors: Record<string, string> = {};
   if (!name) fieldErrors.name = "Nama project wajib diisi";
+  if (!targetBrands.ok) fieldErrors.target_brands = targetBrands.error;
   if (!isIsoDate(startDate) || !isIsoDate(endDate) || endDate < startDate) {
     fieldErrors.start_date = "Periode project tidak valid (start ≤ end)";
   }
@@ -105,12 +109,18 @@ export async function createProject(
     .insert({
       name, type, start_date: startDate, end_date: endDate,
       target_gmv: targetGmv, ads_budget_cap: adsCap, target_creators: targetCreators,
+      // Hanya dikirim bila diisi: project tanpa target brand tetap bisa dibuat walau
+      // migrasi 0091 belum di-apply.
+      ...(targetBrands.ok && targetBrands.value !== null ? { target_brands: targetBrands.value } : {}),
       daily_target_curve: { shape },
       status: "planning", created_by: actor.id,
     })
     .select("id")
     .single();
-  if (error) return { ok: false, message: `Gagal membuat project: ${error.message}` };
+  if (error) {
+    if (isMissingRelationError(error)) return { ok: false, message: MIGRATION_0091_MISSING };
+    return { ok: false, message: `Gagal membuat project: ${error.message}` };
+  }
 
   // R3: slug butuh id (unik by construction) → dibuat setelah insert, bukan di dalamnya.
   const slug = slugifyProjectName(name, data.id);
@@ -119,7 +129,8 @@ export async function createProject(
 
   await writeAudit({
     actorId: actor.id, action: "m7.create_project", entityType: "special_projects",
-    entityId: String(data.id), after: { name, type, startDate, endDate, targetGmv, adsCap, shape, slug },
+    entityId: String(data.id),
+    after: { name, type, startDate, endDate, targetGmv, adsCap, shape, slug, targetBrands: targetBrands.ok ? targetBrands.value : null },
     type: "auto",
   });
   revalidatePath("/projects");
@@ -150,9 +161,11 @@ export async function updateProject(
   const targetCreatorsRaw = String(formData.get("target_creators") ?? "").trim();
   const targetCreators = targetCreatorsRaw ? Number(targetCreatorsRaw) : null;
   const shape: CurveShape = formData.get("curve_shape") === "flat" ? "flat" : "ramp";
+  const targetBrands = parseTargetBrands(formData.get("target_brands"));
 
   const fieldErrors: Record<string, string> = {};
   if (!name) fieldErrors.name = "Nama project wajib diisi";
+  if (!targetBrands.ok) fieldErrors.target_brands = targetBrands.error;
   if (!isIsoDate(startDate) || !isIsoDate(endDate) || endDate < startDate) {
     fieldErrors.start_date = "Periode project tidak valid (start ≤ end)";
   }
@@ -167,18 +180,21 @@ export async function updateProject(
   }
 
   const admin = createAdminClient();
-  const { data: existing } = await admin
+  const { data: existing, error: readError } = await admin
     .from("special_projects")
-    .select("name, type, start_date, end_date, target_gmv, ads_budget_cap, target_creators, daily_target_curve")
+    .select("name, type, start_date, end_date, target_gmv, ads_budget_cap, target_creators, target_brands, daily_target_curve")
     .eq("id", projectId)
     .maybeSingle();
+  if (readError && isMissingRelationError(readError)) return { ok: false, message: MIGRATION_0091_MISSING };
   if (!existing) return { ok: false, message: `Project ${projectId} tidak ditemukan.` };
 
+  const newTargetBrands = targetBrands.ok ? targetBrands.value : null;
   const { error } = await admin
     .from("special_projects")
     .update({
       name, type, start_date: startDate, end_date: endDate,
       target_gmv: targetGmv, ads_budget_cap: adsCap, target_creators: targetCreators,
+      target_brands: newTargetBrands,
       daily_target_curve: { shape },
     })
     .eq("id", projectId);
@@ -187,7 +203,7 @@ export async function updateProject(
   await writeAudit({
     actorId: actor.id, action: "m7.update_project", entityType: "special_projects",
     entityId: String(projectId), before: existing,
-    after: { name, type, startDate, endDate, targetGmv, adsCap, targetCreators, shape },
+    after: { name, type, startDate, endDate, targetGmv, adsCap, targetCreators, targetBrands: newTargetBrands, shape },
     type: "auto",
   });
   revalidatePath("/projects");
@@ -228,13 +244,15 @@ export async function deleteProject(
 
   // Isi lengkap yang hilang lewat cascade harus terekam SEBELUM dihapus (CLAUDE.md
   // #2) — satu-satunya jalan pulih kalau salah hapus adalah baca ulang audit_logs.
-  const [{ data: participants }, { data: manpower }, { count: dailyCount }, { count: liveCount }, { count: reportCount }] =
+  const [{ data: participants }, { data: manpower }, { count: dailyCount }, { count: liveCount }, { count: reportCount }, { data: brands }] =
     await Promise.all([
       admin.from("project_participants").select("creator_id, target_gmv, is_external, live_type, tiktok_binding_status").eq("project_id", projectId),
       admin.from("project_manpower").select("member_id, role, involvement_pct").eq("project_id", projectId),
       admin.from("project_daily_metrics").select("date", { count: "exact", head: true }).eq("project_id", projectId),
       admin.from("project_live_sessions").select("id", { count: "exact", head: true }).eq("project_id", projectId),
       admin.from("creator_reports").select("id", { count: "exact", head: true }).eq("project_id", projectId),
+      // Ikut terhapus lewat ON DELETE CASCADE (0091) — direkam di sini dulu.
+      admin.from("special_project_brands").select("brand_name, shop_key, bizdev_id, joined_at, notes").eq("project_id", projectId),
     ]);
 
   const { error } = await admin.rpc("delete_special_project", { p_project_id: projectId });
@@ -244,7 +262,7 @@ export async function deleteProject(
     actorId: actor.id, action: "m7.delete_project", entityType: "special_projects",
     entityId: String(projectId),
     before: {
-      project, participants, manpower,
+      project, participants, manpower, brands,
       daily_metrics_count: dailyCount ?? 0, live_sessions_count: liveCount ?? 0, creator_reports_count: reportCount ?? 0,
     },
     after: null,

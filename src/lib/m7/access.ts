@@ -62,3 +62,19 @@ export async function isAssignedManpower(
     .maybeSingle();
   return Boolean(data);
 }
+
+/**
+ * Hak mencatat brand yang bergabung ke project (migrasi 0091) — pola dua jalur yang
+ * SAMA dengan hak kelola peserta: role dengan `m7.brands` (management, lead, seluruh
+ * BizDev yang mencari brand-nya) untuk semua project, ATAU man power yang di-assign
+ * ke project itu saja.
+ */
+export function canManageProjectBrands({
+  hasBrandsPermission,
+  isAssignedManpower,
+}: {
+  hasBrandsPermission: boolean;
+  isAssignedManpower: boolean;
+}): boolean {
+  return hasBrandsPermission || isAssignedManpower;
+}

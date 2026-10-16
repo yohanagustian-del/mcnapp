@@ -150,6 +150,20 @@ interface CellContext {
   partnershipLabels: PartnershipStatusLabels;
 }
 
+type CreatorPlatform = "tiktok" | "shopee";
+
+/**
+ * creators.platform: NULL = baris lama sebelum default 'tiktok' (0078) — sama
+ * artinya dengan coalesce(platform, 'tiktok') di indeks unik username (0050).
+ */
+const platformOf = (c: CreatorTableRow): CreatorPlatform => (c.platform === "shopee" ? "shopee" : "tiktok");
+
+const PLATFORM_LABELS: Record<CreatorPlatform, string> = { tiktok: "TikTok", shopee: "Shopee" };
+const PLATFORM_BADGE: Record<CreatorPlatform, string> = {
+  tiktok: "rounded-full bg-slate-900 px-2 py-0.5 text-xs font-medium text-white",
+  shopee: "rounded-full bg-orange-100 px-2 py-0.5 text-xs font-medium text-orange-800",
+};
+
 interface TableColumn {
   /** Judul kolom — sekaligus kunci identitas kolom (dipakai state urut & pilih kolom). */
   label: string;
@@ -224,9 +238,13 @@ const COLUMNS: TableColumn[] = [
   { label: "No HP", value: (c) => c.phone, cell: (c) => c.phone ?? "—" },
   {
     label: "Platform",
-    value: (c) => c.platform,
-    className: `${td} capitalize`,
-    cell: (c) => c.platform ?? "—",
+    compact: true,
+    value: (c) => platformOf(c),
+    csvValue: (c) => PLATFORM_LABELS[platformOf(c)],
+    cell: (c) => {
+      const p = platformOf(c);
+      return <span className={PLATFORM_BADGE[p]}>{PLATFORM_LABELS[p]}</span>;
+    },
   },
   { label: "Jenis", value: (c) => c.jenis_creator, cell: (c) => c.jenis_creator ?? "—" },
   {
@@ -422,7 +440,14 @@ const ALL_LABELS = COLUMNS.map((c) => c.label);
  * disaring terhadap ALL_LABELS, jadi tanpa dinaikkan kolom baru tidak akan pernah
  * muncul untuk user yang pernah menyentuh menu Kolom (v2 = kolom "Akuisitor").
  */
-const COLUMN_PREF_KEY = "mcn.creators.columns.v2";
+const COLUMN_PREF_KEY = "mcn.creators.columns.v3";
+/**
+ * Kunci versi sebelumnya + kolom yang BARU masuk preset Ringkas sejak versi itu.
+ * Preferensi lama dibawa ke versi baru dengan kolom ini ditambahkan, jadi user yang
+ * pernah mengatur kolom tidak kehilangan pilihannya (v3 = "Platform" tampil default).
+ */
+const PREV_COLUMN_PREF_KEY = "mcn.creators.columns.v2";
+const COLUMNS_ADDED_SINCE_PREV = ["Platform"];
 
 type SortDir = "asc" | "desc";
 
@@ -513,17 +538,19 @@ export function CreatorsTable({
   // Improvement MCN T7: filter Partnership / Fee Agreement ("" = semua, "none" = belum ada data).
   const [partnershipFilter, setPartnershipFilter] = useState<string>("");
   const [feeFilter, setFeeFilter] = useState<string>("");
+  const [platformFilter, setPlatformFilter] = useState<"" | CreatorPlatform>("");
   const filteredRows = useMemo(
     () =>
       rows.filter(
         (c) =>
           !removedIds.has(c.id) &&
+          (platformFilter === "" || platformOf(c) === platformFilter) &&
           matches(c.username, c.owner_cpm_id) &&
           matchesStatusFilter(c.partnership_status, partnershipFilter) &&
           (feeFilter === "" ||
             (c.platform !== "shopee" && matchesStatusFilter(c.fee_agreement_status, feeFilter)))
       ),
-    [rows, removedIds, matches, partnershipFilter, feeFilter]
+    [rows, removedIds, matches, platformFilter, partnershipFilter, feeFilter]
   );
 
   const [pageSize, setPageSize] = useState<number>(DEFAULT_PAGE_SIZE);
@@ -541,9 +568,11 @@ export function CreatorsTable({
   useEffect(() => {
     try {
       const saved = window.localStorage.getItem(COLUMN_PREF_KEY);
-      if (!saved) return;
-      const parsed: unknown = JSON.parse(saved);
+      const prev = saved ? null : window.localStorage.getItem(PREV_COLUMN_PREF_KEY);
+      if (!saved && !prev) return;
+      const parsed: unknown = JSON.parse((saved ?? prev) as string);
       if (!Array.isArray(parsed)) return;
+      if (prev) parsed.push(...COLUMNS_ADDED_SINCE_PREV);
       // Saring terhadap ALL_LABELS: kolom yang sudah dihapus/diganti namanya di
       // kode tidak boleh menghidupkan kembali entri usang dari localStorage.
       const valid = ALL_LABELS.filter((l) => parsed.includes(l));
@@ -773,6 +802,16 @@ export function CreatorsTable({
           )}
         </div>
         <div className="flex flex-wrap items-center gap-2">
+          <select
+            value={platformFilter}
+            onChange={(e) => setPlatformFilter(e.target.value as "" | CreatorPlatform)}
+            aria-label="Filter Platform"
+            className="rounded-md border border-slate-300 px-2 py-1 text-sm text-slate-700"
+          >
+            <option value="">Platform: semua</option>
+            <option value="tiktok">TikTok</option>
+            <option value="shopee">Shopee</option>
+          </select>
           <select
             value={partnershipFilter}
             onChange={(e) => setPartnershipFilter(e.target.value)}
