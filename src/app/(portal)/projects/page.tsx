@@ -1,6 +1,7 @@
 import { requireMember, hasPermission } from "@/lib/rbac";
 import { createClient } from "@/lib/supabase/server";
 import { PROJECT_TYPES } from "@/lib/m7/project-type";
+import { loadProjectBrandSummary } from "@/lib/m7/project-brands-data";
 import { ProjectCreateForm } from "./project-create-form";
 import { ProjectsTable, type ProjectRow } from "./projects-table";
 
@@ -27,6 +28,9 @@ export default async function ProjectsPage() {
     }
   }
 
+  // Target vs brand bergabung (migrasi 0091) — query terpisah, toleran migrasi belum ada.
+  const brandSummary = await loadProjectBrandSummary(supabase, (projects ?? []).map((p) => p.id));
+
   // Baris siap-tampil untuk tabel client (search / filter status / sort / paginasi).
   const projectRows: ProjectRow[] = (projects ?? []).map((p) => ({
     id: p.id,
@@ -38,6 +42,8 @@ export default async function ProjectsPage() {
     adsBudgetCap: p.ads_budget_cap,
     targetCreators: p.target_creators,
     participants: participantCounts.get(p.id) ?? 0,
+    targetBrands: brandSummary.targetBrands.get(p.id) ?? null,
+    joinedBrands: brandSummary.joinedBrands.get(p.id) ?? 0,
     status: p.status,
     achievementPct: (p.result_summary as { achievement_pct?: number } | null)?.achievement_pct ?? null,
   }));
@@ -52,7 +58,11 @@ export default async function ProjectsPage() {
 
       {canManage && <ProjectCreateForm projectTypes={PROJECT_TYPES} />}
 
-      <ProjectsTable rows={projectRows} canEditTarget={hasPermission("m7.edit_target", member.role)} />
+      <ProjectsTable
+        rows={projectRows}
+        canEditTarget={hasPermission("m7.edit_target", member.role)}
+        showBrands={!brandSummary.migrationMissing}
+      />
     </div>
   );
 }

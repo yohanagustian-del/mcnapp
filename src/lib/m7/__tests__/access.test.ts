@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { canManageProjectParticipants, canUploadProjectPerformance } from "@/lib/m7/access";
+import { canManageProjectBrands, canManageProjectParticipants, canUploadProjectPerformance } from "@/lib/m7/access";
 
 describe("canManageProjectParticipants", () => {
   it("allows anyone holding the global m7.manage permission", () => {
@@ -61,5 +61,13 @@ describe("RBAC m7.edit_target", () => {
     for (const role of ROLES) {
       expect(hasPermission("m7.edit_target", role)).toBe(allowed.includes(role));
     }
+  });
+});
+
+describe("canManageProjectBrands", () => {
+  it("m7.brands ATAU man power project itu", () => {
+    expect(canManageProjectBrands({ hasBrandsPermission: true, isAssignedManpower: false })).toBe(true);
+    expect(canManageProjectBrands({ hasBrandsPermission: false, isAssignedManpower: true })).toBe(true);
+    expect(canManageProjectBrands({ hasBrandsPermission: false, isAssignedManpower: false })).toBe(false);
   });
 });

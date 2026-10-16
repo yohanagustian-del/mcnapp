@@ -1,6 +1,6 @@
 import { notFound } from "next/navigation";
 import Link from "next/link";
-import { requireMember, hasPermission, MANAGEMENT_ROLES } from "@/lib/rbac";
+import { requireMember, hasPermission, BIZDEV_ROLES, MANAGEMENT_ROLES } from "@/lib/rbac";
 import { EditProjectPanel } from "./edit-project-panel";
 import { ProjectTargetEdit } from "../project-target-edit";
 import { createClient } from "@/lib/supabase/server";
@@ -30,6 +30,10 @@ import { ExternalApplicantPanel, type ExternalApplicantRow } from "../external-a
 import { createAdminClient } from "@/lib/supabase/admin";
 import { ManpowerMemberPicker } from "./manpower-member-picker";
 import { CloseProjectButton } from "./close-project-button";
+import { ProjectBrandsPanel, type BizdevOption, type ProjectBrandRow } from "./project-brands-panel";
+import { canManageProjectBrands } from "@/lib/m7/access";
+import { isMissingRelationError } from "@/lib/db/missing-migration";
+import { MIGRATION_0091_MISSING } from "@/lib/m7/project-brands";
 
 const STATUS_LABELS: Record<string, string> = {
   on_track: "On-track", behind: "Behind", ahead: "Ahead",
@@ -189,6 +193,38 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
     hasManagePermission: canManage,
     isAssignedManpower,
   });
+  // Brand bergabung (migrasi 0091) — query terpisah dari special_projects supaya
+  // halaman tetap terbuka selama migrasinya belum di-apply.
+  const canManageBrands = canManageProjectBrands({
+    hasBrandsPermission: hasPermission("m7.brands", member.role),
+    isAssignedManpower,
+  });
+  const [{ data: brandTarget, error: brandTargetError }, { data: brandRows }, { data: bizdevMembers }] =
+    await Promise.all([
+      supabase.from("special_projects").select("target_brands").eq("id", projectId).maybeSingle(),
+      // Dua FK ke team_members (bizdev_id + created_by) → embed wajib menyebut constraint.
+      supabase.from("special_project_brands")
+        .select("id, brand_name, shop_key, bizdev_id, joined_at, notes, bizdev:team_members!special_project_brands_bizdev_id_fkey(name)")
+        .eq("project_id", projectId)
+        .order("joined_at", { ascending: true })
+        .order("id", { ascending: true }),
+      canManageBrands
+        ? supabase.from("team_members").select("id, name").eq("active", true).in("role", BIZDEV_ROLES).order("name")
+        : Promise.resolve({ data: [] as { id: string; name: string }[] }),
+    ]);
+  const brandMigrationMissing = isMissingRelationError(brandTargetError);
+  const projectBrands: ProjectBrandRow[] = (brandRows ?? []).map((b) => ({
+    id: b.id,
+    brandName: b.brand_name,
+    shopKey: b.shop_key,
+    bizdevId: b.bizdev_id,
+    bizdevName: (b.bizdev as unknown as { name: string } | null)?.name ?? null,
+    joinedAt: b.joined_at,
+    notes: b.notes,
+  }));
+  const bizdevOptions: BizdevOption[] = (bizdevMembers ?? []).map((m) => ({ id: m.id, name: m.name }));
+  const targetBrands = (brandTarget?.target_brands as number | null | undefined) ?? null;
+
   // Orang yang menjalankan project juga yang mengunggah datanya — hak yang sama
   // seperti menambah peserta, bukan permission global terpisah.
   const canOpenPerforma = canUploadProjectPerformance({
@@ -341,6 +377,7 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
               targetGmv: project.target_gmv === null ? null : Number(project.target_gmv),
               adsBudgetCap: project.ads_budget_cap === null ? null : Number(project.ads_budget_cap),
               targetCreators: project.target_creators,
+              targetBrands,
               curveShape: shape,
             }}
             projectTypes={PROJECT_TYPES}
@@ -394,6 +431,7 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
       <p className="mt-1 text-sm text-slate-500">
         {project.start_date} → {project.end_date} · Target {rupiah(project.target_gmv)} · Ads cap {rupiah(project.ads_budget_cap)}
         {project.target_creators ? ` · Target ${project.target_creators} creator` : ""}
+        {targetBrands ? ` · Target ${targetBrands} brand` : ""}
       </p>
 
       {/* Pintu ke pekerjaan project, sebagai blok tombol tepat di atas tombol
@@ -553,6 +591,21 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
           <p className="text-xs text-slate-400">GMV live {rupiah(cumLiveGmv)} dari total {rupiah(tracking.cumActual)}</p>
         </div>
       </div>
+
+      {/* ===== Brand bergabung (0091) ===== */}
+      {brandMigrationMissing ? (
+        <p className="mt-8 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">{MIGRATION_0091_MISSING}</p>
+      ) : (
+        <ProjectBrandsPanel
+          projectId={project.id}
+          targetBrands={targetBrands}
+          brands={projectBrands}
+          canManage={canManageBrands && project.status !== "dibatalkan"}
+          canEditTarget={hasPermission("m7.edit_target", member.role)}
+          bizdevOptions={bizdevOptions}
+          viewerId={member.id}
+        />
+      )}
 
       {/* ===== Daily metrics ===== */}
       <h2 className="mt-8 text-lg font-medium">Metrik Harian</h2>

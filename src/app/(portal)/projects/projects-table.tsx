@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useMemo } from "react";
 import { rupiah } from "@/lib/utils/format";
 import { ProjectTargetEdit } from "./project-target-edit";
+import { brandProgressTone } from "@/lib/m7/project-brands";
 import {
   PAGE_SIZE_10, SortableTh, TableFilterBar, TablePagination, useTableControls,
   type FacetDef, type SortConfig,
@@ -27,6 +28,10 @@ export interface ProjectRow {
   targetCreators: number | null;
   /** Peserta yang sudah ter-bind (dari project_participants). */
   participants: number;
+  /** Target jumlah brand (special_projects.target_brands), null = tidak ditargetkan. */
+  targetBrands: number | null;
+  /** Brand yang sudah bergabung (count special_project_brands). */
+  joinedBrands: number;
   status: string;
   /** Fraksi pencapaian dari result_summary (0.85 = 85%), null bila belum ada. */
   achievementPct: number | null;
@@ -57,6 +62,11 @@ const SORT: SortConfig<ProjectRow> = {
       value: (p) => (p.targetCreators == null ? null : p.targetCreators - p.participants),
       firstDir: "desc",
     },
+    // Sama seperti Target Creator: kekurangan brand terbesar dulu.
+    targetBrands: {
+      value: (p) => (p.targetBrands == null ? null : p.targetBrands - p.joinedBrands),
+      firstDir: "desc",
+    },
     adsCap: { value: (p) => p.adsBudgetCap, firstDir: "desc" },
     status: { value: (p) => p.status },
     achievement: { value: (p) => p.achievementPct, firstDir: "desc" },
@@ -72,7 +82,16 @@ const SORT: SortConfig<ProjectRow> = {
  * Semua client-side atas daftar yang sudah dimuat server component (limit 100) —
  * mengetik/menyortir/pindah halaman tidak memicu query Supabase baru.
  */
-export function ProjectsTable({ rows, canEditTarget = false }: { rows: ProjectRow[]; canEditTarget?: boolean }) {
+export function ProjectsTable({
+  rows,
+  canEditTarget = false,
+  showBrands = true,
+}: {
+  rows: ProjectRow[];
+  canEditTarget?: boolean;
+  /** false = migrasi 0091 belum di-apply → kolom Target Brand disembunyikan. */
+  showBrands?: boolean;
+}) {
   const facets = useMemo(() => STATUS_FACET, []);
   const controls = useTableControls<ProjectRow>({
     rows,
@@ -100,6 +119,7 @@ export function ProjectsTable({ rows, canEditTarget = false }: { rows: ProjectRo
                 <SortableTh controls={controls} sortKey="periode">Periode</SortableTh>
                 <SortableTh controls={controls} sortKey="targetGmv">Target GMV</SortableTh>
                 <SortableTh controls={controls} sortKey="targetCreators">Target Creator</SortableTh>
+                {showBrands && <SortableTh controls={controls} sortKey="targetBrands">Target Brand</SortableTh>}
                 <SortableTh controls={controls} sortKey="adsCap">Ads Cap</SortableTh>
                 <SortableTh controls={controls} sortKey="status">Status</SortableTh>
                 <SortableTh controls={controls} sortKey="achievement">Achievement</SortableTh>
@@ -130,6 +150,17 @@ export function ProjectsTable({ rows, canEditTarget = false }: { rows: ProjectRo
                       `${p.participants}`
                     )}
                   </td>
+                  {showBrands && (
+                    <td className="px-4 py-2">
+                      <Link
+                        href={`/projects/${p.id}#brand`}
+                        title="Lihat brand yang bergabung"
+                        className={`underline-offset-2 hover:underline ${brandProgressTone(p.joinedBrands, p.targetBrands)}`}
+                      >
+                        {p.targetBrands ? `${p.joinedBrands} / ${p.targetBrands}` : `${p.joinedBrands}`}
+                      </Link>
+                    </td>
+                  )}
                   <td className="px-4 py-2">{rupiah(p.adsBudgetCap)}</td>
                   <td className="px-4 py-2">
                     <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${STATUS_STYLES[p.status] ?? ""}`}>
@@ -143,7 +174,7 @@ export function ProjectsTable({ rows, canEditTarget = false }: { rows: ProjectRo
               ))}
               {controls.visibleRows.length === 0 && (
                 <tr>
-                  <td colSpan={7} className="px-4 py-6 text-center text-slate-400">
+                  <td colSpan={showBrands ? 8 : 7} className="px-4 py-6 text-center text-slate-400">
                     {controls.filterActive
                       ? "Tidak ada project yang cocok dengan pencarian nama/tipe atau filter status."
                       : "Belum ada project."}

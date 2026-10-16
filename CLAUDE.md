@@ -65,6 +65,11 @@ Platform internal MCN MEA (agency creator TikTok/Shopee). Menggabungkan tools te
   upload mingguan penuh timeout; kolomnya dibiarkan, tidak ditulis/dibaca). `bizdev_brand_perf` memuat SEMUA shop (non-deal = `shop_key` NULL =
   "Non BD Handle"); `shop_key_map` boleh memetakan satu `shop_id` ke beberapa `shop_key` (ejaan Shop
   Name berbeda → GMV tampil dobel, disengaja) — jangan `maybeSingle()` ke view itu.
+- **Brand bergabung Special Project = SATU tabel** (`special_project_brands`, migrasi 0091): target di
+  `special_projects.target_brands` (form Buat/Edit Project, inline `m7.edit_target`), realisasi = COUNT baris
+  — jangan simpan angka realisasi di `special_projects`. Tambah/hapus = `m7.brands` (management, lead, semua
+  BizDev) atau man power project itu (`canManageProjectBrands`). Satu brand sekali per project (`brand_key` =
+  `brandLeadKey`); `shop_key` opsional = shop tab Deal Brand (divalidasi ke `deal_shop_summary`).
 - **Report Kreator (M2) v2 = 0 LLM.** Angka dari `lib/report/build.ts`, SEMUA kalimat (ringkasan,
   insight box, badge produk, rekomendasi) dari `lib/report/rules.ts` + ambang `app_config`
   (`m2.report_rules`, `m2.live_benchmarks`). `token_used` selalu 0. Tim hanya boleh menyunting

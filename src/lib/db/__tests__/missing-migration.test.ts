@@ -93,3 +93,29 @@ describe("migrasi 0090 — fungsi lookup kategori", () => {
     expect(sql).not.toMatch(/create table/i);
   });
 });
+
+describe("migrasi 0092 — view grain-periode tanpa materialisasi penuh", () => {
+  const sql = readFileSync(
+    join(process.cwd(), "supabase/migrations/0092_shop_period_views_pushdown.sql"),
+    "utf8"
+  );
+
+  it("kedua view tetap security_invoker", () => {
+    for (const v of ["shop_period_summary", "creator_shop_perf"]) {
+      expect(sql).toMatch(new RegExp(`create or replace view ${v}\\s+with \\(security_invoker = on\\)`));
+    }
+  });
+
+  it("tidak ada CTE `base` yang dirujuk dua kali (penyebab materialisasi 766rb baris)", () => {
+    expect(sql).not.toMatch(/with base as/);
+  });
+
+  it("kunci bulan memakai timestamp tanpa zona (immutable → bisa di-index)", () => {
+    expect(sql).not.toMatch(/date_trunc\('month', [gub]\.period_start\)/);
+    expect(sql).toMatch(/date_trunc\('month', period_start::timestamp\)::date/);
+  });
+
+  it("tanpa DROP POLICY/TRIGGER (K23)", () => {
+    expect(sql).not.toMatch(/drop\s+(policy|trigger)/i);
+  });
+});

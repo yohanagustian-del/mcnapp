@@ -15,6 +15,7 @@ export interface EditableProject {
   targetGmv: number | null;
   adsBudgetCap: number | null;
   targetCreators: number | null;
+  targetBrands: number | null;
   curveShape: "ramp" | "flat";
 }
 
@@ -144,6 +145,10 @@ export function EditProjectPanel({
               <Field error={err("target_creators")}>
                 <input name="target_creators" type="number" min="1" defaultValue={project.targetCreators ?? ""}
                   placeholder="Target jumlah creator" className={inputCls} />
+              </Field>
+              <Field error={err("target_brands")}>
+                <input name="target_brands" type="number" min="1" defaultValue={project.targetBrands ?? ""}
+                  placeholder="Target jumlah brand (opsional)" className={inputCls} />
               </Field>
               <input name="ads_budget_cap" defaultValue={project.adsBudgetCap ?? ""} placeholder="Ads budget cap (Rp, opsional)" className={inputCls} />
               <select name="curve_shape" defaultValue={project.curveShape} className={inputCls}>
