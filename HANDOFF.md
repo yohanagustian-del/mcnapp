@@ -3,7 +3,7 @@
 Status per sesi 2026-10-14 (Revisi BizDev T1–T10 + F1–F3). Baca ini + `CLAUDE.md` sebelum lanjut.
 
 ## ⚡ SESI 2026-10-16 — Brand bergabung Special Project + kolom Platform di /creators
-1. Migrasi **0091** (`special_projects.target_brands`, tabel `special_project_brands`, RLS select + restrictive deny `is_creator_user()`) **SUDAH APPLY ke staging** (`fomlangoiiywhexwoqom`), advisor security tanpa temuan baru. **Production BELUM** — menunggu persetujuan user. Sampai di-apply, `/projects` menyembunyikan kolom Target Brand dan detail project menampilkan pesan `MIGRATION_0091_MISSING` (halaman tetap jalan).
+1. Migrasi **0091** (`special_projects.target_brands`, tabel `special_project_brands`, RLS select + restrictive deny `is_creator_user()`) **SUDAH APPLY** ke staging (`fomlangoiiywhexwoqom`, advisor security tanpa temuan baru) & production (`bqknstylbpwsnlgnzayw`, atas persetujuan user 2026-10-16; diverifikasi SQL: kolom `target_brands`, 2 policy termasuk deny RESTRICTIVE, 3 FK). Bila migrasi belum ada di suatu environment, `/projects` menyembunyikan kolom Target Brand dan detail project menampilkan `MIGRATION_0091_MISSING` (halaman tetap jalan).
 2. `/creators`: kolom Platform (badge TikTok/Shopee, NULL = TikTok) masuk preset Ringkas + filter Platform. Kunci preferensi kolom naik ke v3; pilihan v2 dibawa dengan "Platform" ditambahkan.
 
 ## ⚡ SESI 2026-10-13 — Revisi BizDev T1–T10 (plan `docs/plans/REVISI_BIZDEV_2026-10.md`, mode full-auto)
