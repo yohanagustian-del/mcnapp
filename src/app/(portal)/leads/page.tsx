@@ -23,7 +23,19 @@ const STATUS_COLORS: Record<string, string> = {
   batal: "bg-red-100 text-red-700",
 };
 
-const LIST_LIMIT = 500;
+const PAGE_SIZES = [10, 20, 50, 100] as const;
+const DEFAULT_PAGE_SIZE = 20;
+
+// Sortable columns → DB column. Contact PIC & Dukungan are derived/array fields, so not sortable.
+const SORT_COLUMNS: Record<string, string> = {
+  shop_name: "shop_name",
+  business_category: "business_category",
+  bizdev_names: "bizdev_names",
+  ads_scheme: "ads_scheme",
+  source: "source",
+  status: "status",
+  created_at: "created_at",
+};
 
 type LeadRow = {
   id: string;
@@ -42,13 +54,18 @@ type ContactRow = { lead_id: string; lead_name: string | null; phone: string | n
 export default async function LeadsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ status?: string; new?: string; upload?: string; q?: string; niche?: string }>;
+  searchParams: Promise<{ status?: string; new?: string; upload?: string; q?: string; niche?: string; bd?: string; sort?: string; dir?: string; size?: string; page?: string }>;
 }) {
   const member = await requireMember();
   const navItem = NAV_ITEMS.find((n) => n.href === "/leads")!;
   if (!canAccessNav(navItem, member.role)) redirect("/dashboard");
 
-  const { status: statusFilter, new: showNew, upload: showUpload, q, niche } = await searchParams;
+  const { status: statusFilter, new: showNew, upload: showUpload, q, niche, bd, sort, dir, size, page } = await searchParams;
+  const sortKey = sort && SORT_COLUMNS[sort] ? sort : "created_at";
+  const sortDir: "asc" | "desc" = dir === "asc" ? "asc" : dir === "desc" ? "desc" : sortKey === "created_at" ? "desc" : "asc";
+  const pageSize = (PAGE_SIZES as readonly number[]).includes(Number(size)) ? Number(size) : DEFAULT_PAGE_SIZE;
+  const pageNo = Math.max(1, Math.floor(Number(page)) || 1);
+  const from = (pageNo - 1) * pageSize;
   const canCreate = hasPermission("leads.create", member.role);
 
   const supabase = await createClient();
@@ -57,10 +74,12 @@ export default async function LeadsPage({
     .select("id, source, shop_name, business_category, bizdev_names, brand_support, ads_scheme, status, created_at, converted_deal_id", {
       count: "exact",
     })
-    .order("created_at", { ascending: false })
-    .limit(LIST_LIMIT);
+    .order(SORT_COLUMNS[sortKey], { ascending: sortDir === "asc", nullsFirst: false })
+    .order("id", { ascending: true })
+    .range(from, from + pageSize - 1);
   if (statusFilter) query = query.eq("status", statusFilter);
   for (const pattern of brandLeadSearchPatterns(q)) query = query.ilike("shop_name", pattern);
+  for (const pattern of brandLeadSearchPatterns(bd)) query = query.ilike("bizdev_names", pattern);
   if (niche?.trim()) query = query.ilike("business_category", escapeLike(niche.trim().replace(/\*/g, "")));
   const [{ data, count }, { data: nicheRows }] = await Promise.all([
     query,
@@ -77,10 +96,28 @@ export default async function LeadsPage({
     contactsByLead.set(c.lead_id, [...(contactsByLead.get(c.lead_id) ?? []), c]);
   }
 
-  const filtered = Boolean(q?.trim() || niche?.trim() || statusFilter);
+  const filtered = Boolean(q?.trim() || bd?.trim() || niche?.trim() || statusFilter);
+  const total = count ?? leads.length;
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  const SortTh = ({ label, col }: { label: string; col: string }) => {
+    const active = sortKey === col;
+    const next = active && sortDir === "asc" ? "desc" : "asc";
+    return (
+      <th className="px-4 py-3" aria-sort={active ? (sortDir === "asc" ? "ascending" : "descending") : "none"}>
+        <Link href={hrefWith({ sort: col, dir: next })} className="inline-flex items-center gap-1 hover:text-slate-900">
+          {label}
+          <span className={active ? "text-slate-900" : "text-slate-300"}>{active ? (sortDir === "asc" ? "▲" : "▼") : "↕"}</span>
+        </Link>
+      </th>
+    );
+  };
   const hrefWith = (patch: Record<string, string | undefined>) => {
     const params = new URLSearchParams();
-    const merged = { q, niche, status: statusFilter, ...patch };
+    // Any change other than the page itself goes back to page 1.
+    const merged: Record<string, string | undefined> = {
+      q, bd, niche, status: statusFilter, sort, dir, size,
+      ...patch,
+    };
     for (const [k, v] of Object.entries(merged)) if (v?.trim()) params.set(k, v);
     const s = params.toString();
     return s ? `/leads?${s}` : "/leads";
@@ -131,12 +168,24 @@ export default async function LeadsPage({
 
       <form action="/leads" method="get" className="mt-4 flex flex-wrap items-end gap-3">
         {statusFilter && <input type="hidden" name="status" value={statusFilter} />}
+        {sort && <input type="hidden" name="sort" value={sort} />}
+        {dir && <input type="hidden" name="dir" value={dir} />}
+        {size && <input type="hidden" name="size" value={size} />}
         <div className="min-w-56 flex-1">
           <label className="block text-xs text-slate-500">Cari Nama Brand</label>
           <input
             name="q"
             defaultValue={q ?? ""}
             placeholder="mis. skintific, wardah, lemonilo"
+            className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+          />
+        </div>
+        <div className="min-w-48">
+          <label className="block text-xs text-slate-500">Cari Nama Bizdev</label>
+          <input
+            name="bd"
+            defaultValue={bd ?? ""}
+            placeholder="mis. alya, budi"
             className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
           />
         </div>
@@ -172,24 +221,34 @@ export default async function LeadsPage({
         ))}
       </div>
 
-      <p className="mt-3 text-xs text-slate-500">
-        {count ?? leads.length} lead{filtered ? " cocok" : ""}
-        {(count ?? 0) > LIST_LIMIT ? ` — ditampilkan ${LIST_LIMIT} terbaru, persempit pencarian untuk melihat sisanya` : ""}.
-      </p>
+      <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-xs text-slate-500">
+        <p>
+          {total} lead{filtered ? " cocok" : ""}
+          {total > 0 ? ` — menampilkan ${from + 1}–${Math.min(from + pageSize, total)}` : ""}.
+        </p>
+        <div className="flex items-center gap-1">
+          <span className="mr-1">Baris per halaman:</span>
+          {PAGE_SIZES.map((n) => (
+            <Link key={n} href={hrefWith({ size: String(n) })} className={`rounded px-2 py-1 ${pageSize === n ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-600"}`}>
+              {n}
+            </Link>
+          ))}
+        </div>
+      </div>
 
       <div className="mt-2 overflow-x-auto rounded-lg border border-slate-200 bg-white">
         <table className="min-w-full text-sm">
           <thead className="bg-slate-50 text-left text-xs uppercase text-slate-500">
             <tr>
-              <th className="px-4 py-3">Nama Brand</th>
-              <th className="px-4 py-3">Niche</th>
+              <SortTh label="Nama Brand" col="shop_name" />
+              <SortTh label="Niche" col="business_category" />
               <th className="px-4 py-3">Contact PIC Brand</th>
-              <th className="px-4 py-3">Bizdev</th>
+              <SortTh label="Bizdev" col="bizdev_names" />
               <th className="px-4 py-3">Dukungan</th>
-              <th className="px-4 py-3">Ads Brand</th>
-              <th className="px-4 py-3">Asal</th>
-              <th className="px-4 py-3">Status</th>
-              <th className="px-4 py-3">Dibuat</th>
+              <SortTh label="Ads Brand" col="ads_scheme" />
+              <SortTh label="Asal" col="source" />
+              <SortTh label="Status" col="status" />
+              <SortTh label="Dibuat" col="created_at" />
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
@@ -245,6 +304,30 @@ export default async function LeadsPage({
           </tbody>
         </table>
       </div>
+
+      {totalPages > 1 && (
+        <div className="mt-3 flex items-center justify-between text-xs text-slate-600">
+          <span>
+            Halaman {Math.min(pageNo, totalPages)} dari {totalPages}
+          </span>
+          <div className="flex gap-2">
+            {pageNo > 1 ? (
+              <Link href={hrefWith({ page: String(pageNo - 1) })} className="rounded border border-slate-300 bg-white px-3 py-1 hover:bg-slate-50">
+                ← Sebelumnya
+              </Link>
+            ) : (
+              <span className="rounded border border-slate-200 px-3 py-1 text-slate-300">← Sebelumnya</span>
+            )}
+            {pageNo < totalPages ? (
+              <Link href={hrefWith({ page: String(pageNo + 1) })} className="rounded border border-slate-300 bg-white px-3 py-1 hover:bg-slate-50">
+                Berikutnya →
+              </Link>
+            ) : (
+              <span className="rounded border border-slate-200 px-3 py-1 text-slate-300">Berikutnya →</span>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
