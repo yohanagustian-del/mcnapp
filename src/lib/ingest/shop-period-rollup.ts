@@ -2,10 +2,11 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { isMissingRelationError } from "@/lib/db/missing-migration";
 
 /**
- * Number of shop slices per refresh — MUST equal the `& 31` mask in
- * refresh_shop_period_rollup_slice (migrasi 0094). Guarded by a test.
+ * Number of shop slices per refresh — MUST equal the `& 127` mask in
+ * refresh_shop_period_rollup_slice (migrasi 0094). Guarded by a test. With 32 slices a
+ * 5-week month (~1.1M source rows) already took 5-8s per upsert, at the 8s timeout.
  */
-export const SHOP_PERIOD_SLICES = 32;
+export const SHOP_PERIOD_SLICES = 128;
 const GRAINS = ["week", "month"] as const;
 /** Parallel rpc calls; each slice is one short statement (< the 8s statement_timeout). */
 const CONCURRENCY = 4;

@@ -19,13 +19,14 @@ function mockAdmin(calls: Call[], fail?: (c: Call) => { code?: string; message: 
 describe("refreshShopPeriodRollup", () => {
   it("jumlah irisan = mask `& 31` di fungsi SQL 0094", () => {
     const sql = readFileSync(join(process.cwd(), "supabase/migrations/0094_shop_period_rollup.sql"), "utf8");
-    const masks = [...sql.matchAll(/hashtext\([\w.]*shop_id\) & (\d+)/g)].map((m) => Number(m[1]));
-    expect(masks.length).toBeGreaterThan(0);
-    for (const m of masks) expect(m + 1).toBe(SHOP_PERIOD_SLICES);
-    expect(sql).toMatch(new RegExp(`p_slice > ${SHOP_PERIOD_SLICES - 1}`));
+    const fn = sql.slice(sql.indexOf("create or replace function refresh_shop_period_rollup_slice"));
+    const sliceMasks = [...fn.matchAll(/hashtext\(l\.shop_id\) & (\d+)\) = p_slice\b/g)].map((m) => Number(m[1]));
+    expect(sliceMasks).toEqual([SHOP_PERIOD_SLICES - 1, SHOP_PERIOD_SLICES - 1]);
+    expect(fn).toMatch(new RegExp(`p_slice > ${SHOP_PERIOD_SLICES - 1}`));
+    expect(sql).toMatch(new RegExp(`for v_slice in 0\\.\\.${SHOP_PERIOD_SLICES - 1} loop`));
   });
 
-  it("2 grain × 32 irisan dengan satu generasi, lalu finish", async () => {
+  it("2 grain × 128 irisan dengan satu generasi, lalu finish", async () => {
     const calls: Call[] = [];
     expect(await refreshShopPeriodRollup(mockAdmin(calls), "tiktok", "2026-09-29")).toBeNull();
     const slices = calls.filter((c) => c.fn === "refresh_shop_period_rollup_slice");

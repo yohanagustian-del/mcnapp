@@ -69,8 +69,8 @@ Platform internal MCN MEA (agency creator TikTok/Shopee). Menggabungkan tools te
   (`shop_period_rollup`/`creator_shop_rollup`, grain minggu & bulan) — bulan September ±1 juta baris
   terlalu berat dihitung ulang tiap halaman (timeout 8s). Logika agregasi tetap SATU: view `*_live`.
   Penulis ringkasan SATU-SATUNYA = `refreshShopPeriodRollup()` (`lib/ingest/shop-period-rollup.ts`),
-  dipanggil ingest TikTok & Shopee setelah `writeCreatorShopPeriod`: 2 grain × 32 irisan
-  (`hashtext(shop_id) & 31`, tiap rpc < 8s) lalu `finish_shop_period_rollup` menerbitkan generasi
+  dipanggil ingest TikTok & Shopee setelah `writeCreatorShopPeriod`: 2 grain × 128 irisan
+  (`hashtext(shop_id) & 127`, tiap rpc < 8s) lalu `finish_shop_period_rollup` menerbitkan generasi
   (`shop_period_rollup_runs`; view publik hanya membaca baris generasi terbaru — tanpa DELETE, K23).
   Tidak ada job terjadwal. Menulis `creator_shop_period_gmv` di jalur lain = WAJIB memanggil refresh ini.
 - **Upload mingguan TikTok = job latar belakang** (`ingest_jobs`, 0094): `startIngestFromStorageAction`

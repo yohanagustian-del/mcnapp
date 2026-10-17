@@ -14,8 +14,9 @@
 -- view), kini membaca tabel ringkasan → bizdev_brand_perf, TAP Matchmaking, Report Brand v2
 -- tidak berubah (CLAUDE.md #4).
 --
--- Refresh dipotong 32 IRISAN shop (hashtext(shop_id) & 31, di-index): satu irisan bulan
--- penuh ±22 ribu baris sumber → tiap panggilan rpc jauh di bawah statement_timeout 8s
+-- Refresh dipotong 128 IRISAN shop (hashtext(shop_id) & 127): bulan penuh 5 minggu ±1,1 juta
+-- baris sumber; dengan 32 irisan upsert satu irisan sudah ±5-8s (2026-10-17) → 128 irisan
+-- (±9 ribu baris sumber, ±3 ribu baris ringkasan per irisan) jauh di bawah statement_timeout 8s
 -- (service_role lewat PostgREST mewarisi 8s authenticator; SET di fungsi tidak memperpanjang
 -- statement yang sedang jalan). Tanpa job terjadwal: aplikasi memanggil 2 grain × 32 irisan
 -- lalu finish_shop_period_rollup.
@@ -174,6 +175,10 @@ create index if not exists shop_period_rollup_period_idx
 create index if not exists creator_shop_rollup_period_idx
   on creator_shop_rollup (period_kind, period_key, platform, refreshed_at);
 
+-- Tiap refresh bulan memperbarui ratusan ribu baris → vacuum lebih sering dari default 20%.
+alter table shop_period_rollup set (autovacuum_vacuum_scale_factor = 0.05);
+alter table creator_shop_rollup set (autovacuum_vacuum_scale_factor = 0.05);
+
 alter table shop_period_rollup enable row level security;
 alter table creator_shop_rollup enable row level security;
 alter table shop_period_rollup_runs enable row level security;
@@ -210,6 +215,7 @@ comment on table shop_period_rollup_runs is
   'Generasi refresh terbaru per (platform, grain, periode) untuk shop_period_rollup & creator_shop_rollup.';
 
 -- ============ index irisan (dipakai fungsi refresh) ============
+-- Index memakai & 31; fungsi menyaring & 31 (pakai index) lalu & 127 (irisan sebenarnya).
 create index if not exists cspg_week_slice_idx
   on creator_shop_period_gmv (platform, period_start, (hashtext(shop_id) & 31));
 create index if not exists cspg_month_slice_idx
@@ -247,14 +253,15 @@ begin
   else
     raise exception 'grain tidak dikenal: %', p_grain;
   end if;
-  if p_slice < 0 or p_slice > 31 then
-    raise exception 'irisan di luar 0..31: %', p_slice;
+  if p_slice < 0 or p_slice > 127 then
+    raise exception 'irisan di luar 0..127: %', p_slice;
   end if;
 
   insert into shop_period_rollup
     select l.*, p_generation from shop_period_summary_live l
      where l.platform = p_platform and l.period_kind = p_grain and l.period_key = v_key
-       and (hashtext(l.shop_id) & 31) = p_slice
+       and (hashtext(l.shop_id) & 31) = (p_slice & 31)  -- cocok dengan index irisan *_slice_*
+       and (hashtext(l.shop_id) & 127) = p_slice
   on conflict (platform, shop_id, period_kind, period_key) do update set
     shop_name = excluded.shop_name, period_end = excluded.period_end,
     creator_count = excluded.creator_count, creator_tap_count = excluded.creator_tap_count,
@@ -271,7 +278,8 @@ begin
   insert into creator_shop_rollup
     select l.*, p_generation from creator_shop_perf_live l
      where l.platform = p_platform and l.period_kind = p_grain and l.period_key = v_key
-       and (hashtext(l.shop_id) & 31) = p_slice
+       and (hashtext(l.shop_id) & 31) = (p_slice & 31)  -- cocok dengan index irisan *_slice_*
+       and (hashtext(l.shop_id) & 127) = p_slice
   on conflict (platform, creator_id, shop_id, period_kind, period_key) do update set
     shop_name = excluded.shop_name, gmv_mcn = excluded.gmv_mcn,
     gmv_mcn_live = excluded.gmv_mcn_live, gmv_mcn_video = excluded.gmv_mcn_video,
@@ -312,7 +320,7 @@ declare
   v_slice int;
 begin
   foreach v_grain in array array['week', 'month'] loop
-    for v_slice in 0..31 loop
+    for v_slice in 0..127 loop
       perform refresh_shop_period_rollup_slice(p_platform, p_period_start, v_grain, v_slice, v_gen);
     end loop;
   end loop;
