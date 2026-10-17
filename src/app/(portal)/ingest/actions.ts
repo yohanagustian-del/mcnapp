@@ -1,9 +1,11 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { after } from "next/server";
 import { requirePermission } from "@/lib/rbac";
 import { runIngest, type RunIngestResult } from "@/lib/ingest/run";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { isMissingRelationError, MIGRATION_0094_MISSING } from "@/lib/db/missing-migration";
 import {
   assertValidObjectRef, downloadIngestFile, ingestObjectPaths, removeIngestFiles, type IngestObjectRef,
 } from "@/lib/ingest/storage";
@@ -56,72 +58,145 @@ export async function runIngestAction(formData: FormData): Promise<RunIngestActi
   }
 }
 
+/** Collects + validates the storage refs of one weekly upload; returns every object path for cleanup. */
+interface StorageRefs {
+  mcn: IngestObjectRef;
+  extraMcn: IngestObjectRef | null;
+  tap: IngestObjectRef | null;
+  master: IngestObjectRef | null;
+  paths: string[];
+}
+
+function validateStorageRefs(mcnRef: unknown, tapRef: unknown, masterRef: unknown, extraMcnRef: unknown): StorageRefs {
+  assertValidObjectRef(mcnRef, "MCN");
+  const paths = [...ingestObjectPaths(mcnRef)];
+  // Optional second MCN export of the same week (e.g. MEA Academy), merged into one batch.
+  let extraMcn: IngestObjectRef | null = null;
+  if (extraMcnRef != null) {
+    assertValidObjectRef(extraMcnRef, "MCN tambahan");
+    extraMcn = extraMcnRef;
+    paths.push(...ingestObjectPaths(extraMcn));
+  }
+  let tap: IngestObjectRef | null = null;
+  if (tapRef != null) {
+    assertValidObjectRef(tapRef, "TAP");
+    tap = tapRef;
+    paths.push(...ingestObjectPaths(tap));
+  }
+  // Optional "Master Data Shop" upload for the leak analysis (artifact's 3rd input).
+  let master: IngestObjectRef | null = null;
+  if (masterRef != null) {
+    assertValidObjectRef(masterRef, "Master Data Shop");
+    master = masterRef;
+    paths.push(...ingestObjectPaths(master));
+  }
+  return { mcn: mcnRef, extraMcn, tap, master, paths };
+}
+
+export type StartIngestActionResult = { ok: true; jobId: string } | { ok: false; error: string };
+
 /**
  * Storage-based weekly upload (large-file path). The browser has already pushed
  * the WHOLE MCN file (and optional TAP file) straight to Supabase Storage —
- * bypassing the ~4,5MB serverless body limit that blocked ~61k-row exports — so
- * this action receives only the object refs. It downloads the files server-side
- * (service-role, RLS-bypass), runs the SAME parse → aggregate → drop-raw
- * pipeline as runIngestAction over the file WHOLE (no splitting ⇒ no
- * replace-loss), then removes the transient objects (raw never persisted).
+ * bypassing the ~4,5MB serverless body limit — so this action receives only the
+ * object refs.
  *
- * Cleanup is best-effort and always runs (success or failure); a leftover
- * object in the private transient bucket is harmless and never masks the result.
+ * A full week (MCN + Academy + TAP, ~1M rows) takes ~7 minutes; holding the
+ * browser request open that long ended in "Failed to fetch" even though the batch
+ * succeeded (W3 Okt 2026). So this action only records an ingest_jobs row
+ * (migrasi 0094) and returns its id; the pipeline runs in after() within this
+ * page's maxDuration, and the form polls getIngestJobAction. The pipeline itself
+ * is unchanged: download server-side → runIngest over the file WHOLE → remove the
+ * transient objects (best-effort, always, success or failure).
  */
-export async function runIngestFromStorageAction(
+export async function startIngestFromStorageAction(
   mcnRef: unknown,
   tapRef: unknown,
   masterRef?: unknown,
   extraMcnRef?: unknown
-): Promise<RunIngestActionResult> {
-  const paths: string[] = [];
+): Promise<StartIngestActionResult> {
+  let paths: string[] = [];
   try {
     const actor = await requirePermission("ingest.run");
-
-    assertValidObjectRef(mcnRef, "MCN");
-    const mcn: IngestObjectRef = mcnRef;
-    paths.push(...ingestObjectPaths(mcn));
-
-    // Optional second MCN export of the same week (e.g. MEA Academy), merged into one batch.
-    let extraMcn: IngestObjectRef | null = null;
-    if (extraMcnRef != null) {
-      assertValidObjectRef(extraMcnRef, "MCN tambahan");
-      extraMcn = extraMcnRef;
-      paths.push(...ingestObjectPaths(extraMcn));
-    }
-
-    let tap: IngestObjectRef | null = null;
-    if (tapRef != null) {
-      assertValidObjectRef(tapRef, "TAP");
-      tap = tapRef;
-      paths.push(...ingestObjectPaths(tap));
-    }
-
-    // Optional "Master Data Shop" upload for the leak analysis (artifact's 3rd input).
-    let master: IngestObjectRef | null = null;
-    if (masterRef != null) {
-      assertValidObjectRef(masterRef, "Master Data Shop");
-      master = masterRef;
-      paths.push(...ingestObjectPaths(master));
-    }
+    const refs = validateStorageRefs(mcnRef, tapRef, masterRef, extraMcnRef);
+    paths = refs.paths;
 
     const admin = createAdminClient();
-    const mcnFile = await downloadIngestFile(admin, mcn);
-    const extraMcnFile = extraMcn ? await downloadIngestFile(admin, extraMcn) : null;
-    const tapFile = tap ? await downloadIngestFile(admin, tap) : null;
-    const masterShopFile = master ? await downloadIngestFile(admin, master) : null;
+    const { data: job, error: jobError } = await admin
+      .from("ingest_jobs").insert({ platform: "tiktok", created_by: actor.id }).select("id").single();
+    if (jobError || !job) {
+      throw new Error(
+        isMissingRelationError(jobError) ? MIGRATION_0094_MISSING : `Gagal membuat job upload: ${jobError?.message}`
+      );
+    }
+    const jobId = (job as { id: string }).id;
+    const jobPaths = paths;
+    paths = []; // cleanup now belongs to the background run
 
-    const result = await runIngest({ mcnFile, extraMcnFile, tapFile, masterShopFile, actorId: actor.id });
-
-    revalidatePath("/ingest");
-    revalidatePath("/link-leakage");
-    revalidatePath("/workspace/cm");
-    revalidatePath("/creators");
-    revalidatePath("/dashboard");
-    return { ok: true, result };
+    after(async () => {
+      let update: Record<string, unknown>;
+      try {
+        const mcnFile = await downloadIngestFile(admin, refs.mcn);
+        const extraMcnFile = refs.extraMcn ? await downloadIngestFile(admin, refs.extraMcn) : null;
+        const tapFile = refs.tap ? await downloadIngestFile(admin, refs.tap) : null;
+        const masterShopFile = refs.master ? await downloadIngestFile(admin, refs.master) : null;
+        const result = await runIngest({ mcnFile, extraMcnFile, tapFile, masterShopFile, actorId: actor.id });
+        update = { status: "done", result };
+      } catch (e) {
+        update = { status: "failed", error: e instanceof Error ? e.message : "Terjadi kesalahan tidak terduga." };
+      } finally {
+        await removeIngestFiles(admin, jobPaths);
+      }
+      const { error } = await admin.from("ingest_jobs")
+        .update({ ...update, finished_at: new Date().toISOString() }).eq("id", jobId);
+      if (error) console.error(`[ingest] gagal update ingest_jobs ${jobId}: ${error.message}`);
+    });
+    return { ok: true, jobId };
   } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : "Terjadi kesalahan tidak terduga." };
-  } finally {
     if (paths.length > 0) await removeIngestFiles(createAdminClient(), paths);
+    return { ok: false, error: e instanceof Error ? e.message : "Terjadi kesalahan tidak terduga." };
+  }
+}
+
+/**
+ * A running job older than this is reported as failed: the function was killed at
+ * maxDuration (800s) before it could record the outcome.
+ */
+const INGEST_JOB_STALE_MS = 15 * 60 * 1000;
+
+export type IngestJobStatus =
+  | { status: "running"; startedAt: string }
+  | { status: "done"; result: RunIngestResult }
+  | { status: "failed"; error: string };
+
+/** Poll target of the upload form. Only the uploader's own jobs are visible. */
+export async function getIngestJobAction(jobId: string): Promise<IngestJobStatus> {
+  try {
+    const actor = await requirePermission("ingest.run");
+    const { data, error } = await createAdminClient()
+      .from("ingest_jobs").select("status, result, error, created_at")
+      .eq("id", jobId).eq("created_by", actor.id).maybeSingle();
+    if (error) throw new Error(error.message);
+    if (!data) return { status: "failed", error: "Job upload tidak ditemukan." };
+    const job = data as { status: string; result: RunIngestResult | null; error: string | null; created_at: string };
+    if (job.status === "done" && job.result) {
+      revalidatePath("/ingest");
+      revalidatePath("/link-leakage");
+      revalidatePath("/workspace/cm");
+      revalidatePath("/workspace/bizdev");
+      revalidatePath("/creators");
+      revalidatePath("/dashboard");
+      return { status: "done", result: job.result };
+    }
+    if (job.status === "failed") return { status: "failed", error: job.error ?? "Upload gagal." };
+    if (Date.now() - new Date(job.created_at).getTime() > INGEST_JOB_STALE_MS) {
+      return {
+        status: "failed",
+        error: "Proses melewati batas waktu server tanpa hasil. Cek Riwayat Upload; bila minggu ini belum Selesai, upload ulang.",
+      };
+    }
+    return { status: "running", startedAt: job.created_at };
+  } catch (e) {
+    return { status: "failed", error: e instanceof Error ? e.message : "Gagal membaca status upload." };
   }
 }

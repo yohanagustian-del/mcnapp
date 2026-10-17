@@ -387,6 +387,8 @@ export async function runIngest(input: RunIngestInput): Promise<RunIngestResult>
       admin, "tiktok", batchId, [...creatorIdsSet], periodStart, periodEnd, shopPeriod.rows, shopPeriod.unattributed
     );
     lap("creator x shop");
+    // The stored week + month rollup (migrasi 0094) is refreshed by the pg_cron queue: the
+    // insert above enqueues this week via trigger (migrasi 0095) — not from the app.
     if (shopPeriodWrite.skipped) skipped.push({ row: -1, reason: shopPeriodWrite.skipped });
     if (shopPeriod.unattributedTapGmv > 0) {
       skipped.push({

@@ -1,11 +1,36 @@
 "use client";
 
 import Link from "next/link";
-import { useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 import type { RunIngestResult } from "@/lib/ingest/run";
 import { uploadIngestFile } from "@/lib/ingest/upload-client";
 import { LeakResultPanel } from "@/components/leak-result-panel";
-import { runIngestFromStorageAction } from "./actions";
+import { getIngestJobAction, startIngestFromStorageAction } from "./actions";
+
+/** localStorage key: a reload while the server is still processing resumes polling. */
+const JOB_KEY = "mcn.ingest.job";
+const POLL_MS = 5000;
+/** Consecutive poll failures (network blips) tolerated before giving up. */
+const MAX_POLL_ERRORS = 12;
+
+function storeJob(jobId: string | null) {
+  try {
+    if (jobId) localStorage.setItem(JOB_KEY, jobId);
+    else localStorage.removeItem(JOB_KEY);
+  } catch {
+    // storage unavailable (private mode) — polling still works for this page view
+  }
+}
+
+function storedJob(): string | null {
+  try {
+    return localStorage.getItem(JOB_KEY);
+  } catch {
+    return null;
+  }
+}
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 const FILE_ACCEPT =
   ".xlsx,.xls,.csv,.numbers,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.apple.numbers,text/csv";
@@ -24,6 +49,57 @@ export function IngestForm() {
   const [tapChosen, setTapChosen] = useState(false);
   const [stage, setStage] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
+
+  const polling = useRef(false);
+
+  /**
+   * Polls the background job until done/failed. The pipeline runs ~7 minutes for a
+   * full week; transient fetch errors (laptop sleep, flaky wifi) are retried instead
+   * of surfacing "Failed to fetch" while the server keeps working.
+   */
+  async function waitForJob(jobId: string) {
+    if (polling.current) return;
+    polling.current = true;
+    const started = Date.now();
+    let errors = 0;
+    try {
+      for (;;) {
+        const minutes = Math.floor((Date.now() - started) / 60000);
+        setStage(`Memproses di server… (${minutes} menit)`);
+        try {
+          const job = await getIngestJobAction(jobId);
+          errors = 0;
+          if (job.status === "done") {
+            setResult(job.result);
+            break;
+          }
+          if (job.status === "failed") {
+            setError(job.error);
+            break;
+          }
+        } catch {
+          if (++errors >= MAX_POLL_ERRORS) {
+            setError(
+              "Koneksi ke server terputus saat menunggu hasil. Proses tetap berjalan di server — muat ulang halaman ini " +
+              "untuk melihat hasilnya, atau cek Riwayat Upload."
+            );
+            return; // keep the stored job id so a reload resumes
+          }
+        }
+        await sleep(POLL_MS);
+      }
+      storeJob(null);
+    } finally {
+      polling.current = false;
+      setStage(null);
+    }
+  }
+
+  useEffect(() => {
+    const jobId = storedJob();
+    if (jobId) startTransition(() => waitForJob(jobId));
+    // Resume a job left running by a previous page view (once, on mount).
+  }, []);
 
   function onSubmit(formData: FormData) {
     setError(null);
@@ -51,17 +127,18 @@ export function IngestForm() {
         const masterRef = masterFile ? await uploadIngestFile(masterFile, "master") : null;
 
         // 2. Server downloads + processes the file WHOLE (no splitting → no
-        //    replace-loss) then removes the transient objects.
-        setStage("Memproses agregat + analisa kebocoran di server…");
-        const res = await runIngestFromStorageAction(mcnRef, tapRef, masterRef, extraMcnRef);
-        if (res.ok) {
-          setResult(res.result);
-        } else {
+        //    replace-loss) in the background, then removes the transient objects.
+        setStage("Memulai proses di server…");
+        const res = await startIngestFromStorageAction(mcnRef, tapRef, masterRef, extraMcnRef);
+        if (!res.ok) {
           setError(res.error);
+          setStage(null);
+          return;
         }
+        storeJob(res.jobId);
+        await waitForJob(res.jobId);
       } catch (e) {
         setError(e instanceof Error ? e.message : "Terjadi kesalahan tidak terduga saat mengunggah.");
-      } finally {
         setStage(null);
       }
     });
@@ -142,6 +219,12 @@ export function IngestForm() {
         tidak perlu lagi menjalankan artifak eksternal.
       </p>
 
+      {pending && stage?.startsWith("Memproses di server") && (
+        <p className="mt-3 rounded-md bg-blue-50 p-3 text-sm text-blue-900">
+          Upload sudah diterima dan sedang diproses di server (file besar bisa ±10 menit). Halaman boleh
+          ditutup — proses tetap jalan; buka lagi halaman ini untuk melihat hasilnya.
+        </p>
+      )}
       {error && <p className="mt-3 rounded-md bg-red-50 p-3 text-sm text-red-700">{error}</p>}
 
       {result && (
