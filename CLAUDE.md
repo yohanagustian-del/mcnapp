@@ -68,11 +68,15 @@ Platform internal MCN MEA (agency creator TikTok/Shopee). Menggabungkan tools te
   Sejak 0094 (2026-10-16) `shop_period_summary`/`creator_shop_perf` membaca TABEL RINGKASAN
   (`shop_period_rollup`/`creator_shop_rollup`, grain minggu & bulan) — bulan September ±1 juta baris
   terlalu berat dihitung ulang tiap halaman (timeout 8s). Logika agregasi tetap SATU: view `*_live`.
-  Penulis ringkasan SATU-SATUNYA = `refreshShopPeriodRollup()` (`lib/ingest/shop-period-rollup.ts`),
-  dipanggil ingest TikTok & Shopee setelah `writeCreatorShopPeriod`: 2 grain × 128 irisan
-  (`hashtext(shop_id) & 127`, tiap rpc < 8s) lalu `finish_shop_period_rollup` menerbitkan generasi
-  (`shop_period_rollup_runs`; view publik hanya membaca baris generasi terbaru — tanpa DELETE, K23).
-  Tidak ada job terjadwal. Menulis `creator_shop_period_gmv` di jalur lain = WAJIB memanggil refresh ini.
+  Penulis ringkasan SATU-SATUNYA = job pg_cron `shop_period_rollup_queue` (tiap menit, migrasi 0095,
+  Opsi A disetujui user 2026-10-17) → `process_shop_period_rollup_queue()`. Trigger statement-level
+  insert/delete di `creator_shop_period_gmv` & `creator_shop_period_unattributed_tap` menaruh
+  (platform, minggu) ke `shop_period_rollup_queue`; setelah minggu itu tenang 2 menit, job menghitung
+  grain minggu (+ bulan sekali per bulan) 128 irisan (`hashtext(shop_id) & 127`) tanpa statement_timeout,
+  lalu `finish_shop_period_rollup` menerbitkan generasi (`shop_period_rollup_runs`; view publik hanya
+  membaca baris generasi terbaru; cap baris = `greatest`, generasi tak pernah mundur). Antrean TIDAK
+  pernah dihapus (`processed_at`, K23). Aplikasi TIDAK me-refresh sendiri — jalur tulis lain otomatis
+  ikut lewat trigger. Angka Summary BizDev/TAP Matchmaking/Report Brand muncul ±2–10 menit setelah upload.
 - **Upload mingguan TikTok = job latar belakang** (`ingest_jobs`, 0094): `startIngestFromStorageAction`
   mencatat job lalu menjalankan `runIngest` lewat `after()` (maxDuration 800s halaman `/ingest`); form
   mem-poll `getIngestJobAction` (toleran putus koneksi, lanjut setelah reload via localStorage). Jangan

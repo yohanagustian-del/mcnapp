@@ -12,7 +12,6 @@ import { validateW1W5Period } from "@/lib/utils/date";
 import { derivePeriod, mergeExtraMcn, parseMcnFile, parseTapFile, type ParseResult, type SkippedRow } from "./parse";
 import { buildCreatorShopPeriod, buildPeriodSummary, buildSubcatSegment, buildTopProducts } from "./aggregate";
 import { writeCreatorShopPeriod } from "./shop-period-write";
-import { refreshShopPeriodRollup } from "./shop-period-rollup";
 import { fillMissingCategories } from "./category-fill";
 import { MCN_COLUMNS, type McnRow, type TapRow } from "./schema";
 import { upsertDerivedFromTap } from "@/lib/m10/products";
@@ -388,13 +387,9 @@ export async function runIngest(input: RunIngestInput): Promise<RunIngestResult>
       admin, "tiktok", batchId, [...creatorIdsSet], periodStart, periodEnd, shopPeriod.rows, shopPeriod.unattributed
     );
     lap("creator x shop");
+    // The stored week + month rollup (migrasi 0094) is refreshed by the pg_cron queue: the
+    // insert above enqueues this week via trigger (migrasi 0095) — not from the app.
     if (shopPeriodWrite.skipped) skipped.push({ row: -1, reason: shopPeriodWrite.skipped });
-    else {
-      // Stored week + month rollup read by /workspace/bizdev etc. (migrasi 0094).
-      const rollupNote = await refreshShopPeriodRollup(admin, "tiktok", periodStart);
-      if (rollupNote) skipped.push({ row: -1, reason: rollupNote });
-      lap("shop period rollup");
-    }
     if (shopPeriod.unattributedTapGmv > 0) {
       skipped.push({
         row: -1,

@@ -154,3 +154,43 @@ describe("migrasi 0093/0094 — kolom bulan & tabel ringkasan per shop", () => {
     }
   });
 });
+
+describe("migrasi 0095 — antrean ringkasan per shop + job pg_cron", () => {
+  const sql = readFileSync(join(process.cwd(), "supabase/migrations/0095_shop_period_rollup_queue.sql"), "utf8");
+
+  it("tanpa DROP/DELETE apa pun (K23) — antrean ditandai processed_at, tidak dihapus", () => {
+    expect(sql).not.toMatch(/^\s*drop\s/im);
+    expect(sql).not.toMatch(/^\s*delete\s/im);
+    expect(sql).toMatch(/update shop_period_rollup_queue set processed_at = v_seen\[i\]/);
+  });
+
+  it("tabel antrean punya restrictive deny is_creator_user()", () => {
+    const tables = [...sql.matchAll(/create table if not exists (\w+)/g)].map((m) => m[1]);
+    expect(tables).toEqual(["shop_period_rollup_queue"]);
+    expect(sql).toMatch(/on shop_period_rollup_queue as restrictive for select\s+using \(not \(select is_creator_user\(\)\)\)/);
+  });
+
+  it("trigger insert & delete di kedua tabel sumber", () => {
+    for (const t of ["creator_shop_period_gmv", "creator_shop_period_unattributed_tap"]) {
+      expect(sql).toMatch(new RegExp(`after insert on ${t}\\s+referencing new table as changed`));
+      expect(sql).toMatch(new RegExp(`after delete on ${t}\\s+referencing old table as changed`));
+    }
+  });
+
+  it("irisan pemroses = mask di refresh_shop_period_rollup_slice; generasi tidak mundur", () => {
+    const fn = sql.slice(sql.indexOf("create or replace function refresh_shop_period_rollup_slice"));
+    const masks = [...fn.matchAll(/hashtext\(l\.shop_id\) & (\d+)\) = p_slice\b/g)].map((m) => Number(m[1]));
+    expect(masks).toEqual([127, 127]);
+    expect(fn).toMatch(/p_slice > 127/);
+    expect([...sql.matchAll(/for v_slice in 0\.\.(\d+) loop/g)].map((m) => Number(m[1]))).toEqual([127, 127]);
+    expect(fn).toMatch(/refreshed_at = greatest\(shop_period_rollup\.refreshed_at, excluded\.refreshed_at\)/);
+    expect(fn).toMatch(/refreshed_at = greatest\(creator_shop_rollup\.refreshed_at, excluded\.refreshed_at\)/);
+  });
+
+  it("pemroses hanya untuk service_role; job cron tanpa statement_timeout", () => {
+    expect(sql).toMatch(/revoke all on function process_shop_period_rollup_queue\(interval\) from public, anon, authenticated/);
+    expect(sql).toMatch(/grant execute on function process_shop_period_rollup_queue\(interval\) to service_role/);
+    expect(sql).toMatch(/revoke all on function enqueue_shop_period_rollup\(\) from public, anon, authenticated/);
+    expect(sql).toMatch(/'shop_period_rollup_queue', '\* \* \* \* \*',\s+'set statement_timeout = 0; select process_shop_period_rollup_queue\(\);'/);
+  });
+});

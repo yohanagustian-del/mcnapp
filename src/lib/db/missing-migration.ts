@@ -35,3 +35,7 @@ export const MIGRATION_0087_MISSING =
 /** Pesan untuk GMV TAP tanpa nama kreator (K6) — tabel 0088 + tabel lingkup 0089. */
 export const MIGRATION_0089_MISSING =
   "Migrasi 0088/0089 belum di-apply (tabel creator_shop_period_unattributed_tap / creator_shop_period_unattributed_scope). Hubungi admin untuk menjalankan migrasinya.";
+
+/** Pesan untuk tabel ringkasan per shop & job upload latar belakang (migrasi 0094). */
+export const MIGRATION_0094_MISSING =
+  "Migrasi 0094 belum di-apply (tabel ringkasan shop_period_rollup / tabel job upload ingest_jobs). Hubungi admin untuk menjalankan migrasinya.";

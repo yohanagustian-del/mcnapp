@@ -5,8 +5,7 @@ import { after } from "next/server";
 import { requirePermission } from "@/lib/rbac";
 import { runIngest, type RunIngestResult } from "@/lib/ingest/run";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { isMissingRelationError } from "@/lib/db/missing-migration";
-import { MIGRATION_0094_MISSING } from "@/lib/ingest/shop-period-rollup";
+import { isMissingRelationError, MIGRATION_0094_MISSING } from "@/lib/db/missing-migration";
 import {
   assertValidObjectRef, downloadIngestFile, ingestObjectPaths, removeIngestFiles, type IngestObjectRef,
 } from "@/lib/ingest/storage";
