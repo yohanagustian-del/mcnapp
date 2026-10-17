@@ -65,6 +65,18 @@ Platform internal MCN MEA (agency creator TikTok/Shopee). Menggabungkan tools te
   upload mingguan penuh timeout; kolomnya dibiarkan, tidak ditulis/dibaca). `bizdev_brand_perf` memuat SEMUA shop (non-deal = `shop_key` NULL =
   "Non BD Handle"); `shop_key_map` boleh memetakan satu `shop_id` ke beberapa `shop_key` (ejaan Shop
   Name berbeda → GMV tampil dobel, disengaja) — jangan `maybeSingle()` ke view itu.
+  Sejak 0094 (2026-10-16) `shop_period_summary`/`creator_shop_perf` membaca TABEL RINGKASAN
+  (`shop_period_rollup`/`creator_shop_rollup`, grain minggu & bulan) — bulan September ±1 juta baris
+  terlalu berat dihitung ulang tiap halaman (timeout 8s). Logika agregasi tetap SATU: view `*_live`.
+  Penulis ringkasan SATU-SATUNYA = `refreshShopPeriodRollup()` (`lib/ingest/shop-period-rollup.ts`),
+  dipanggil ingest TikTok & Shopee setelah `writeCreatorShopPeriod`: 2 grain × 32 irisan
+  (`hashtext(shop_id) & 31`, tiap rpc < 8s) lalu `finish_shop_period_rollup` menerbitkan generasi
+  (`shop_period_rollup_runs`; view publik hanya membaca baris generasi terbaru — tanpa DELETE, K23).
+  Tidak ada job terjadwal. Menulis `creator_shop_period_gmv` di jalur lain = WAJIB memanggil refresh ini.
+- **Upload mingguan TikTok = job latar belakang** (`ingest_jobs`, 0094): `startIngestFromStorageAction`
+  mencatat job lalu menjalankan `runIngest` lewat `after()` (maxDuration 800s halaman `/ingest`); form
+  mem-poll `getIngestJobAction` (toleran putus koneksi, lanjut setelah reload via localStorage). Jangan
+  kembali menahan request browser selama pipeline berjalan ("Failed to fetch" W3 Okt 2026).
 - **Brand bergabung Special Project = SATU tabel** (`special_project_brands`, migrasi 0091): target di
   `special_projects.target_brands` (form Buat/Edit Project, inline `m7.edit_target`), realisasi = COUNT baris
   — jangan simpan angka realisasi di `special_projects`. Tambah/hapus = `m7.brands` (management, lead, semua

@@ -119,3 +119,38 @@ describe("migrasi 0092 — view grain-periode tanpa materialisasi penuh", () => 
     expect(sql).not.toMatch(/drop\s+(policy|trigger)/i);
   });
 });
+
+describe("migrasi 0093/0094 — kolom bulan & tabel ringkasan per shop", () => {
+  const sql93 = readFileSync(join(process.cwd(), "supabase/migrations/0093_shop_period_month_column.sql"), "utf8");
+  const sql = readFileSync(join(process.cwd(), "supabase/migrations/0094_shop_period_rollup.sql"), "utf8");
+
+  it("tanpa DROP/DELETE apa pun (K23)", () => {
+    for (const s of [sql93, sql]) {
+      expect(s).not.toMatch(/^\s*drop\s/im);
+      expect(s).not.toMatch(/^\s*delete\s/im);
+    }
+  });
+
+  it("setiap tabel baru punya restrictive deny is_creator_user()", () => {
+    const tables = [...sql.matchAll(/create table if not exists (\w+)/g)].map((m) => m[1]);
+    expect(tables).toEqual(["shop_period_rollup", "creator_shop_rollup", "shop_period_rollup_runs", "ingest_jobs"]);
+    for (const t of tables) {
+      expect(sql).toMatch(new RegExp(`on ${t} as restrictive for select\\s+using \\(not \\(select is_creator_user\\(\\)\\)\\)`));
+    }
+  });
+
+  it("semua view security_invoker; view _live tertutup untuk anon/authenticated", () => {
+    for (const v of ["shop_period_summary_live", "creator_shop_perf_live", "shop_period_summary", "creator_shop_perf"]) {
+      expect(sql).toMatch(new RegExp(`create or replace view ${v}\\s+with \\(security_invoker = on\\)`));
+    }
+    expect(sql).toMatch(/revoke all on shop_period_summary_live from anon, authenticated/);
+    expect(sql).toMatch(/revoke all on creator_shop_perf_live from anon, authenticated/);
+  });
+
+  it("fungsi refresh hanya bisa dieksekusi service_role", () => {
+    for (const f of ["refresh_shop_period_rollup_slice", "finish_shop_period_rollup", "refresh_shop_period_rollup"]) {
+      expect(sql).toMatch(new RegExp(`revoke all on function ${f}\\([^)]*\\) from public, anon, authenticated`));
+      expect(sql).toMatch(new RegExp(`grant execute on function ${f}\\([^)]*\\) to service_role`));
+    }
+  });
+});

@@ -98,7 +98,7 @@ export function IngestForm() {
   useEffect(() => {
     const jobId = storedJob();
     if (jobId) startTransition(() => waitForJob(jobId));
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- resume once on mount
+    // Resume a job left running by a previous page view (once, on mount).
   }, []);
 
   function onSubmit(formData: FormData) {
