@@ -6,23 +6,27 @@
 -- shop, ±25 detik untuk creator_shop_perf) di SETIAP halaman 1000 baris → statement timeout
 -- 8s. Index tidak menolong ketika semua baris memang dibutuhkan.
 --
--- Perbaikan: agregat grain minggu & bulan DISIMPAN di dua tabel ringkasan
--- (shop_period_rollup, creator_shop_rollup), di-refresh SEKALI per upload oleh
--- refresh_shop_period_rollup(platform, period_start) — dipanggil penulis satu-satunya
--- (lib/ingest/shop-period-write.ts) setelah menulis baris minggu itu. Logika agregasi tetap
--- SATU tempat: view *_live (= definisi 0093, dibaca hanya oleh fungsi refresh).
--- shop_period_summary & creator_shop_perf tetap ada dengan kolom yang SAMA (create or
--- replace view), kini hanya membaca tabel ringkasan → bizdev_brand_perf, TAP Matchmaking,
--- Report Brand v2 tidak berubah (CLAUDE.md #4).
+-- Perbaikan: agregat grain minggu & bulan DISIMPAN di tabel ringkasan (shop_period_rollup,
+-- creator_shop_rollup), ditulis ulang SEKALI per upload oleh penulis satu-satunya
+-- (lib/ingest/shop-period-write.ts → lib/ingest/shop-period-rollup.ts). Logika agregasi tetap
+-- SATU tempat: view *_live (= definisi 0093, hanya dibaca fungsi refresh).
+-- shop_period_summary & creator_shop_perf tetap ada dengan kolom yang SAMA (create or replace
+-- view), kini membaca tabel ringkasan → bizdev_brand_perf, TAP Matchmaking, Report Brand v2
+-- tidak berubah (CLAUDE.md #4).
 --
--- Tabel ringkasan dibuat dari view lama (create table as ... with no data) supaya tipe
--- kolomnya identik dengan view. Refresh = UPSERT bertanda `refreshed_at` + satu baris per
--- (platform, grain, periode) di shop_period_rollup_runs; view publik hanya membaca baris
--- generasi terbaru — baris shop yang hilang dari upload ulang otomatis tidak terbaca, tanpa
--- pernyataan hapus (apply_migration MCP menggantung pada DELETE/DROP, K23), dan pembaca tidak
--- pernah melihat periode yang sedang setengah ditulis. RLS: select authenticated + restrictive deny
--- is_creator_user() (CLAUDE.md #9). Tulis hanya lewat fungsi refresh (security definer,
--- execute hanya service_role).
+-- Refresh dipotong 32 IRISAN shop (hashtext(shop_id) & 31, di-index): satu irisan bulan
+-- penuh ±22 ribu baris sumber → tiap panggilan rpc jauh di bawah statement_timeout 8s
+-- (service_role lewat PostgREST mewarisi 8s authenticator; SET di fungsi tidak memperpanjang
+-- statement yang sedang jalan). Tanpa job terjadwal: aplikasi memanggil 2 grain × 32 irisan
+-- lalu finish_shop_period_rollup.
+--
+-- Generasi: tiap refresh memberi cap `refreshed_at` (= p_generation) pada baris yang ditulis
+-- (UPSERT), finish mencatatnya di shop_period_rollup_runs. View publik membaca baris dengan
+-- refreshed_at >= generasi tercatat: baris shop yang hilang dari upload ulang otomatis tidak
+-- terbaca setelah finish, tanpa pernyataan hapus (apply_migration MCP menggantung pada
+-- DELETE/DROP, K23); selama refresh berjalan tidak ada baris yang hilang dari pembaca.
+-- RLS: select authenticated + restrictive deny is_creator_user() (CLAUDE.md #9). Tulis hanya
+-- lewat fungsi refresh (security definer, execute hanya service_role).
 --
 -- ingest_jobs: status upload mingguan TikTok yang diproses di latar belakang. Upload besar
 -- (MCN + Academy + TAP ±1 juta baris) diproses ±7 menit; koneksi browser putus sebelum
@@ -199,113 +203,137 @@ begin
 end $$;
 
 comment on table shop_period_rollup is
-  'Ringkasan per shop × periode (grain week & month) dari shop_period_summary_live. Ditulis HANYA oleh refresh_shop_period_rollup (dipanggil ingest). Dibaca lewat view shop_period_summary (generasi terbaru saja).';
+  'Ringkasan per shop × periode (grain week & month) dari shop_period_summary_live. Ditulis HANYA oleh refresh_shop_period_rollup_slice (dipanggil ingest). Dibaca lewat view shop_period_summary.';
 comment on table creator_shop_rollup is
-  'Ringkasan per kreator × shop × periode (grain week & month) dari creator_shop_perf_live. Ditulis HANYA oleh refresh_shop_period_rollup (dipanggil ingest). Dibaca lewat view creator_shop_perf (generasi terbaru saja).';
+  'Ringkasan per kreator × shop × periode (grain week & month) dari creator_shop_perf_live. Ditulis HANYA oleh refresh_shop_period_rollup_slice (dipanggil ingest). Dibaca lewat view creator_shop_perf.';
 comment on table shop_period_rollup_runs is
   'Generasi refresh terbaru per (platform, grain, periode) untuk shop_period_rollup & creator_shop_rollup.';
 
--- ============ refresh per (platform, minggu) ============
--- Menulis ulang grain minggu itu + grain bulan yang memuatnya, satu transaksi. Advisory lock:
--- dua upload bersamaan tidak saling menimpa generasi. statement_timeout fungsi diterapkan
--- PostgREST pada transaksi rpc (role service_role mewarisi 8s dari authenticator).
+-- ============ index irisan (dipakai fungsi refresh) ============
+create index if not exists cspg_week_slice_idx
+  on creator_shop_period_gmv (platform, period_start, (hashtext(shop_id) & 31));
+create index if not exists cspg_month_slice_idx
+  on creator_shop_period_gmv (platform, period_month, (hashtext(shop_id) & 31));
+-- Grain bulan membaca ±1 juta baris: index covering (INCLUDE kolom yang dijumlahkan) membuat
+-- index-only scan (butuh visibility map segar → vacuum analyze setelah upload besar), irisan
+-- dingin turun dari ±15s (heap acak) ke ±3s. cspg_month_slice_idx jadi redundan; dibiarkan
+-- (K23: tanpa DROP di migrasi), boleh di-drop manual.
+create index if not exists cspg_month_slice_cover_idx
+  on creator_shop_period_gmv (platform, period_month, (hashtext(shop_id) & 31))
+  include (shop_id, creator_id, shop_name, period_end, gmv_mcn, gmv_mcn_live, gmv_mcn_video,
+           orders_mcn, items_sold_mcn, gmv_tap, gmv_tap_live, gmv_tap_video, orders_tap,
+           est_partner_commission, actual_partner_commission, est_creator_commission,
+           actual_creator_commission);
+
+-- ============ refresh: satu (platform, grain, periode, irisan) per panggilan ============
+-- p_period_start = awal minggu yang diupload; grain 'month' memakai bulan yang memuatnya.
 -- Catatan: penghapusan kreator (FK cascade ke creator_shop_period_gmv) baru tercermin di
 -- ringkasan saat minggu itu diupload ulang.
+create or replace function refresh_shop_period_rollup_slice(
+  p_platform text, p_period_start date, p_grain text, p_slice int, p_generation timestamptz
+)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_key date;
+begin
+  if p_grain = 'week' then
+    v_key := p_period_start;
+  elsif p_grain = 'month' then
+    v_key := date_trunc('month', p_period_start::timestamp)::date;
+  else
+    raise exception 'grain tidak dikenal: %', p_grain;
+  end if;
+  if p_slice < 0 or p_slice > 31 then
+    raise exception 'irisan di luar 0..31: %', p_slice;
+  end if;
+
+  insert into shop_period_rollup
+    select l.*, p_generation from shop_period_summary_live l
+     where l.platform = p_platform and l.period_kind = p_grain and l.period_key = v_key
+       and (hashtext(l.shop_id) & 31) = p_slice
+  on conflict (platform, shop_id, period_kind, period_key) do update set
+    shop_name = excluded.shop_name, period_end = excluded.period_end,
+    creator_count = excluded.creator_count, creator_tap_count = excluded.creator_tap_count,
+    gmv_mcn = excluded.gmv_mcn, gmv_mcn_live = excluded.gmv_mcn_live,
+    gmv_mcn_video = excluded.gmv_mcn_video, orders_mcn = excluded.orders_mcn,
+    items_sold_mcn = excluded.items_sold_mcn, gmv_tap = excluded.gmv_tap,
+    gmv_tap_live = excluded.gmv_tap_live, gmv_tap_video = excluded.gmv_tap_video,
+    orders_tap = excluded.orders_tap,
+    est_partner_commission = excluded.est_partner_commission,
+    actual_partner_commission = excluded.actual_partner_commission,
+    est_creator_commission = excluded.est_creator_commission,
+    actual_creator_commission = excluded.actual_creator_commission,
+    refreshed_at = excluded.refreshed_at;
+  insert into creator_shop_rollup
+    select l.*, p_generation from creator_shop_perf_live l
+     where l.platform = p_platform and l.period_kind = p_grain and l.period_key = v_key
+       and (hashtext(l.shop_id) & 31) = p_slice
+  on conflict (platform, creator_id, shop_id, period_kind, period_key) do update set
+    shop_name = excluded.shop_name, gmv_mcn = excluded.gmv_mcn,
+    gmv_mcn_live = excluded.gmv_mcn_live, gmv_mcn_video = excluded.gmv_mcn_video,
+    orders_mcn = excluded.orders_mcn, gmv_tap = excluded.gmv_tap,
+    gmv_tap_live = excluded.gmv_tap_live, gmv_tap_video = excluded.gmv_tap_video,
+    orders_tap = excluded.orders_tap,
+    actual_partner_commission = excluded.actual_partner_commission,
+    refreshed_at = excluded.refreshed_at;
+end $$;
+
+-- Setelah SEMUA irisan kedua grain selesai: generasi ini jadi acuan pembaca.
+create or replace function finish_shop_period_rollup(
+  p_platform text, p_period_start date, p_generation timestamptz
+)
+returns void
+language sql
+security definer
+set search_path = public
+as $$
+  insert into shop_period_rollup_runs (platform, period_kind, period_key, refreshed_at)
+  values (p_platform, 'week', p_period_start, p_generation),
+         (p_platform, 'month', date_trunc('month', p_period_start::timestamp)::date, p_generation)
+  on conflict (platform, period_kind, period_key)
+    do update set refreshed_at = greatest(shop_period_rollup_runs.refreshed_at, excluded.refreshed_at);
+$$;
+
+-- Semua irisan dalam satu panggilan — untuk isi awal/perbaikan manual dari SQL editor (tanpa
+-- statement_timeout). Aplikasi TIDAK memakainya (kena 8s): pakai lib/ingest/shop-period-rollup.ts.
 create or replace function refresh_shop_period_rollup(p_platform text, p_period_start date)
 returns void
 language plpgsql
 security definer
 set search_path = public
-set statement_timeout = '600s'
 as $$
 declare
-  v_month date := date_trunc('month', p_period_start::timestamp)::date;
-  v_now timestamptz := clock_timestamp();
+  v_gen timestamptz := clock_timestamp();
+  v_grain text;
+  v_slice int;
 begin
-  perform pg_advisory_xact_lock(hashtext('shop_period_rollup'));
-
-  insert into shop_period_rollup
-    select l.*, v_now from shop_period_summary_live l
-     where l.platform = p_platform and l.period_kind = 'week' and l.period_key = p_period_start
-  on conflict (platform, shop_id, period_kind, period_key) do update set
-    shop_name = excluded.shop_name, period_end = excluded.period_end,
-    creator_count = excluded.creator_count, creator_tap_count = excluded.creator_tap_count,
-    gmv_mcn = excluded.gmv_mcn, gmv_mcn_live = excluded.gmv_mcn_live,
-    gmv_mcn_video = excluded.gmv_mcn_video, orders_mcn = excluded.orders_mcn,
-    items_sold_mcn = excluded.items_sold_mcn, gmv_tap = excluded.gmv_tap,
-    gmv_tap_live = excluded.gmv_tap_live, gmv_tap_video = excluded.gmv_tap_video,
-    orders_tap = excluded.orders_tap,
-    est_partner_commission = excluded.est_partner_commission,
-    actual_partner_commission = excluded.actual_partner_commission,
-    est_creator_commission = excluded.est_creator_commission,
-    actual_creator_commission = excluded.actual_creator_commission,
-    refreshed_at = excluded.refreshed_at;
-  insert into shop_period_rollup
-    select l.*, v_now from shop_period_summary_live l
-     where l.platform = p_platform and l.period_kind = 'month' and l.period_key = v_month
-  on conflict (platform, shop_id, period_kind, period_key) do update set
-    shop_name = excluded.shop_name, period_end = excluded.period_end,
-    creator_count = excluded.creator_count, creator_tap_count = excluded.creator_tap_count,
-    gmv_mcn = excluded.gmv_mcn, gmv_mcn_live = excluded.gmv_mcn_live,
-    gmv_mcn_video = excluded.gmv_mcn_video, orders_mcn = excluded.orders_mcn,
-    items_sold_mcn = excluded.items_sold_mcn, gmv_tap = excluded.gmv_tap,
-    gmv_tap_live = excluded.gmv_tap_live, gmv_tap_video = excluded.gmv_tap_video,
-    orders_tap = excluded.orders_tap,
-    est_partner_commission = excluded.est_partner_commission,
-    actual_partner_commission = excluded.actual_partner_commission,
-    est_creator_commission = excluded.est_creator_commission,
-    actual_creator_commission = excluded.actual_creator_commission,
-    refreshed_at = excluded.refreshed_at;
-  insert into creator_shop_rollup
-    select l.*, v_now from creator_shop_perf_live l
-     where l.platform = p_platform and l.period_kind = 'week' and l.period_key = p_period_start
-  on conflict (platform, creator_id, shop_id, period_kind, period_key) do update set
-    shop_name = excluded.shop_name, gmv_mcn = excluded.gmv_mcn,
-    gmv_mcn_live = excluded.gmv_mcn_live, gmv_mcn_video = excluded.gmv_mcn_video,
-    orders_mcn = excluded.orders_mcn, gmv_tap = excluded.gmv_tap,
-    gmv_tap_live = excluded.gmv_tap_live, gmv_tap_video = excluded.gmv_tap_video,
-    orders_tap = excluded.orders_tap,
-    actual_partner_commission = excluded.actual_partner_commission,
-    refreshed_at = excluded.refreshed_at;
-  insert into creator_shop_rollup
-    select l.*, v_now from creator_shop_perf_live l
-     where l.platform = p_platform and l.period_kind = 'month' and l.period_key = v_month
-  on conflict (platform, creator_id, shop_id, period_kind, period_key) do update set
-    shop_name = excluded.shop_name, gmv_mcn = excluded.gmv_mcn,
-    gmv_mcn_live = excluded.gmv_mcn_live, gmv_mcn_video = excluded.gmv_mcn_video,
-    orders_mcn = excluded.orders_mcn, gmv_tap = excluded.gmv_tap,
-    gmv_tap_live = excluded.gmv_tap_live, gmv_tap_video = excluded.gmv_tap_video,
-    orders_tap = excluded.orders_tap,
-    actual_partner_commission = excluded.actual_partner_commission,
-    refreshed_at = excluded.refreshed_at;
-
-  insert into shop_period_rollup_runs (platform, period_kind, period_key, refreshed_at)
-  values (p_platform, 'week', p_period_start, v_now), (p_platform, 'month', v_month, v_now)
-  on conflict (platform, period_kind, period_key) do update set refreshed_at = excluded.refreshed_at;
+  foreach v_grain in array array['week', 'month'] loop
+    for v_slice in 0..31 loop
+      perform refresh_shop_period_rollup_slice(p_platform, p_period_start, v_grain, v_slice, v_gen);
+    end loop;
+  end loop;
+  perform finish_shop_period_rollup(p_platform, p_period_start, v_gen);
 end $$;
 
+revoke all on function refresh_shop_period_rollup_slice(text, date, text, int, timestamptz) from public, anon, authenticated;
+revoke all on function finish_shop_period_rollup(text, date, timestamptz) from public, anon, authenticated;
 revoke all on function refresh_shop_period_rollup(text, date) from public, anon, authenticated;
+grant execute on function refresh_shop_period_rollup_slice(text, date, text, int, timestamptz) to service_role;
+grant execute on function finish_shop_period_rollup(text, date, timestamptz) to service_role;
 grant execute on function refresh_shop_period_rollup(text, date) to service_role;
 
--- ============ isi awal (semua minggu yang sudah ada) ============
--- Lewat fungsi refresh yang sama dengan ingest (satu jalur tulis). Diulang aman: upsert.
-do $$
-declare r record;
-begin
-  for r in
-    select platform, period_start from creator_shop_period_gmv
-    union
-    select platform, period_start from creator_shop_period_unattributed_tap
-    order by 1, 2
-  loop
-    perform refresh_shop_period_rollup(r.platform, r.period_start);
-  end loop;
-end $$;
-analyze shop_period_rollup;
-analyze creator_shop_rollup;
-analyze shop_period_rollup_runs;
+-- ============ isi awal ============
+-- Dijalankan per minggu dari SQL editor (bulan penuh > batas waktu apply_migration):
+--   select refresh_shop_period_rollup(platform, period_start)
+--     from (select distinct platform, period_start from creator_shop_period_gmv
+--           union select distinct platform, period_start from creator_shop_period_unattributed_tap) w;
+-- View publik di bawah baru dialihkan SETELAH isi awal selesai.
 
--- ============ view publik: kolom sama, kini membaca ringkasan generasi terbaru ============
+-- ============ view publik: kolom sama, kini membaca ringkasan ============
 create or replace view shop_period_summary
 with (security_invoker = on) as
 select
@@ -317,7 +345,7 @@ select
 from shop_period_rollup r
 join shop_period_rollup_runs g
   on g.platform = r.platform and g.period_kind = r.period_kind
- and g.period_key = r.period_key and g.refreshed_at = r.refreshed_at;
+ and g.period_key = r.period_key and r.refreshed_at >= g.refreshed_at;
 
 create or replace view creator_shop_perf
 with (security_invoker = on) as
@@ -328,7 +356,7 @@ select
 from creator_shop_rollup r
 join shop_period_rollup_runs g
   on g.platform = r.platform and g.period_kind = r.period_kind
- and g.period_key = r.period_key and g.refreshed_at = r.refreshed_at;
+ and g.period_key = r.period_key and r.refreshed_at >= g.refreshed_at;
 
 -- ============ ingest_jobs ============
 create table if not exists ingest_jobs (

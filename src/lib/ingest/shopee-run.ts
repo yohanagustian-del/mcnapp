@@ -11,6 +11,7 @@ import {
   buildShopeeCreatorShopPeriod, buildShopeePeriodSummary, buildShopeeSubcatSegment, type ShopeePeriodSummaryRow,
 } from "./shopee-aggregate";
 import { writeCreatorShopPeriod } from "./shop-period-write";
+import { refreshShopPeriodRollup } from "./shop-period-rollup";
 import type { SubcatSegmentRow } from "./aggregate";
 import { computeSharedAutoFillFields, fetchMonthlyAvgGmvByCreator, writeCreatorAutoFillUpdate } from "./creator-autofill";
 
@@ -207,6 +208,10 @@ export async function runShopeeIngest(input: RunShopeeIngestInput): Promise<RunS
       admin, "shopee", batchId, [...creatorIdsSet], periodStart, periodEnd, buildShopeeCreatorShopPeriod(resolvedRows)
     );
     if (shopPeriodWrite.skipped) skipped.push({ row: -1, reason: shopPeriodWrite.skipped });
+    else {
+      const rollupNote = await refreshShopPeriodRollup(admin, "shopee", periodStart);
+      if (rollupNote) skipped.push({ row: -1, reason: rollupNote });
+    }
 
     // ---- 5. Auto-fill creators master (shared helper + niche ranking) ----
     await autoFillShopeeCreators(admin, actorId, periodSummary, subcatSegment);
