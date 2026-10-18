@@ -194,3 +194,30 @@ describe("migrasi 0095 — antrean ringkasan per shop + job pg_cron", () => {
     expect(sql).toMatch(/'shop_period_rollup_queue', '\* \* \* \* \*',\s+'set statement_timeout = 0; select process_shop_period_rollup_queue\(\);'/);
   });
 });
+
+describe("migrasi 0096 — penjaga CLAUDE.md #9 & apply_migration (K23)", () => {
+  const sql = readFileSync(
+    join(process.cwd(), "supabase/migrations/0096_bizdev_summary_sql_aggregate.sql"),
+    "utf8"
+  );
+
+  it("view agregasi baru security_invoker dan membaca bizdev_brand_perf (tidak menghitung ulang)", () => {
+    for (const v of ["bizdev_brand_breakdown", "bizdev_member_summary"]) {
+      expect(sql).toMatch(new RegExp(`create or replace view ${v}\\s+with \\(security_invoker = on\\)`));
+    }
+    expect(sql).toMatch(/from bizdev_brand_perf p/);
+    expect(sql).not.toMatch(/creator_shop_period_gmv|shop_period_rollup/);
+  });
+
+  it("policy deny dibungkus (select ...) lewat ALTER, tanpa pernyataan hapus", () => {
+    for (const [policy, table] of [
+      ["pt_creator_deny", "products_tap"],
+      ["brand_deals_deny_creator", "brand_deals"],
+      ["team_members_deny_creator", "team_members"],
+    ]) {
+      expect(sql).toMatch(new RegExp(`alter policy ${policy} on ${table}\\s+using \\(not \\(select is_creator_user\\(\\)\\)\\)`));
+    }
+    const code = sql.replace(/--.*$/gm, "");
+    expect(code).not.toMatch(/\bdrop\b|\bdelete\b|\btruncate\b/i);
+  });
+});

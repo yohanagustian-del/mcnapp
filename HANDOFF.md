@@ -2,6 +2,12 @@
 
 Status per sesi 2026-10-14 (Revisi BizDev T1–T10 + F1–F3). Baca ini + `CLAUDE.md` sebelum lanjut.
 
+## ⚡ SESI 2026-10-18 — /workspace/bizdev tidak bisa terbuka (Management/BizDev Lead)
+1. Penyebab: Summary per BizDev memuat SEMUA baris `bizdev_brand_perf` periode berjalan (Oktober = 51.370 shop) lewat 52 query berurutan, tiap query ±1–3 dtk karena policy `pt_creator_deny` (`not is_creator_user()`) dievaluasi per baris products_tap (±75rb) saat membangun `shop_key_map`; lalu ±51rb baris breakdown dikirim ke browser.
+2. **Migrasi 0096 SUDAH APPLY** ke staging & production (2026-10-18, `apply_migration`): policy deny `products_tap`/`brand_deals`/`team_members` dibungkus `(select ...)` + view `bizdev_brand_breakdown` & `bizdev_member_summary` (security_invoker). Diverifikasi production sebagai `authenticated`: kartu Oktober identik dengan agregasi baris dasar (jumlah brand, GMV MCN/TAP, revenue per BizDev); September breakdown top-1000 0,63 dtk + kartu 0,48 dtk.
+3. Halaman kini 2 query agregat; breakdown dikirim maks 1.000 baris GMV MCN tertinggi, pencarian brand/BizDev di server (`?q=`).
+4. Kandidat lanjutan: policy `not is_creator_user()` lain yang masih per-baris (lihat `pg_policies`) — bungkus `(select ...)` bila tabelnya besar.
+
 ## ⚡ SESI 2026-10-16/17 — Upload besar "Failed to fetch" + /workspace/bizdev bulan September timeout
 1. **"Failed to fetch" di /ingest** = browser memutus request ±7 menit padahal server sukses. Kini upload TikTok jadi job latar belakang (`ingest_jobs`, `after()`), form mem-poll status (lihat CLAUDE.md #4).
 2. **Migrasi 0093** (kolom generated `period_month` + index; date_trunc non-leakproof memblokir index di bawah RLS) & **0094** (view `*_live`, tabel ringkasan `shop_period_rollup`/`creator_shop_rollup`/`shop_period_rollup_runs`, fungsi refresh per irisan, `ingest_jobs`) **SUDAH APPLY** ke staging & production (sebagian lewat execute_sql karena apply_migration timeout; objek diverifikasi ada). Index covering `cspg_month_slice_cover_idx` membuat irisan bulan ±3s (perlu `vacuum (analyze) creator_shop_period_gmv` setelah isi awal besar); `cspg_month_slice_idx` redundan, boleh di-drop MANUAL (bukan lewat migrasi, K23).
