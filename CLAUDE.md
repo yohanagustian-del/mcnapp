@@ -68,6 +68,12 @@ Platform internal MCN MEA (agency creator TikTok/Shopee). Menggabungkan tools te
   Sejak 0094 (2026-10-16) `shop_period_summary`/`creator_shop_perf` membaca TABEL RINGKASAN
   (`shop_period_rollup`/`creator_shop_rollup`, grain minggu & bulan) — bulan September ±1 juta baris
   terlalu berat dihitung ulang tiap halaman (timeout 8s). Logika agregasi tetap SATU: view `*_live`.
+  Summary per BizDev (`/workspace/bizdev`) sejak 0096 membaca view agregat `bizdev_member_summary`
+  (kartu) + `bizdev_brand_breakdown` (BizDev × brand, top `BREAKDOWN_LIMIT` urut GMV MCN, cari via `?q=`
+  di server) lewat `loadBizdevSummary` (`lib/m8/bizdev-summary.ts`) — JANGAN kembali memuat semua baris
+  `bizdev_brand_perf` lalu mengagregasi di JS (Oktober 2026: 51rb baris/52 query → halaman menggantung).
+  Policy deny `is_creator_user()` di tabel besar WAJIB dibungkus `(select is_creator_user())` (per-baris
+  di `products_tap` ±1,9 dtk per query).
   Penulis ringkasan SATU-SATUNYA = job pg_cron `shop_period_rollup_queue` (tiap menit, migrasi 0095,
   Opsi A disetujui user 2026-10-17) → `process_shop_period_rollup_queue()`. Trigger statement-level
   insert/delete di `creator_shop_period_gmv` & `creator_shop_period_unattributed_tap` menaruh

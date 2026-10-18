@@ -39,3 +39,7 @@ export const MIGRATION_0089_MISSING =
 /** Pesan untuk tabel ringkasan per shop & job upload latar belakang (migrasi 0094). */
 export const MIGRATION_0094_MISSING =
   "Migrasi 0094 belum di-apply (tabel ringkasan shop_period_rollup / tabel job upload ingest_jobs). Hubungi admin untuk menjalankan migrasinya.";
+
+/** Pesan untuk view agregasi Summary per BizDev (migrasi 0096). */
+export const MIGRATION_0096_MISSING =
+  "Migrasi 0096 belum di-apply (view bizdev_member_summary / bizdev_brand_breakdown). Hubungi admin untuk menjalankan migrasinya.";

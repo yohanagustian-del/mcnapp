@@ -37,19 +37,31 @@ const SORT: SortConfig<BizdevBreakdownRow> = {
 export function BizdevSummary({
   cards,
   breakdown,
+  breakdownTotal,
+  breakdownLimit,
   periodLabel,
+  periodValue,
+  search,
 }: {
   cards: BizdevCard[];
   breakdown: BizdevBreakdownRow[];
+  /** Jumlah baris breakdown periode ini tanpa filter pencarian. */
+  breakdownTotal: number;
+  /** Server hanya mengirim N baris GMV MCN tertinggi (bulan penuh = puluhan ribu shop). */
+  breakdownLimit: number;
   periodLabel: string;
+  periodValue: string;
+  search: string;
 }) {
+  // Pencarian dijalankan di server (form GET ?q=) supaya brand di luar N baris teratas
+  // tetap bisa ditemukan; sort & paginasi tetap di klien atas baris yang dimuat.
   const controls = useTableControls<BizdevBreakdownRow>({
     rows: breakdown,
     sort: SORT,
     pageSizes: PAGE_SIZES_10_20_50_100,
     itemLabel: "brand",
-    searchText: (r) => `${r.memberName} ${r.shopName}`,
   });
+  const truncated = breakdown.length >= breakdownLimit;
 
   return (
     <div className="space-y-4">
@@ -83,14 +95,37 @@ export function BizdevSummary({
       </p>
 
       <div className="rounded-lg border border-slate-200 bg-white">
-        <div className="border-b border-slate-200 p-2">
-          <input
-            type="search"
-            value={controls.search}
-            onChange={(e) => controls.setSearch(e.target.value)}
-            placeholder="Cari BizDev / brand…"
-            className="w-64 rounded-md border border-slate-300 px-2 py-1 text-sm"
-          />
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-slate-200 p-2">
+          <form method="get" className="flex items-center gap-2">
+            <input type="hidden" name="period" value={periodValue} />
+            <input
+              type="search"
+              name="q"
+              defaultValue={search}
+              placeholder="Cari BizDev / brand…"
+              className="w-64 rounded-md border border-slate-300 px-2 py-1 text-sm"
+            />
+            <button type="submit" className="rounded-md bg-slate-100 px-3 py-1 text-sm hover:bg-slate-200">
+              Cari
+            </button>
+          </form>
+          <p className="text-xs text-slate-500">
+            {search ? (
+              <>
+                {breakdown.length.toLocaleString("id-ID")}
+                {truncated ? "+" : ""} hasil untuk “{search}”
+                {truncated ? ` (ditampilkan ${breakdownLimit.toLocaleString("id-ID")} GMV MCN tertinggi)` : ""} ·{" "}
+                <a href={`?period=${encodeURIComponent(periodValue)}`} className="underline">
+                  Hapus pencarian
+                </a>
+              </>
+            ) : truncated ? (
+              <>
+                Menampilkan {breakdownLimit.toLocaleString("id-ID")} brand dengan GMV MCN tertinggi dari{" "}
+                {breakdownTotal.toLocaleString("id-ID")}. Cari nama brand/BizDev untuk baris lainnya.
+              </>
+            ) : null}
+          </p>
         </div>
         <div className="overflow-x-auto">
           <table className="min-w-full text-sm">

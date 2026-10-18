@@ -12,9 +12,9 @@ import { getWeekStart, getWeekDays } from "@/lib/schedule/week";
 import { todayWib } from "@/lib/utils/date";
 import { PeriodPicker } from "@/components/period-picker";
 import { parsePeriodParam, periodOptions } from "@/lib/m8/period";
-import { buildBizdevSummary, type BizdevPerfRow } from "@/lib/m8/bizdev-summary";
-import { hasLegacyPeriodData, LEGACY_PERIOD_MESSAGE, loadPeriodView } from "@/lib/m8/shop-perf-data";
-import { MIGRATION_0087_MISSING } from "@/lib/db/missing-migration";
+import { BREAKDOWN_LIMIT, loadBizdevSummary } from "@/lib/m8/bizdev-summary";
+import { hasLegacyPeriodData, LEGACY_PERIOD_MESSAGE } from "@/lib/m8/shop-perf-data";
+import { MIGRATION_0096_MISSING } from "@/lib/db/missing-migration";
 import { BizdevSummary } from "./bizdev-summary";
 
 export const dynamic = "force-dynamic";
@@ -26,10 +26,11 @@ const btnSmall = "rounded-md px-2 py-1 text-xs font-medium";
 export default async function BizdevWorkspacePage({
   searchParams,
 }: {
-  searchParams: Promise<{ period?: string }>;
+  searchParams: Promise<{ period?: string; q?: string }>;
 }) {
   const member = await requireMember();
-  const { period: periodParam } = await searchParams;
+  const { period: periodParam, q: searchParam } = await searchParams;
+  const search = (searchParam ?? "").trim();
   const canRoute = hasPermission("m8.route_campaign", member.role);
   const canBrandAcc = hasPermission("m8.brand_acc", member.role);
   const canHandover = hasPermission("m8.handover", member.role);
@@ -40,21 +41,17 @@ export default async function BizdevWorkspacePage({
 
   const supabase = await createClient();
 
-  // ===== Summary per BizDev (REVISI_BIZDEV T6) — angka dari view bizdev_brand_perf =====
+  // ===== Summary per BizDev (REVISI_BIZDEV T6) — agregasi SQL atas bizdev_brand_perf (0096) =====
   const todayIso = todayWib();
   const period = parsePeriodParam(periodParam, todayIso);
   // K11 = B: tanpa m8.bizdev_summary_all, hanya brand yang di-handle akun ini (filter di
   // query server, bukan cuma disembunyikan di UI).
   const summaryAll = hasPermission("m8.bizdev_summary_all", member.role);
-  const perf = await loadPeriodView<BizdevPerfRow>(
-    supabase,
-    "bizdev_brand_perf",
-    "platform, shop_id, shop_name, shop_key, creator_count, creator_tap_count, gmv_mcn, gmv_tap, actual_partner_commission, member_id, member_name",
-    period,
-    summaryAll ? undefined : (q) => q.eq("member_id", member.id)
-  );
-  const summary = buildBizdevSummary(perf.rows);
-  const legacyOnly = !perf.missing && perf.rows.length === 0 && (await hasLegacyPeriodData(supabase, period));
+  const summary = await loadBizdevSummary(supabase, period, {
+    memberId: summaryAll ? undefined : member.id,
+    search,
+  });
+  const legacyOnly = !summary.missing && summary.cards.length === 0 && (await hasLegacyPeriodData(supabase, period));
 
   // ===== Ringkasan Brand Lead Bank =====
   const { count: leadsBaru } = canViewLeads
@@ -199,16 +196,24 @@ export default async function BizdevWorkspacePage({
           <PeriodPicker value={period.value} options={periodOptions(todayIso)} />
         </div>
         <div className="mt-3">
-          {perf.missing ? (
-            <p className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">{MIGRATION_0087_MISSING}</p>
-          ) : perf.rows.length === 0 ? (
+          {summary.missing ? (
+            <p className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">{MIGRATION_0096_MISSING}</p>
+          ) : summary.cards.length === 0 ? (
             <p className="rounded-md border border-slate-200 bg-white p-4 text-sm text-slate-500">
               {legacyOnly ? LEGACY_PERIOD_MESSAGE : summaryAll
                 ? `Belum ada data upload shop untuk ${period.label}.`
                 : `Belum ada brand yang Anda handle dengan data upload untuk ${period.label}.`}
             </p>
           ) : (
-            <BizdevSummary cards={summary.cards} breakdown={summary.breakdown} periodLabel={period.label} />
+            <BizdevSummary
+              cards={summary.cards}
+              breakdown={summary.breakdown}
+              breakdownTotal={summary.breakdownTotal}
+              breakdownLimit={BREAKDOWN_LIMIT}
+              periodLabel={period.label}
+              periodValue={period.value}
+              search={search}
+            />
           )}
         </div>
       </section>

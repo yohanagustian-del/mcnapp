@@ -1,62 +1,110 @@
 import { describe, expect, it } from "vitest";
-import { buildBizdevSummary, type BizdevPerfRow } from "../bizdev-summary";
+import type { SupabaseClient } from "@supabase/supabase-js";
+import {
+  BREAKDOWN_LIMIT, loadBizdevSummary, toBizdevBreakdown, toBizdevCards,
+  type BizdevBreakdownViewRow, type BizdevMemberRow,
+} from "../bizdev-summary";
+import { parsePeriodParam } from "../period";
 
-const r = (o: Partial<BizdevPerfRow>): BizdevPerfRow => ({
-  platform: "tiktok", shop_id: "1", shop_name: "Toko", shop_key: "tiktok:Toko", creator_count: 1,
-  creator_tap_count: 0, gmv_mcn: 0, gmv_tap: 0, actual_partner_commission: null,
-  member_id: null, member_name: null, ...o,
+const m = (o: Partial<BizdevMemberRow>): BizdevMemberRow => ({
+  member_id: null, member_name: null, brand_count: 1, gmv_mcn: 0, gmv_mcn_tap_known: 0,
+  gmv_mcn_tap_unknown: 0, gmv_tap: null, actual_partner_commission: null, ...o,
 });
 
-describe("buildBizdevSummary — shop tanpa kartu/deal & ejaan ganda (K4 = B, K5 = C)", () => {
-  it("shop_key NULL masuk Non BD Handle, dikenali per (platform, shop_id); shop_id dengan 2 shop_key tampil dobel", () => {
-    const { cards, breakdown } = buildBizdevSummary([
-      r({ shop_key: null, shop_name: "Toko Non Deal", shop_id: "9001", gmv_mcn: 300 }),
-      r({ shop_key: null, shop_name: null, shop_id: "9002", gmv_mcn: 200 }),
-      r({ shop_key: "tiktok:DVARA", shop_name: "DVARA", shop_id: "5", gmv_mcn: 100, member_id: "u1", member_name: "Rina" }),
-      r({ shop_key: "tiktok:Dvara Official", shop_name: "DVARA", shop_id: "5", gmv_mcn: 100, member_id: "u1", member_name: "Rina" }),
+const b = (o: Partial<BizdevBreakdownViewRow>): BizdevBreakdownViewRow => ({
+  member_id: null, member_name: null, brand_key: "tiktok:A", shop_key: "tiktok:A", platform: "tiktok",
+  shop_name: "A", creator_count: 0, creator_tap_count: 0, gmv_mcn: 0, gmv_mcn_tap_known: 0,
+  gmv_mcn_tap_unknown: 0, gmv_tap: null, actual_partner_commission: null, ...o,
+});
+
+describe("toBizdevCards", () => {
+  it("Non BD Handle terakhir, sisanya urut GMV MCN; angka string dari PostgREST dibaca sebagai number", () => {
+    const cards = toBizdevCards([
+      m({ brand_count: 51313, gmv_mcn: "9999999" }),
+      m({ member_id: "u2", member_name: "Budi", gmv_mcn: "1000", gmv_mcn_tap_known: "1000", gmv_tap: "600" }),
+      m({ member_id: "u1", member_name: "Rina", brand_count: "3", gmv_mcn: "3500", gmv_mcn_tap_known: "1500", gmv_mcn_tap_unknown: "2000", gmv_tap: "700", actual_partner_commission: "30" }),
     ]);
-    expect(cards.find((c) => c.memberId === null)).toMatchObject({ brandCount: 2, gmvMcn: 500 });
-    expect(cards.find((c) => c.memberId === "u1")).toMatchObject({ brandCount: 2, gmvMcn: 200 });
-    expect(breakdown.find((b) => b.shopKey === null && b.shopName === "#9002")).toBeTruthy();
-    expect(breakdown).toHaveLength(4);
-  });
-});
-
-describe("buildBizdevSummary", () => {
-  const rows: BizdevPerfRow[] = [
-    // Brand A dipegang Rina & Budi → dihitung penuh di keduanya.
-    r({ shop_key: "tiktok:A", shop_name: "A", shop_id: "1", gmv_mcn: "1000", gmv_tap: "600", actual_partner_commission: "30", member_id: "u1", member_name: "Rina", creator_count: 3, creator_tap_count: 2 }),
-    r({ shop_key: "tiktok:A", shop_name: "A", shop_id: "1", gmv_mcn: "1000", gmv_tap: "600", actual_partner_commission: "30", member_id: "u2", member_name: "Budi", creator_count: 3, creator_tap_count: 2 }),
-    r({ shop_key: "tiktok:B", shop_name: "B", shop_id: "2", gmv_mcn: 500, gmv_tap: 100, member_id: "u1", member_name: "Rina" }),
-    // Shopee: GMV TAP null → tidak masuk penyebut %TAP.
-    r({ platform: "shopee", shop_key: "shopee:C", shop_name: "C", shop_id: "3", gmv_mcn: 2000, gmv_tap: null, member_id: "u1", member_name: "Rina" }),
-    // Tanpa handler.
-    r({ shop_key: "tiktok:D", shop_name: "D", shop_id: "4", gmv_mcn: 9999, gmv_tap: 0 }),
-  ];
-
-  it("kartu per BizDev: brand dihandle, GMV MCN/TAP, revenue partner, %TAP/MCN; Non BD Handle terakhir", () => {
-    const { cards } = buildBizdevSummary(rows);
     expect(cards.map((c) => c.memberName)).toEqual(["Rina", "Budi", "Non BD Handle"]);
-    const rina = cards[0];
-    expect(rina).toMatchObject({
-      brandCount: 3, gmvMcn: 3500, gmvMcnTapKnown: 1500, gmvMcnTapUnknown: 2000, gmvTap: 700, actualRevenuePartner: 30,
-    });
-    expect(rina.tapShare).toBeCloseTo(700 / 1500);
-    expect(cards[1]).toMatchObject({ brandCount: 1, gmvMcn: 1000, gmvTap: 600 });
-    expect(cards[2]).toMatchObject({ memberId: null, brandCount: 1, gmvTap: 0, tapShare: 0, actualRevenuePartner: null });
+    expect(cards[0]).toMatchObject({ brandCount: 3, gmvMcn: 3500, gmvMcnTapKnown: 1500, gmvMcnTapUnknown: 2000, gmvTap: 700, actualRevenuePartner: 30 });
+    expect(cards[0].tapShare).toBeCloseTo(700 / 1500);
+    expect(cards[2]).toMatchObject({ memberId: null, brandCount: 51313 });
   });
 
-  it("breakdown satu baris per (BizDev × brand), Shopee tanpa %TAP", () => {
-    const { breakdown } = buildBizdevSummary(rows);
-    expect(breakdown).toHaveLength(5);
-    const c = breakdown.find((b) => b.shopKey === "shopee:C")!;
+  it("GMV TAP null (Shopee) bukan nol → %TAP/MCN null", () => {
+    const [c] = toBizdevCards([m({ member_id: "u1", member_name: "Rina", gmv_mcn: 2000, gmv_mcn_tap_unknown: 2000, gmv_tap: null })]);
     expect(c.gmvTap).toBeNull();
     expect(c.tapShare).toBeNull();
-    const aRina = breakdown.find((b) => b.shopKey === "tiktok:A" && b.memberName === "Rina")!;
-    expect(aRina).toMatchObject({ creatorCount: 3, creatorTapCount: 2, gmvMcn: 1000 });
   });
 
-  it("tanpa baris → kosong", () => {
-    expect(buildBizdevSummary([])).toEqual({ cards: [], breakdown: [] });
+  it("handler non-aktif (nama null) tampil '—', bukan Non BD Handle", () => {
+    expect(toBizdevCards([m({ member_id: "u9", member_name: null })])[0].memberName).toBe("—");
+  });
+});
+
+describe("toBizdevBreakdown", () => {
+  it("kunci unik per (BizDev × brand); shop tanpa kartu/deal = Non BD Handle", () => {
+    const rows = toBizdevBreakdown([
+      b({ member_id: "u1", member_name: "Rina", creator_count: "3", creator_tap_count: "2", gmv_mcn: "1000" }),
+      b({ member_id: "u2", member_name: "Budi" }),
+      b({ brand_key: "shop:tiktok:9001", shop_key: null, shop_name: "#9001" }),
+    ]);
+    expect(rows.map((r) => r.key)).toEqual(["u1|tiktok:A", "u2|tiktok:A", "__non_bd__|shop:tiktok:9001"]);
+    expect(rows[0]).toMatchObject({ creatorCount: 3, creatorTapCount: 2, gmvMcn: 1000 });
+    expect(rows[2]).toMatchObject({ memberName: "Non BD Handle", shopKey: null, shopName: "#9001" });
+  });
+});
+
+function fake(results: Record<string, { data?: unknown[]; error?: { code: string; message: string } | null }>) {
+  const calls: [string, string, unknown][] = [];
+  const client = {
+    from: (t: string) => {
+      const q: Record<string, unknown> = {};
+      for (const fn of ["select", "eq", "ilike", "order", "limit"]) {
+        q[fn] = (...a: unknown[]) => { calls.push([t, fn, a]); return q; };
+      }
+      q.then = (res: (v: unknown) => unknown) => res({ data: results[t]?.data ?? [], error: results[t]?.error ?? null });
+      return q;
+    },
+  } as unknown as SupabaseClient;
+  return { client, calls };
+}
+
+describe("loadBizdevSummary", () => {
+  const month = parsePeriodParam("2026-10", "2026-10-18");
+
+  it("dua query agregat (bukan semua baris shop): filter periode, member, pencarian per kata, top-N", async () => {
+    const f = fake({
+      bizdev_member_summary: { data: [m({ member_id: "u1", member_name: "Rina", brand_count: 2 }), m({ brand_count: 5 })] },
+      bizdev_brand_breakdown: { data: [b({ member_id: "u1" })] },
+    });
+    const r = await loadBizdevSummary(f.client, month, { memberId: "u1", search: "glow skin" });
+    expect(r.missing).toBe(false);
+    expect(r.breakdownTotal).toBe(7);
+    expect(r.breakdown).toHaveLength(1);
+    for (const t of ["bizdev_member_summary", "bizdev_brand_breakdown"]) {
+      expect(f.calls).toContainEqual([t, "eq", ["period_kind", "month"]]);
+      expect(f.calls).toContainEqual([t, "eq", ["period_key", "2026-10-01"]]);
+      expect(f.calls).toContainEqual([t, "eq", ["member_id", "u1"]]);
+    }
+    expect(f.calls).toContainEqual(["bizdev_brand_breakdown", "ilike", ["search_text", "%glow%"]]);
+    expect(f.calls).toContainEqual(["bizdev_brand_breakdown", "ilike", ["search_text", "%skin%"]]);
+    expect(f.calls).toContainEqual(["bizdev_brand_breakdown", "limit", [BREAKDOWN_LIMIT]]);
+    expect(f.calls.filter(([t, fn]) => t === "bizdev_member_summary" && fn === "ilike")).toEqual([]);
+  });
+
+  it("tanpa memberId tidak memfilter member (Management / BizDev Lead)", async () => {
+    const f = fake({});
+    await loadBizdevSummary(f.client, month);
+    expect(f.calls.some(([, fn, a]) => fn === "eq" && (a as unknown[])[0] === "member_id")).toBe(false);
+  });
+
+  it("view 0096 belum ada → missing, bukan crash", async () => {
+    const f = fake({ bizdev_member_summary: { error: { code: "PGRST205", message: "Could not find the table in the schema cache" } } });
+    expect(await loadBizdevSummary(f.client, month)).toEqual({ cards: [], breakdown: [], breakdownTotal: 0, missing: true });
+  });
+
+  it("error lain dilempar", async () => {
+    const f = fake({ bizdev_brand_breakdown: { error: { code: "57014", message: "canceling statement due to statement timeout" } } });
+    await expect(loadBizdevSummary(f.client, month)).rejects.toThrow(/statement timeout/);
   });
 });
