@@ -43,6 +43,7 @@ import { loadContractAlertDays } from "@/lib/creators/contract-alerts";
 import { loadPartnershipLabels, loadPartnershipStatus } from "@/lib/creators/partnership";
 import { loadPortalStatus, type PortalAccountStatus } from "@/lib/portal/invite";
 import { isCreatorInScope } from "@/lib/schedule/scope";
+import { fetchAll, fetchAllIn } from "@/lib/supabase/fetch-all";
 
 export const dynamic = "force-dynamic";
 
@@ -117,6 +118,37 @@ const input = "rounded-md border border-slate-300 px-3 py-2 text-sm";
 const btn = "rounded-md bg-slate-900 px-3 py-2 text-sm font-medium text-white hover:bg-slate-700";
 const btnSmall = "rounded-md px-2 py-1 text-xs font-medium";
 
+/** Baris kreator dalam scope CM (kolom sesuai select di CmWorkspacePage). */
+type CreatorScopeRow = {
+  id: string;
+  name: string;
+  username: string | null;
+  platform: string | null;
+  level: number | null;
+  segment: string | null;
+  status: string | null;
+  gmv: number | string | null;
+  owner_cpm_id: string | null;
+  ads_budget_cap: number | string | null;
+  creator_class: string | null;
+  niche: string | null;
+  top_niches: string[] | null;
+  join_date: string | null;
+  contract_end_date: string | null;
+  team_members: { name?: string } | null;
+};
+
+/** Baris creator_period_summary yang dibaca halaman ini (kolom sesuai select). */
+type PeriodSummaryDbRow = {
+  id: number;
+  creator_id: string;
+  period_start: string;
+  period_end: string;
+  upload_batch: string;
+  affiliate_gmv: number | string | null;
+  created_at: string;
+};
+
 export default async function CmWorkspacePage({
   searchParams,
 }: {
@@ -134,20 +166,25 @@ export default async function CmWorkspacePage({
   const supabase = await createClient();
 
   // Scope: CPM lihat creator sendiri; CM Lead/management lintas (§2F).
-  let creatorsQuery = supabase
-    .from("creators")
-    // creator_class + niche/top_niches ikut diambil: dipakai filter "Kelas" &
-    // "Kategori" di tabel Pertumbuhan GMV Mingguan dan Creator & Growth Mingguan.
-    // creators punya dua FK ke team_members (CM + Akuisitor) → embed CM harus
-    // menyebut nama constraint-nya, kalau tidak PostgREST menolak sebagai ambigu.
-    // platform/join_date/contract_end_date: section Kontrak & Status Kemitraan (T6).
-    .select("id, name, username, platform, level, segment, status, gmv, owner_cpm_id, ads_budget_cap, creator_class, niche, top_niches, join_date, contract_end_date, team_members!creators_owner_cpm_id_fkey(name)")
-    .order("gmv", { ascending: false })
-    .limit(100);
-  if (isCpm) creatorsQuery = creatorsQuery.eq("owner_cpm_id", member.id);
-  const { data: creatorRows } = await creatorsQuery;
+  // SEMUA kreator dalam scope (paginasi, bukan limit 100): tabel growth mingguan & rollup
+  // per CM harus memuat setiap kreator — dulu limit(100) membuat kreator di luar 100 besar
+  // GMV (mis. kakrufi, rank 547 dari 3.645) hilang dari "Growth Mingguan per CM".
+  // creator_class + niche/top_niches ikut diambil: dipakai filter "Kelas" &
+  // "Kategori" di tabel Pertumbuhan GMV Mingguan dan Creator & Growth Mingguan.
+  // creators punya dua FK ke team_members (CM + Akuisitor) → embed CM harus
+  // menyebut nama constraint-nya, kalau tidak PostgREST menolak sebagai ambigu.
+  // platform/join_date/contract_end_date: section Kontrak & Status Kemitraan (T6).
+  const creatorRows = await fetchAll<CreatorScopeRow>(
+    supabase,
+    "creators",
+    "id, name, username, platform, level, segment, status, gmv, owner_cpm_id, ads_budget_cap, creator_class, niche, top_niches, join_date, contract_end_date, team_members!creators_owner_cpm_id_fkey(name)",
+    (q) => {
+      const scoped = q.order("gmv", { ascending: false }).order("id");
+      return isCpm ? scoped.eq("owner_cpm_id", member.id) : scoped;
+    }
+  );
   // team_members(name) = CM pemilik (owner_cpm_id) — dipakai filter CM di tabel client.
-  const creators = (creatorRows ?? []).map((c) => ({
+  const allCreators = creatorRows.map((c) => ({
     ...c,
     cmName: (c.team_members as { name?: string } | null)?.name ?? null,
     // Kategori tampil = niche utama; kalau kolom niche kosong, pakai top_niches[0]
@@ -157,6 +194,10 @@ export default async function CmWorkspacePage({
       ((c.top_niches as string[] | null) ?? [])[0] ||
       null,
   }));
+  const allCreatorIds = allCreators.map((c) => c.id);
+  // Section lain (kontrak, partnership, portal, request, product match) tetap memakai
+  // 100 kreator teratas agar daftar `.in()`-nya tidak melewati batas URL PostgREST.
+  const creators = allCreators.slice(0, 100);
   const creatorIds = creators.map((c) => c.id);
 
   // ===== Improvement MCN T6 — Kontrak & Status Kemitraan (scope = creators di atas) =====
@@ -259,18 +300,21 @@ export default async function CmWorkspacePage({
   // Growth mingguan per creator (§2A.2) — Module 0.5 Fase 2: creator_period_summary
   // adalah source of truth (1 baris per creator per periode per batch), bukan
   // platform_metrics_raw per-hari (bug lama: "1 hari" tampil sebagai "1 minggu").
-  const { data: periodRows } = creatorIds.length
-    ? await supabase
-        .from("creator_period_summary")
-        .select("creator_id, period_start, period_end, upload_batch, affiliate_gmv, created_at")
-        .in("creator_id", creatorIds)
-        .order("period_start", { ascending: false })
-        .limit(1000)
-    : { data: [] as { creator_id: string; period_start: string; period_end: string; upload_batch: string; affiliate_gmv: number | null; created_at: string }[] };
+  // Dibaca untuk SEMUA kreator dalam scope & dipaginasi (fetchAllIn): satu sumber untuk
+  // daftar bulan, tabel per kreator, dan rollup per CM — dulu limit(1000/2000) memotong
+  // bulan & kreator tanpa peringatan.
+  const periodRows = await fetchAllIn<PeriodSummaryDbRow>(
+    supabase,
+    "creator_period_summary",
+    "id, creator_id, period_start, period_end, upload_batch, affiliate_gmv, created_at",
+    "creator_id",
+    allCreatorIds,
+    (q) => q.order("id")
+  );
   const growth = new Map<string, { current: number; previous: number | null; periodStart: string; periodEnd: string }>();
   {
     const byCreator = new Map<string, PeriodSummaryPoint[]>();
-    for (const r of periodRows ?? []) {
+    for (const r of periodRows) {
       const list = byCreator.get(r.creator_id) ?? [];
       list.push({
         periodStart: r.period_start,
@@ -293,48 +337,28 @@ export default async function CmWorkspacePage({
   }
 
   // ===== Pertumbuhan GMV Mingguan (W1-W5) — pemilih bulan =====
-  // availableMonths dari periodRows di atas (limit 1000, cukup untuk daftar bulan).
-  const monthsFromLimitedRows = availableMonths(
-    (periodRows ?? []).map((r): WeeklyGrowthInputRow => ({
-      creatorId: r.creator_id,
-      periodStart: r.period_start,
-      periodEnd: r.period_end,
-      affiliateGmv: Number(r.affiliate_gmv ?? 0),
-      createdAt: r.created_at,
-    }))
-  );
+  const periodInputRows: WeeklyGrowthInputRow[] = periodRows.map((r) => ({
+    creatorId: r.creator_id,
+    periodStart: r.period_start,
+    periodEnd: r.period_end,
+    affiliateGmv: Number(r.affiliate_gmv ?? 0),
+    createdAt: r.created_at,
+  }));
+  const monthsFromRows = availableMonths(periodInputRows);
   const { bulan: bulanParam } = await searchParams;
-  const selectedMonth = bulanParam?.trim() || monthsFromLimitedRows[0] || null;
+  const selectedMonth = bulanParam?.trim() || monthsFromRows[0] || null;
 
-  // Query kedua ter-scope bulan (jangan andalkan limit 1000 global — bulan lama
-  // bisa terpotong kalau creator/minggu banyak).
-  let monthlyRows: WeeklyGrowthInputRow[] = [];
-  if (selectedMonth && creatorIds.length) {
-    const monthStart = `${selectedMonth}-01`;
-    const [y, m] = selectedMonth.split("-").map(Number);
-    const lastDay = new Date(y, m, 0).getDate();
-    const monthEnd = `${selectedMonth}-${String(lastDay).padStart(2, "0")}`;
-    const { data: monthRows } = await supabase
-      .from("creator_period_summary")
-      .select("creator_id, period_start, period_end, affiliate_gmv, created_at")
-      .in("creator_id", creatorIds)
-      .gte("period_start", monthStart)
-      .lte("period_start", monthEnd)
-      .limit(2000);
-    monthlyRows = (monthRows ?? []).map((r) => ({
-      creatorId: r.creator_id,
-      periodStart: r.period_start,
-      periodEnd: r.period_end,
-      affiliateGmv: Number(r.affiliate_gmv ?? 0),
-      createdAt: r.created_at,
-    }));
-  }
+  // Baris bulan terpilih = irisan periodInputRows (bukan query kedua), jadi tabel per
+  // kreator dan rollup per CM selalu membaca data yang sama.
+  const monthlyRows = selectedMonth
+    ? periodInputRows.filter((r) => r.periodStart.startsWith(`${selectedMonth}-`))
+    : [];
   const monthlyGrowth = selectedMonth
     ? buildMonthlyGrowth(monthlyRows, selectedMonth)
     : new Map<string, MonthlyGrowth>();
   // Hanya creator yang punya minimal satu minggu terisi bulan ini — creator tanpa upload
   // adalah noise, bukan "Rp0". Baris TOTAL dihitung di klien dari baris terfilter.
-  const weeklyGrowthRows: WeeklyGrowthRow[] = creators
+  const weeklyGrowthRows: WeeklyGrowthRow[] = allCreators
     .filter((c) => monthlyGrowth.has(c.id))
     .map((c) => {
       const g = monthlyGrowth.get(c.id)!;
@@ -428,7 +452,8 @@ export default async function CmWorkspacePage({
         .limit(1),
     ]);
 
-  const scopedAlerts = (alerts ?? []).filter((a) => !isCpm || creatorIds.includes(a.entity_id ?? ""));
+  const allCreatorIdSet = new Set(allCreatorIds);
+  const scopedAlerts = (alerts ?? []).filter((a) => !isCpm || allCreatorIdSet.has(a.entity_id ?? ""));
   const name = (rel: unknown) => (rel as { name?: string } | null)?.name ?? "—";
 
   // Opsi dropdown "pilih kreator" pada req broadcast (dipakai komponen klien).
@@ -452,7 +477,7 @@ export default async function CmWorkspacePage({
 
   // Baris tabel "Creator & Growth Mingguan" — delta dihitung di sini (server), komponen
   // klien hanya search/filter/paginasi (CLAUDE.md #4: tidak ada perhitungan ulang di UI).
-  const creatorGrowthRows: CreatorGrowthRow[] = creators.map((c) => {
+  const creatorGrowthRows: CreatorGrowthRow[] = allCreators.map((c) => {
     const g = growth.get(c.id);
     return {
       creatorId: c.id,
@@ -625,10 +650,10 @@ export default async function CmWorkspacePage({
               defaultValue={selectedMonth ?? ""}
               className="rounded-md border border-slate-300 px-2 py-1 text-sm"
             >
-              {monthsFromLimitedRows.length === 0 && selectedMonth && (
+              {monthsFromRows.length === 0 && selectedMonth && (
                 <option value={selectedMonth}>{selectedMonth}</option>
               )}
-              {monthsFromLimitedRows.map((m) => (
+              {monthsFromRows.map((m) => (
                 <option key={m} value={m}>{m}</option>
               ))}
             </select>
