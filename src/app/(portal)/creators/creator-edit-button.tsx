@@ -14,7 +14,7 @@ import { updateCreatorProfile, type CreatorEditState } from "./actions";
  * Field editable oleh Creator Manager = seluruh kolom master yang diisi manusia.
  *
  * `commission_share` hanya tampil untuk role dengan izin creators.edit_commission
- * (leader/SPV/Director). TIDAK termasuk (sengaja): `gmv`/`gmv_live`/`gmv_video` (dihitung dari upload data platform
+ * (leader/Head/SPV/Director). TIDAK termasuk (sengaja): `gmv`/`gmv_live`/`gmv_video` (dihitung dari upload data platform
  * mingguan di /ingest), dan "Sisa Kontrak" (computed dari join_date + End Date).
  */
 export interface EditableCreator {
@@ -459,7 +459,7 @@ export function CreatorEditButton({
               <p className="col-span-full rounded-md bg-slate-50 px-3 py-2 text-[11px] text-slate-500">
                 {canEditCommission
                   ? "Perubahan Sharing Komisi tercatat di audit log. "
-                  : "Sharing Komisi hanya bisa diubah leader / SPV / Director. "}
+                  : "Sharing Komisi hanya bisa diubah leader / Head / SPV / Director. "}
                 GMV total / live / video juga read-only: dihitung dari upload data
                 platform mingguan di <span className="font-medium">/ingest</span>. Sisa kontrak
                 dihitung otomatis dari Join Date + End Date.

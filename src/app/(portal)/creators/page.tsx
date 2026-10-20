@@ -211,7 +211,7 @@ export default async function CreatorsPage() {
           Master data kreator (format sheet &quot;data creator&quot;). GMV total / live / video adalah
           RATA-RATA BULANAN — dihitung otomatis dari upload data platform mingguan di{" "}
           <a href="/ingest" className="underline">/ingest</a> (rata-rata dari seluruh bulan yang punya
-          data, bukan total sekali batch). Sharing komisi bisa diubah leader / SPV / Director lewat tombol Edit (tercatat di audit
+          data, bukan total sekali batch). Sharing komisi bisa diubah leader / Head / SPV / Director lewat tombol Edit (tercatat di audit
           log); selain itu hanya baca.
           {canEdit && (
             <>
@@ -220,7 +220,7 @@ export default async function CreatorsPage() {
               platform, jenis, kelas kreator, niche, followers, kualitas, level, RC live/video, rate
               card, join date, end date, domisili, alamat, status, akuisitor
               {canAssignCm && ", CM pemilik"}) lewat tombol <strong>Edit</strong> di setiap baris —
-              setiap perubahan tercatat di audit log. Sharing komisi hanya bisa diubah leader / SPV / Director,
+              setiap perubahan tercatat di audit log. Sharing komisi hanya bisa diubah leader / Head / SPV / Director,
               dan GMV tidak bisa diedit (hasil hitung upload mingguan).
             </>
           )}

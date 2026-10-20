@@ -164,7 +164,7 @@ export const PERMISSIONS: Record<string, Role[]> = {
   // Akuisisi Lead), SPV, dan Director — menggantikan aturan read-only lama. Ditegakkan
   // di updateCreatorProfile (service role melewati trigger protect_commission_share);
   // setiap perubahan tercatat di audit_logs.
-  "creators.edit_commission": ["director", "spv", "cm_lead", "bizdev_lead", "acquisition_lead"],
+  "creators.edit_commission": ["director", "head", "spv", "cm_lead", "bizdev_lead", "acquisition_lead"],
   // Hapus master data kreator (permanen). Management + CM Lead (leader TikTok &
   // Shopee, dibuka 2026-10-01) — BUKAN cpm / akuisisi: menghapus kreator berpotensi
   // merugikan (CLAUDE.md #2), dan kreator yang sudah punya kontrak/report/komisi
