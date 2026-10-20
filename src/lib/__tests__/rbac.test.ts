@@ -189,3 +189,31 @@ describe("summary per BizDev (REVISI_BIZDEV K11 = B)", () => {
     }
   });
 });
+
+// Campaign Ops (keputusan Yohan 2026-10-20, docs/DECISIONS.md D-2026-10-20-6): support
+// administratif & operasional. BizDev memegang leads, pitching, negosiasi, closing.
+describe("campaign_ops — support administratif, bukan pitching/closing", () => {
+  it("tetap boleh update database brand, report, monitoring aktivasi, M7/M10", () => {
+    for (const perm of [
+      "deals.edit", "m4.upload", "m4.run", "m4.view", "m7.manage", "m7.metrics", "m7.curate",
+      "m8.handover", "m10.brief_execute", "m10.result_input", "products.edit", "products.upload_master",
+    ] as const) {
+      expect(hasPermission(perm, "campaign_ops"), perm).toBe(true);
+    }
+  });
+
+  it("TIDAK punya akses pitching/closing: Registrasi Deal, BD Value Predictor, tambah/edit lead, Report Brand", () => {
+    for (const perm of ["deals.register", "m6.run", "leads.create", "leads.edit", "m8.brand_report"] as const) {
+      expect(hasPermission(perm, "campaign_ops"), perm).toBe(false);
+    }
+    const nav = (href: string) => NAV_ITEMS.find((n) => n.href === href)!;
+    expect(canAccessNav(nav("/deals/baru"), "campaign_ops")).toBe(false);
+    expect(canAccessNav(nav("/predictor"), "campaign_ops")).toBe(false);
+  });
+
+  it("preview import & kelola niche hanya management + bizdev_lead", () => {
+    for (const perm of ["deals.import_preview", "deals.niche_manage"] as const) {
+      expect(PERMISSIONS[perm]).toEqual([...MANAGEMENT_ROLES, "bizdev_lead"]);
+    }
+  });
+});

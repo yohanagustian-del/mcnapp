@@ -185,7 +185,14 @@ export const PERMISSIONS: Record<string, Role[]> = {
   "leads.create": [...MANAGEMENT_ROLES, "bizdev_lead", "bizdev"],
   "leads.edit": [...MANAGEMENT_ROLES, "bizdev_lead", "bizdev"],
   "deals.register": [...MANAGEMENT_ROLES, "bizdev_lead", "bizdev"],
+  // Import Bulk Deal Brand (/deals/import, menggantikan importer master deal lama sejak
+  // 2026-10-20). Kunci izin dipertahankan supaya role yang sudah memakainya tidak berubah.
   "deals.import_legacy": [...MANAGEMENT_ROLES, "bizdev_lead", "bd_admin"],
+  // Halaman preview hasil load staging vs produksi (keputusan Yohan 2026-10-20):
+  // hanya management + bizdev_lead.
+  "deals.import_preview": [...MANAGEMENT_ROLES, "bizdev_lead"],
+  // Tambah niche baru ke daftar baku app_config m8.niche_options (DECISIONS D-2026-10-20-7).
+  "deals.niche_manage": [...MANAGEMENT_ROLES, "bizdev_lead"],
   // Edit deal brand per-row: memperbaiki data master deal lama yang berantakan
   // (shop_id kosong, exp_date teks bebas, komisi "not found") lewat form tervalidasi
   // yang sama ketatnya dengan registrasi — CLAUDE.md #6. Dicermin RLS deals_update (0002),
