@@ -94,7 +94,7 @@ export const NAV_ITEMS: NavItem[] = [
   // Project BD: beberapa shop/brand digarap sebagai satu campaign. Pemirsanya sama
   // dengan Deal Brand — isinya memang pandangan lain atas data yang sama.
   { href: "/bd-projects", label: "Project BD", roles: [...MANAGEMENT_ROLES, ...BIZDEV_ROLES, "finance"], group: "BizDev & Deal" },
-  { href: "/deals/import", label: "Import Master Deal", roles: [...MANAGEMENT_ROLES, "bizdev_lead", "bd_admin"], group: "BizDev & Deal" },
+  { href: "/deals/import", label: "Import Bulk Deal Brand", roles: [...MANAGEMENT_ROLES, "bizdev_lead", "bd_admin"], group: "BizDev & Deal" },
   // CM ikut melihat & mencari (request 2026-10-01): brand lama yang belum winning bisa
   // dicocokkan ke kreator baru. Tambah/upload/edit tetap BizDev (leads.create/edit).
   { href: "/leads", label: "Brand Lead Bank", roles: [...MANAGEMENT_ROLES, ...BIZDEV_ROLES, ...CM_ROLES], group: "BizDev & Deal" },

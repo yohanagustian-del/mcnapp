@@ -32,7 +32,7 @@ export type BulkDealField = (typeof BULK_DEAL_FIELDS)[number];
 /** Kolom berisi kontak pribadi — diff-nya tidak menampilkan nilai di laporan. */
 export const SENSITIVE_FIELDS: BulkDealField[] = ["contact_pic_brand", "nama_grup"];
 
-export type DealRecord = Record<BulkDealField, string | number | string[] | null>;
+export type DealRecord = Record<BulkDealField, string | number | string[] | null> & { status: string | null };
 
 export interface ExistingDeal extends Partial<Record<BulkDealField, unknown>> {
   id: string;

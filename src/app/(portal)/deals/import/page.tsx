@@ -1,29 +1,35 @@
+import Link from "next/link";
 import { redirect } from "next/navigation";
 import { requireMember, hasPermission } from "@/lib/rbac";
-import { CsvUploadForm } from "@/components/csv-upload-form";
-import { importLegacyDeals } from "../actions";
+import { BulkImportPanel } from "./bulk-import-panel";
+
+// 800+ baris: insert per batch + sinkron handler/cooperating_shops dalam satu request.
+export const maxDuration = 300;
 
 export default async function DealImportPage() {
   const member = await requireMember();
   if (!hasPermission("deals.import_legacy", member.role)) redirect("/deals");
+  const canPreview = hasPermission("deals.import_preview", member.role);
 
   return (
     <div>
-      <h1 className="text-2xl font-semibold">Import Master Deal Internal (lama)</h1>
-      <p className="mt-1 text-sm text-slate-500">
-        Parser toleran untuk sheet lama yang berantakan: Rupiah campur (titik/koma ribuan),
-        exp date teks bebas ("19 February 2026"), komisi kotor ("5-7%", "not found") → disimpan
-        dengan flag review, tidak crash. Baris "Summary" otomatis dilewati. Countdown negatif →
-        shop dinonaktifkan. Mendukung .xlsx, .csv, dan .numbers (Apple Numbers) — baris judul di
-        atas header ikut dilewati otomatis.
+      <h1 className="text-2xl font-semibold">Import Bulk Deal Brand</h1>
+      <p className="mt-1 max-w-3xl text-sm text-slate-500">
+        Upload export tab <strong>&quot;DATA BULKING! UNTUK KO YOHAN&quot;</strong> (sheet All Brand TAP, .xlsx atau
+        .csv) apa adanya — baris 1 grup kolom, baris 2 header. Kolom dibaca per <strong>posisi</strong> (header
+        &quot;Leads&quot; muncul dua kali). Klik <strong>Preview</strong> dulu: belum ada yang tersimpan. Setelah
+        dicek, <strong>Simpan</strong> melakukan upsert per (Shop ID + Nama Brand persis). Baris lama yang tidak ada
+        di file TIDAK dihapus di sini.
       </p>
-
-      <div className="mt-6 max-w-3xl">
-        <CsvUploadForm
-          action={importLegacyDeals}
-          buttonLabel="Import Master Deal"
-          helpText='Kolom yang dikenali (header sheet lama): Nama Brand, SHOP ID, Niche, GMV TAP, Avg Harga, Tim Handler, Ads Brand, Leads, Bobot, Diterima/Ditolak, Priority, Status, Campaign Name, Campaign ID, Exp Date, Countdown, Link TAP, Contact PIC, Nama Grup, Komisi Kreator, Komisi Mea, Openplan, Action, Notes, Shop Code.'
-        />
+      {canPreview && (
+        <p className="mt-2 text-sm">
+          <Link href="/deals/import/preview" className="font-medium text-blue-700 hover:underline">
+            Buka halaman Preview Bulk Load (staging vs produksi) →
+          </Link>
+        </p>
+      )}
+      <div className="mt-6">
+        <BulkImportPanel />
       </div>
     </div>
   );
