@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { dealStatusLabel } from "@/lib/deals/deal-status";
 import { notFound, redirect } from "next/navigation";
 import { requireMember, canAccessNav, hasPermission, NAV_ITEMS } from "@/lib/rbac";
 import { createClient } from "@/lib/supabase/server";
@@ -98,7 +99,7 @@ export default async function DealDetailPage({
     ["Tipe Campaign", deal.campaign_type === "sample" ? "Sample (non-berbayar)" : deal.campaign_type === "extra_commission" ? "Komisi Extra (non-berbayar)" : "Paid"],
     ["Didaftarkan oleh", deal.sourced_by_role === "cm" ? "CM (tanpa BizDev)" : "BizDev"],
     ["PIC Brand", deal.contact_pic_brand ?? "—"],
-    ["Status", deal.status ?? "—"],
+    ["Status", dealStatusLabel(deal.status)],
   ];
 
   return (

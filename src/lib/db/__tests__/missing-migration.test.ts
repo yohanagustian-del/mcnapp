@@ -221,3 +221,29 @@ describe("migrasi 0096 — penjaga CLAUDE.md #9 & apply_migration (K23)", () => 
     expect(code).not.toMatch(/\bdrop\b|\bdelete\b|\btruncate\b/i);
   });
 });
+
+describe("migrasi 0097/0098 — bulk load Deal Brand", () => {
+  const stripComments = (s: string) => s.replace(/--.*$/gm, "");
+  const sql = stripComments(readFileSync(join(process.cwd(), "supabase/migrations/0097_deal_brand_bulkload.sql"), "utf8"));
+  const uniq = stripComments(readFileSync(join(process.cwd(), "supabase/migrations/0098_brand_deals_upsert_unique.sql"), "utf8"));
+
+  it("tanpa tabel baru, tanpa DROP POLICY/TRIGGER (K23)", () => {
+    expect(sql).not.toMatch(/create table/i);
+    expect(sql).not.toMatch(/drop\s+(policy|trigger)/i);
+  });
+
+  it("status lama dipetakan sebelum CHECK baru dipasang", () => {
+    const iRun = sql.indexOf("set status = 'running_1st_month' where status = 'running'");
+    const iDone = sql.indexOf("set status = 'stop' where status = 'done'");
+    const iCheck = sql.indexOf("check (status in ('reguler', 'running_1st_month', 'retention', 'hold', 'stop'))");
+    expect(iRun).toBeGreaterThan(0);
+    expect(iDone).toBeGreaterThan(0);
+    expect(iCheck).toBeGreaterThan(Math.max(iRun, iDone));
+  });
+
+  it("unique key upsert case-sensitive & TIDAK unique (platform, shop_id) saja", () => {
+    expect(sql).not.toMatch(/unique/i);
+    expect(uniq).toMatch(/on brand_deals \(platform, shop_id, brand_name\)/);
+    expect(uniq).not.toMatch(/lower\(/);
+  });
+});

@@ -28,6 +28,7 @@ import {
   type ShopCardRow,
 } from "@/lib/deals/shop-edit";
 import { CAMPAIGN_TYPE_LABEL } from "@/lib/deals/campaign-type";
+import { DEAL_STATUSES, normalizeDealStatus, writeWithDealStatusFallback } from "@/lib/deals/deal-status";
 import { getConfig } from "@/lib/config";
 import { priceSegmentOf, type PriceBounds } from "@/lib/projection/gmv";
 import { NO_CAMPAIGN, uploadProductMasterList } from "@/lib/m10/products";
@@ -294,9 +295,9 @@ async function registerShopDeal(
   const shopId = d.shop_id ?? null;
   const expDate = d.effective_end ?? null;
 
-  // Satu shop = satu deal aktif, invarian yang sama dengan form Edit deal. Tanpa
-  // pemeriksaan ini satu shop bisa punya dua baris deal yang saling bertabrakan saat
-  // sinkron ke cooperating_shops.
+  // Kunci deal = (platform, shop_id, brand_name) — invarian yang sama dengan form Edit
+  // deal & Import Bulk Deal Brand (DECISIONS D-2026-10-20-4). Satu shop BOLEH dipakai
+  // beberapa brand; nama yang sama di shop yang sama = duplikat.
   //
   // limit(1), BUKAN maybeSingle(): master deal lama bisa memuat beberapa baris dengan
   // shop_id yang sama, dan maybeSingle() akan error di situ — lalu error itu terbaca
@@ -305,7 +306,9 @@ async function registerShopDeal(
     const { data: dupes, error: dupeError } = await admin
       .from("brand_deals")
       .select("id, brand_name")
+      .eq("platform", platform ?? "tiktok")
       .eq("shop_id", shopId)
+      .eq("brand_name", d.shop_name ?? `#${shopId}`)
       .limit(1);
     // Error dibaca, tidak diabaikan: kalau pemeriksaannya sendiri gagal, kita tidak
     // tahu ada duplikat atau tidak — menyimpan tetap berarti menebak.
@@ -317,10 +320,10 @@ async function registerShopDeal(
       return {
         ok: false,
         message:
-          `Shop ID ${shopId} sudah terdaftar di deal ${dupe.id} (${dupe.brand_name}). ` +
+          `Brand "${dupe.brand_name}" dengan Shop ID ${shopId} sudah terdaftar di deal ${dupe.id}. ` +
           "Perbaiki deal itu lewat tab Deal Brand, atau daftarkan kartu produknya " +
           "(isi Product Name / Product ID) kalau ini produk baru di shop yang sama.",
-        fieldErrors: { shop_id: "Shop ID sudah dipakai deal lain" },
+        fieldErrors: { shop_id: "Brand + Shop ID ini sudah dipakai deal lain" },
       };
     }
   }
@@ -364,7 +367,9 @@ async function registerShopDeal(
     // Kontak PIC dari Brand Lead Bank (T8); form biasa tidak mengirimnya → null.
     contact_pic_brand: leadCtx?.contactPic ?? null,
     ...(platform ? { platform } : {}),
-    status: "running", // deal yang baru ditutup memang sedang berjalan
+    // Deal yang baru ditutup = bulan pertama berjalan (status 0097; fallback "running"
+    // otomatis selama migrasinya belum di-apply).
+    status: "running_1st_month",
     notes:
       "Didaftarkan lewat Registrasi Deal; produknya belum diketahui." +
       (titipan.length ? ` ${titipan.join("; ")}.` : ""),
@@ -372,7 +377,9 @@ async function registerShopDeal(
     created_by: actorId,
   };
 
-  const { error } = await admin.from("brand_deals").insert(record);
+  const { error } = await writeWithDealStatusFallback(record, (rec) =>
+    admin.from("brand_deals").insert(rec)
+  );
   if (error) return { ok: false, message: `Gagal menyimpan deal: ${error.message}` };
 
   const extras: string[] = [];
@@ -674,7 +681,14 @@ const dealEditSchema = z.object({
   komisi_mea_max: optionalNumber(100),
   campaign_name: z.string().optional().default(""),
   campaign_type: z.enum(["paid", "sample", "extra_commission"]).default("paid"),
-  status: z.enum(["", "running", "hold", "done"]).default(""),
+  // Nilai lama (running/done) tetap diterima lalu dinormalisasi ke status 0097.
+  status: z
+    .string()
+    .optional()
+    .default("")
+    .refine((v) => !v.trim() || normalizeDealStatus(v) !== null, {
+      message: `Status harus salah satu: ${DEAL_STATUSES.join(", ")}`,
+    }),
   ads_budget: optionalNumber(),
   service_fee: optionalNumber(),
   gmv_tap: optionalNumber(),
@@ -716,7 +730,7 @@ export async function updateDeal(
   const { data: before } = await supabase
     .from("brand_deals")
     .select(
-      "id, brand_name, shop_id, niche, exp_date, campaign_name, campaign_type, status, komisi_kreator_raw, komisi_kreator_pct, komisi_mea_raw, komisi_mea_pct, ads_budget, service_fee, gmv_tap, avg_price, notes, review_flags"
+      "id, platform, brand_name, shop_id, niche, exp_date, campaign_name, campaign_type, status, komisi_kreator_raw, komisi_kreator_pct, komisi_mea_raw, komisi_mea_pct, ads_budget, service_fee, gmv_tap, avg_price, notes, review_flags"
     )
     .eq("id", d.deal_id)
     .maybeSingle();
@@ -725,16 +739,24 @@ export async function updateDeal(
   const shopId = d.shop_id.trim() || null;
   const expDate = d.exp_date.trim() || null;
 
-  // shop_id tetap unik antar deal (satu shop = satu deal aktif); baris ini sendiri
-  // tentu saja tidak dihitung sebagai duplikat.
+  // Kunci deal = (platform, shop_id, brand_name) persis (DECISIONS D-2026-10-20-4):
+  // satu shop boleh dipakai beberapa brand, tapi nama brand yang sama di shop yang sama
+  // = duplikat. Baris ini sendiri tidak dihitung.
   if (shopId) {
     const { data: dupe } = await supabase
-      .from("brand_deals").select("id").eq("shop_id", shopId).neq("id", d.deal_id).maybeSingle();
+      .from("brand_deals")
+      .select("id")
+      .eq("platform", before.platform ?? "tiktok")
+      .eq("shop_id", shopId)
+      .eq("brand_name", d.brand_name.trim())
+      .neq("id", d.deal_id)
+      .limit(1)
+      .maybeSingle();
     if (dupe) {
       return {
         ok: false,
-        message: `Shop ID ${shopId} sudah terdaftar di deal ${dupe.id}.`,
-        fieldErrors: { shop_id: "Shop ID sudah dipakai deal lain" },
+        message: `Brand "${d.brand_name.trim()}" dengan Shop ID ${shopId} sudah terdaftar di deal ${dupe.id}.`,
+        fieldErrors: { shop_id: "Brand + Shop ID ini sudah dipakai deal lain" },
       };
     }
   }
@@ -753,7 +775,7 @@ export async function updateDeal(
     komisi_mea_pct: d.komisi_mea_min ?? null,
     campaign_name: d.campaign_name.trim() || null,
     campaign_type: d.campaign_type,
-    status: d.status || null,
+    status: normalizeDealStatus(d.status),
     ads_budget: d.ads_budget ?? null,
     service_fee: d.service_fee ?? null,
     gmv_tap: d.gmv_tap ?? null,
@@ -763,7 +785,9 @@ export async function updateDeal(
   };
 
   // Update lewat client user-scoped supaya RLS deals_update yang menentukan boleh/tidak.
-  const { error } = await supabase.from("brand_deals").update(record).eq("id", d.deal_id);
+  const { error } = await writeWithDealStatusFallback(record, (rec) =>
+    supabase.from("brand_deals").update(rec).eq("id", d.deal_id)
+  );
   if (error) return { ok: false, message: `Gagal menyimpan perubahan: ${error.message}` };
 
   // Sinkron exp_date → cooperating_shops.deal_end untuk alert kadaluarsa M4 (CLAUDE.md #5).
@@ -895,7 +919,7 @@ export async function importLegacyDeals(formData: FormData): Promise<UploadRepor
       (Number.isFinite(countdown) && countdown < 0) || (expDate !== null && expDate < today);
 
     const id = genId("DEAL");
-    const { error } = await admin.from("brand_deals").insert({
+    const legacyRecord = {
       id,
       brand_name: brandName,
       shop_id: shopId,
@@ -910,7 +934,7 @@ export async function importLegacyDeals(formData: FormData): Promise<UploadRepor
       bobot_leads: (raw.bobot ?? raw.bobot_leads)?.trim() || null,
       diterima_ditolak: normalizeChoice(raw["diterima/ditolak"] ?? raw.diterima_ditolak, ["diterima", "ditolak"]),
       priority: raw.priority?.trim() || null,
-      status: normalizeChoice(raw.status, ["running", "hold", "done"]),
+      status: normalizeDealStatus(raw.status),
       // "Nama Campiagn" (sic) is the header in the BD master tracker.
       campaign_name: (raw.campaign_name ?? raw.nama_campaign ?? raw.nama_campiagn)?.trim() || null,
       campaign_id: raw.campaign_id?.trim() || null,
@@ -929,9 +953,12 @@ export async function importLegacyDeals(formData: FormData): Promise<UploadRepor
       shop_code: raw.shop_code?.trim() || null,
       review_flags: flags,
       created_by: actor.id,
-    });
+    };
+    const { error } = await writeWithDealStatusFallback(legacyRecord, (rec) =>
+      admin.from("brand_deals").insert(rec)
+    );
     if (error) {
-      report.skipped.push({ row: rowNum, reason: error.message });
+      report.skipped.push({ row: rowNum, reason: error.message ?? "gagal menyimpan" });
       continue;
     }
 
