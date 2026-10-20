@@ -494,6 +494,7 @@ export function CreatorsTable({
   canEdit,
   canDelete,
   canAssignCm = false,
+  canEditCommission = false,
   cmOptions = [],
   acquisitorOptions = [],
   canRequestCm = false,
@@ -511,6 +512,8 @@ export function CreatorsTable({
   canDelete: boolean;
   /** Izin m8.assign_creator — menampilkan dropdown CM di modal Edit. */
   canAssignCm?: boolean;
+  /** Izin creators.edit_commission — menampilkan input Sharing Komisi di modal Edit. */
+  canEditCommission?: boolean;
   /** Daftar CM aktif untuk dropdown CM di modal Edit. */
   cmOptions?: EditCmOption[];
   /** Anggota grup akuisisi aktif untuk dropdown Akuisitor di modal Edit. */
@@ -957,6 +960,7 @@ export function CreatorsTable({
                             cms={cmOptions}
                             acquisitors={acquisitorOptions}
                             canAssignCm={canAssignCm}
+                            canEditCommission={canEditCommission}
                           />
                         )}
                         {canDelete && (

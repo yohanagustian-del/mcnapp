@@ -7,13 +7,14 @@ import {
   CREATOR_CLASS_OPTIONS,
   DEFAULT_CREATOR_CLASS,
 } from "@/lib/creators/creator-class";
+import { commissionShareToPct } from "@/lib/creators/commission-share";
 import { updateCreatorProfile, type CreatorEditState } from "./actions";
 
 /**
  * Field editable oleh Creator Manager = seluruh kolom master yang diisi manusia.
  *
- * TIDAK termasuk (sengaja): `commission_share` (read-only, sync platform —
- * CLAUDE.md #3), `gmv`/`gmv_live`/`gmv_video` (dihitung dari upload data platform
+ * `commission_share` hanya tampil untuk role dengan izin creators.edit_commission
+ * (leader/SPV/Director). TIDAK termasuk (sengaja): `gmv`/`gmv_live`/`gmv_video` (dihitung dari upload data platform
  * mingguan di /ingest), dan "Sisa Kontrak" (computed dari join_date + End Date).
  */
 export interface EditableCreator {
@@ -41,6 +42,7 @@ export interface EditableCreator {
   status: string;
   owner_cpm_id: string | null;
   acquisitor_id: string | null;
+  commission_share: number | string | null;
 }
 
 /** Pilihan CM untuk dropdown "CM" (hanya tampil bila punya izin m8.assign_creator). */
@@ -158,6 +160,7 @@ export function CreatorEditButton({
   cms,
   acquisitors,
   canAssignCm,
+  canEditCommission = false,
 }: {
   creator: EditableCreator;
   /** Daftar CM aktif — hanya dipakai kalau canAssignCm. */
@@ -166,6 +169,8 @@ export function CreatorEditButton({
   acquisitors: EditCmOption[];
   /** Izin m8.assign_creator: boleh memindah kreator antar CM. */
   canAssignCm: boolean;
+  /** Izin creators.edit_commission: tampilkan input Sharing Komisi (%). */
+  canEditCommission?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [state, action, pending] = useActionState<CreatorEditState | null, FormData>(
@@ -418,6 +423,22 @@ export function CreatorEditButton({
                 ))}
               </SelectField>
 
+              {canEditCommission && (
+                <>
+                  <SectionTitle>Komisi</SectionTitle>
+                  <Field
+                    creatorId={creator.id}
+                    name="commission_share"
+                    title="Sharing Komisi (%)"
+                    type="number"
+                    min={0}
+                    max={100}
+                    placeholder="mis. 17"
+                    defaultValue={commissionShareToPct(creator.commission_share)}
+                  />
+                </>
+              )}
+
               <SectionTitle>Lokasi</SectionTitle>
               <Field
                 creatorId={creator.id}
@@ -436,8 +457,10 @@ export function CreatorEditButton({
               />
 
               <p className="col-span-full rounded-md bg-slate-50 px-3 py-2 text-[11px] text-slate-500">
-                Sharing Komisi tidak bisa diedit di sini — sinkron dari platform (read-only). Turun =
-                alert, bukan edit. GMV total / live / video juga read-only: dihitung dari upload data
+                {canEditCommission
+                  ? "Perubahan Sharing Komisi tercatat di audit log. "
+                  : "Sharing Komisi hanya bisa diubah leader / SPV / Director. "}
+                GMV total / live / video juga read-only: dihitung dari upload data
                 platform mingguan di <span className="font-medium">/ingest</span>. Sisa kontrak
                 dihitung otomatis dari Join Date + End Date.
               </p>

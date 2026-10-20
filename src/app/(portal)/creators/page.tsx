@@ -45,6 +45,7 @@ export default async function CreatorsPage() {
   const canEdit = hasPermission("creators.edit", member.role);
   const canDelete = hasPermission("creators.delete", member.role);
   const canAssignCm = hasPermission("m8.assign_creator", member.role);
+  const canEditCommission = hasPermission("creators.edit_commission", member.role);
   const canDecideCmRequest = hasPermission("creators.decide_cm_request", member.role);
   // CPM: boleh mengajukan request, tidak boleh assign. Yang sudah boleh assign
   // memakai dropdown CM di modal Edit — tidak perlu (dan tidak boleh) dua jalur.
@@ -210,8 +211,8 @@ export default async function CreatorsPage() {
           Master data kreator (format sheet &quot;data creator&quot;). GMV total / live / video adalah
           RATA-RATA BULANAN — dihitung otomatis dari upload data platform mingguan di{" "}
           <a href="/ingest" className="underline">/ingest</a> (rata-rata dari seluruh bulan yang punya
-          data, bukan total sekali batch). Sharing komisi sync dari platform (read-only) — turun =
-          alert, bukan edit.
+          data, bukan total sekali batch). Sharing komisi bisa diubah leader / SPV / Director lewat tombol Edit (tercatat di audit
+          log); selain itu hanya baca.
           {canEdit && (
             <>
               {" "}
@@ -219,8 +220,8 @@ export default async function CreatorsPage() {
               platform, jenis, kelas kreator, niche, followers, kualitas, level, RC live/video, rate
               card, join date, end date, domisili, alamat, status, akuisitor
               {canAssignCm && ", CM pemilik"}) lewat tombol <strong>Edit</strong> di setiap baris —
-              setiap perubahan tercatat di audit log. Yang tidak bisa diedit hanya sharing komisi
-              (sync platform) dan GMV (hasil hitung upload mingguan).
+              setiap perubahan tercatat di audit log. Sharing komisi hanya bisa diubah leader / SPV / Director,
+              dan GMV tidak bisa diedit (hasil hitung upload mingguan).
             </>
           )}
           {canDelete && (
@@ -315,6 +316,7 @@ export default async function CreatorsPage() {
             canEdit={canEdit}
             canDelete={canDelete}
             canAssignCm={canAssignCm}
+            canEditCommission={canEditCommission}
             cmOptions={(activeCms ?? []).map((m) => ({ id: m.id, name: m.name }))}
             acquisitorOptions={acquisitorOptions}
             canRequestCm={canRequestCm}

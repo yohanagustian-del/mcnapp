@@ -15,6 +15,7 @@ import { parseSheet } from "@/lib/utils/sheet";
 import { parseRupiah } from "@/lib/utils/rupiah";
 import { parseFlexibleDate } from "@/lib/utils/date";
 import { CREATOR_CLASSES } from "@/lib/creators/creator-class";
+import { parseCommissionSharePct } from "@/lib/creators/commission-share";
 import {
   buildMasterCreatorRow,
   parseNiches,
@@ -181,8 +182,10 @@ export type CreatorEditState = { ok: boolean; error?: string };
  * owner_cpm_id (CM — izin terpisah, lihat di bawah).
  *
  * Yang SENGAJA tidak bisa diedit di sini:
- *  - `commission_share` — read-only sync platform (CLAUDE.md #3): turun = alert,
- *    bukan edit. Diproteksi juga oleh trigger DB protect_commission_share.
+ *  - `commission_share` hanya boleh diubah role dengan izin creators.edit_commission
+ *    (leader/SPV/Director, permintaan 2026-10-20). Field-nya hanya diproses bila
+ *    ikut terkirim; tanpa izin DITOLAK. Ditulis lewat service role (trigger DB
+ *    protect_commission_share hanya memblokir klien biasa) dan tercatat di audit_logs.
  *  - `gmv` / `gmv_live` / `gmv_video` — dihitung dari upload data platform
  *    mingguan (/ingest), bukan angka yang boleh ditulis tangan.
  *  - "Sisa Kontrak" — computed di UI dari join_date + contract_end_date.
@@ -333,6 +336,17 @@ export async function updateCreatorProfile(
       // Dikosongkan = kreator masuk daftar "Kreator belum punya CM" di /creators.
       payload.owner_cpm_id = null;
     }
+  }
+
+  // Sharing Komisi: input persen → fraksi. Dikirim hanya oleh form leader/SPV/Director;
+  // kalau ikut terkirim tanpa izin, DITOLAK (bukan diabaikan diam-diam).
+  if (formData.has("commission_share")) {
+    if (!hasPermission("creators.edit_commission", actor.role)) {
+      return { ok: false, error: `Role ${actor.role} tidak berhak mengubah Sharing Komisi` };
+    }
+    const share = parseCommissionSharePct(String(formData.get("commission_share") ?? ""));
+    if (!share.ok) return { ok: false, error: share.error };
+    payload.commission_share = share.fraction;
   }
 
   const editableCols = Object.keys(payload).join(", ");

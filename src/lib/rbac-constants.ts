@@ -158,8 +158,13 @@ export const PERMISSIONS: Record<string, Role[]> = {
   "creators.bulk_upload": [...MANAGEMENT_ROLES, ...CM_ROLES, ...ACQUISITION_ROLES],
   // Edit master data kreator per-row (username sering ganti, no HP, RC, level, dll).
   // Dimiliki CM (Creator Manager) + management + akuisisi + creator_support — sejajar
-  // dengan RLS creators_update (0002). commission_share TETAP read-only (CLAUDE.md #3).
+  // dengan RLS creators_update (0002). Sharing komisi punya izin sendiri: creators.edit_commission.
   "creators.edit": [...MANAGEMENT_ROLES, ...CM_ROLES, ...ACQUISITION_ROLES, "creator_support"],
+  // Ubah Sharing Komisi kreator (permintaan user 2026-10-20): hanya leader (CM/BizDev/
+  // Akuisisi Lead), SPV, dan Director — menggantikan aturan read-only lama. Ditegakkan
+  // di updateCreatorProfile (service role melewati trigger protect_commission_share);
+  // setiap perubahan tercatat di audit_logs.
+  "creators.edit_commission": ["director", "spv", "cm_lead", "bizdev_lead", "acquisition_lead"],
   // Hapus master data kreator (permanen). Management + CM Lead (leader TikTok &
   // Shopee, dibuka 2026-10-01) — BUKAN cpm / akuisisi: menghapus kreator berpotensi
   // merugikan (CLAUDE.md #2), dan kreator yang sudah punya kontrak/report/komisi
