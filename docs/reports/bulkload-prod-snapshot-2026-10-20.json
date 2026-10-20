@@ -1,0 +1,1127 @@
+{
+ "env": "produksi",
+ "projectRef": "bqknstylbpwsnlgnzayw",
+ "fetchedAt": "2026-10-20T15:30:00Z",
+ "note": "SELECT read-only lewat Supabase MCP; kontak PIC & grup hanya ditandai '(ada)', member.id = nama.",
+ "deals": [
+  {
+   "id": "DEAL-25VDA",
+   "platform": "tiktok",
+   "brand_name": "Femmy",
+   "shop_id": null,
+   "status": "done",
+   "campaign_name": "Femmy - Bidan Lilis"
+  },
+  {
+   "id": "DEAL-2B2WU",
+   "platform": "tiktok",
+   "brand_name": "L'Oréal Professionnel ID",
+   "shop_id": "7495817678334494753",
+   "status": "running"
+  },
+  {
+   "id": "DEAL-3CKKW",
+   "platform": "tiktok",
+   "brand_name": "Glughava",
+   "shop_id": "147607132",
+   "status": "running",
+   "campaign_id": "1130279203",
+   "exp_date": "2027-01-30"
+  },
+  {
+   "id": "DEAL-5BASF",
+   "platform": "tiktok",
+   "brand_name": "Cerave Indonesia",
+   "shop_id": "7495725536740870256",
+   "status": "running"
+  },
+  {
+   "id": "DEAL-5BXMK",
+   "platform": "tiktok",
+   "brand_name": "testingShopName",
+   "shop_id": "123123",
+   "status": "running"
+  },
+  {
+   "id": "DEAL-5ST5K",
+   "platform": "tiktok",
+   "brand_name": "Sulwhasoo Indonesia",
+   "shop_id": "2143151",
+   "status": null,
+   "niche": "Beauty",
+   "gmv_tap": 0,
+   "avg_price": 0,
+   "campaign_name": "Sulwhasoo x MEA",
+   "exp_date": "2026-12-31"
+  },
+  {
+   "id": "DEAL-6SUWY",
+   "platform": "tiktok",
+   "brand_name": "TT Mode wanita",
+   "shop_id": "7495481862045141587",
+   "status": "running"
+  },
+  {
+   "id": "DEAL-7HFTZ",
+   "platform": "tiktok",
+   "brand_name": "Uwwais store",
+   "shop_id": "7495036815769701000",
+   "status": "running"
+  },
+  {
+   "id": "DEAL-7QSSX",
+   "platform": "tiktok",
+   "brand_name": "Raja Karpet",
+   "shop_id": "7494701207877225245",
+   "status": "running"
+  },
+  {
+   "id": "DEAL-AHCAD",
+   "platform": "tiktok",
+   "brand_name": "3CE Indonesia",
+   "shop_id": "7496114913756744244",
+   "status": "running"
+  },
+  {
+   "id": "DEAL-ANHE4",
+   "platform": "tiktok",
+   "brand_name": "Moorkoedal.Id",
+   "shop_id": "7495986821446798305",
+   "status": "running"
+  },
+  {
+   "id": "DEAL-AWVPK",
+   "platform": "tiktok",
+   "brand_name": "Zeea.Official Store",
+   "shop_id": null,
+   "status": "done",
+   "campaign_name": "ZeeaOffucial - Zezee"
+  },
+  {
+   "id": "DEAL-ENFHB",
+   "platform": "tiktok",
+   "brand_name": "Buds Organics Indonesia",
+   "shop_id": "7494083694437893783",
+   "status": "running"
+  },
+  {
+   "id": "DEAL-F57JE",
+   "platform": "tiktok",
+   "brand_name": "L'Oreal Paris Indonesia",
+   "shop_id": "7494420619288217834",
+   "status": "running"
+  },
+  {
+   "id": "DEAL-F94FK",
+   "platform": "tiktok",
+   "brand_name": "VIVI NICI",
+   "shop_id": "7494422182333614375",
+   "status": "running"
+  },
+  {
+   "id": "DEAL-GSP2U",
+   "platform": "tiktok",
+   "brand_name": "npureofficial",
+   "shop_id": "7493991957026932115",
+   "status": "running"
+  },
+  {
+   "id": "DEAL-GXCBF",
+   "platform": "tiktok",
+   "brand_name": "MLEN DIARY",
+   "shop_id": "7495293503028562237",
+   "status": "running"
+  },
+  {
+   "id": "DEAL-HPV5P",
+   "platform": "tiktok",
+   "brand_name": "Madame Gie",
+   "shop_id": null,
+   "status": "running",
+   "exp_date": "2026-12-31"
+  },
+  {
+   "id": "DEAL-HZRTW",
+   "platform": "tiktok",
+   "brand_name": "Sattelite of Glow",
+   "shop_id": null,
+   "status": "done",
+   "campaign_name": "Satellite of Glow"
+  },
+  {
+   "id": "DEAL-JATUM",
+   "platform": "tiktok",
+   "brand_name": "facetologystore",
+   "shop_id": "7494518382967229229",
+   "status": "running"
+  },
+  {
+   "id": "DEAL-JR28W",
+   "platform": "tiktok",
+   "brand_name": "MUKENA.AMINAH",
+   "shop_id": "7494839777434241358",
+   "status": "running"
+  },
+  {
+   "id": "DEAL-KMH5J",
+   "platform": "tiktok",
+   "brand_name": "P&G Store",
+   "shop_id": "7645028054468724498",
+   "status": "running"
+  },
+  {
+   "id": "DEAL-M4YXK",
+   "platform": "tiktok",
+   "brand_name": "Wardah",
+   "shop_id": null,
+   "status": "running",
+   "campaign_name": "Wardah Cushion"
+  },
+  {
+   "id": "DEAL-MU74W",
+   "platform": "tiktok",
+   "brand_name": "Now Foods indonesia",
+   "shop_id": "7494854818827700648",
+   "status": "running"
+  },
+  {
+   "id": "DEAL-NXC6Z",
+   "platform": "tiktok",
+   "brand_name": "THENBLANK",
+   "shop_id": "7494729079531145300",
+   "status": "running"
+  },
+  {
+   "id": "DEAL-P3WTE",
+   "platform": "tiktok",
+   "brand_name": "La Roche Posay",
+   "shop_id": "7494929988145220466",
+   "status": "running"
+  },
+  {
+   "id": "DEAL-P4NEC",
+   "platform": "tiktok",
+   "brand_name": "Sahabat Kesehatan",
+   "shop_id": "7495001424040659912",
+   "status": "running",
+   "campaign_id": "7611476489859188487",
+   "exp_date": "2027-02-21"
+  },
+  {
+   "id": "DEAL-PYSUV",
+   "platform": "tiktok",
+   "brand_name": "Ayucitra Fashion",
+   "shop_id": "7493993157318051090",
+   "status": "running"
+  },
+  {
+   "id": "DEAL-Q2MFA",
+   "platform": "tiktok",
+   "brand_name": "Haquhara",
+   "shop_id": "7493994407041271768",
+   "status": "running"
+  },
+  {
+   "id": "DEAL-Q3FQZ",
+   "platform": "tiktok",
+   "brand_name": "Shinzui Shop",
+   "shop_id": "7494919300905863950",
+   "status": "running"
+  },
+  {
+   "id": "DEAL-Q3TJJ",
+   "platform": "tiktok",
+   "brand_name": "Femmy",
+   "shop_id": null,
+   "status": "running",
+   "campaign_name": "Femmy - Fadlan"
+  },
+  {
+   "id": "DEAL-Q93TH",
+   "platform": "tiktok",
+   "brand_name": "L'Oreal Paris Haircare",
+   "shop_id": "7496100006925011248",
+   "status": "running"
+  },
+  {
+   "id": "DEAL-QJCEC",
+   "platform": "tiktok",
+   "brand_name": "Purbasari Indonesia",
+   "shop_id": "7494083658890053184",
+   "status": "running"
+  },
+  {
+   "id": "DEAL-QVBW8",
+   "platform": "tiktok",
+   "brand_name": "NONIMAGIC OFFICIAL STORE",
+   "shop_id": "7494735752283785875",
+   "status": "running"
+  },
+  {
+   "id": "DEAL-RAXJD",
+   "platform": "tiktok",
+   "brand_name": "Sattelite of Glow",
+   "shop_id": null,
+   "status": null,
+   "campaign_name": "Satellite of Glow"
+  },
+  {
+   "id": "DEAL-S2WCW",
+   "platform": "tiktok",
+   "brand_name": "SHIJI.",
+   "shop_id": "7494524380528937142",
+   "status": "running"
+  },
+  {
+   "id": "DEAL-SSYD2",
+   "platform": "tiktok",
+   "brand_name": "Maybelline Indonesia",
+   "shop_id": "7494048773396071648",
+   "status": "running"
+  },
+  {
+   "id": "DEAL-TEST01",
+   "platform": "tiktok",
+   "brand_name": "Skintific Official Store",
+   "shop_id": "7495001001",
+   "status": "running",
+   "niche": "Skincare",
+   "campaign_name": "Skintific Q3 Push",
+   "exp_date": "2026-12-31"
+  },
+  {
+   "id": "DEAL-TEST02",
+   "platform": "tiktok",
+   "brand_name": "Erigo Store",
+   "shop_id": "7495002002",
+   "status": "running",
+   "niche": "Fashion Pria",
+   "campaign_name": "Erigo Payday",
+   "exp_date": "2026-09-30"
+  },
+  {
+   "id": "DEAL-TEST03",
+   "platform": "tiktok",
+   "brand_name": "Wardah Beauty",
+   "shop_id": "7495003003",
+   "status": "hold",
+   "niche": "Kosmetik",
+   "campaign_name": "Wardah Sample Drive",
+   "exp_date": "2026-08-15"
+  },
+  {
+   "id": "DEAL-U24US",
+   "platform": "tiktok",
+   "brand_name": "Wardahbeautyid",
+   "shop_id": "7493999781643847575",
+   "status": "running"
+  },
+  {
+   "id": "DEAL-VFN6U",
+   "platform": "tiktok",
+   "brand_name": "Bintang Toedjoe Store",
+   "shop_id": "7494083427604399900",
+   "status": "done",
+   "niche": "Health",
+   "gmv_tap": 0,
+   "avg_price": 0,
+   "campaign_name": "Femmy Fadlan (1)",
+   "exp_date": "2026-12-31"
+  },
+  {
+   "id": "DEAL-VKDVT",
+   "platform": "tiktok",
+   "brand_name": "Glowsicha Indonesia",
+   "shop_id": "7495304714025077543",
+   "status": "running"
+  },
+  {
+   "id": "DEAL-XTX6C",
+   "platform": "tiktok",
+   "brand_name": "Betadine Shop",
+   "shop_id": "7494881384198474181",
+   "status": "running"
+  },
+  {
+   "id": "DEAL-YSC6Z",
+   "platform": "tiktok",
+   "brand_name": "Wardah",
+   "shop_id": null,
+   "status": "running",
+   "campaign_name": "Wardah Cushion"
+  },
+  {
+   "id": "DEAL-YYTHG",
+   "platform": "tiktok",
+   "brand_name": "Ryusei",
+   "shop_id": "7494083411718276575",
+   "status": "running"
+  },
+  {
+   "id": "DEAL-ZB6QW",
+   "platform": "tiktok",
+   "brand_name": "Berkahfashion89",
+   "shop_id": "7494083372748212051",
+   "status": "running"
+  },
+  {
+   "id": "DEAL-ZZBGC",
+   "platform": "tiktok",
+   "brand_name": "Loluna Official",
+   "shop_id": "7495182677925792112",
+   "status": "running"
+  }
+ ],
+ "refs": {
+  "DEAL-5ST5K": {
+   "cooperating_shops": 1
+  },
+  "DEAL-U24US": {
+   "cooperating_shops": 1
+  },
+  "DEAL-5BXMK": {
+   "cooperating_shops": 1
+  },
+  "DEAL-7HFTZ": {
+   "cooperating_shops": 1
+  },
+  "DEAL-S2WCW": {
+   "cooperating_shops": 1
+  },
+  "DEAL-QVBW8": {
+   "cooperating_shops": 1
+  },
+  "DEAL-GXCBF": {
+   "cooperating_shops": 1
+  },
+  "DEAL-7QSSX": {
+   "cooperating_shops": 1
+  },
+  "DEAL-KMH5J": {
+   "cooperating_shops": 1
+  },
+  "DEAL-ENFHB": {
+   "cooperating_shops": 1
+  },
+  "DEAL-ZB6QW": {
+   "cooperating_shops": 1
+  },
+  "DEAL-JR28W": {
+   "cooperating_shops": 1
+  },
+  "DEAL-MU74W": {
+   "cooperating_shops": 1
+  },
+  "DEAL-SSYD2": {
+   "cooperating_shops": 1
+  },
+  "DEAL-YYTHG": {
+   "cooperating_shops": 1
+  },
+  "DEAL-QJCEC": {
+   "cooperating_shops": 1
+  },
+  "DEAL-VKDVT": {
+   "cooperating_shops": 1
+  },
+  "DEAL-PYSUV": {
+   "cooperating_shops": 1
+  },
+  "DEAL-6SUWY": {
+   "cooperating_shops": 1
+  },
+  "DEAL-F57JE": {
+   "cooperating_shops": 1
+  },
+  "DEAL-F94FK": {
+   "cooperating_shops": 1
+  },
+  "DEAL-P3WTE": {
+   "cooperating_shops": 1
+  },
+  "DEAL-Q93TH": {
+   "cooperating_shops": 1
+  },
+  "DEAL-GSP2U": {
+   "cooperating_shops": 1
+  },
+  "DEAL-5BASF": {
+   "cooperating_shops": 1
+  },
+  "DEAL-NXC6Z": {
+   "cooperating_shops": 1
+  },
+  "DEAL-ANHE4": {
+   "cooperating_shops": 1
+  },
+  "DEAL-AHCAD": {
+   "cooperating_shops": 1
+  },
+  "DEAL-XTX6C": {
+   "cooperating_shops": 1
+  },
+  "DEAL-JATUM": {
+   "cooperating_shops": 1
+  },
+  "DEAL-ZZBGC": {
+   "cooperating_shops": 1
+  },
+  "DEAL-2B2WU": {
+   "cooperating_shops": 1
+  },
+  "DEAL-Q2MFA": {
+   "cooperating_shops": 1
+  },
+  "DEAL-TEST01": {
+   "deal_products": 3
+  },
+  "DEAL-TEST02": {
+   "deal_products": 1
+  },
+  "DEAL-M4YXK": {
+   "live_schedule_slots": 1
+  },
+  "DEAL-RAXJD": {
+   "live_schedule_slots": 1
+  },
+  "DEAL-VFN6U": {
+   "cooperating_shops": 1,
+   "campaign_requests": 56,
+   "deal_live_sessions": 39,
+   "deal_creator_proposals": 47,
+   "deal_products": 1
+  },
+  "DEAL-3CKKW": {
+   "cooperating_shops": 1,
+   "campaign_requests": 1
+  }
+ },
+ "members": [
+  {
+   "id": "Adelia Cindyta Puteri",
+   "name": "Adelia Cindyta Puteri",
+   "role": "creator_support",
+   "active": true
+  },
+  {
+   "id": "Adinda Ayu Kustianingrum",
+   "name": "Adinda Ayu Kustianingrum",
+   "role": "cm_lead",
+   "active": true
+  },
+  {
+   "id": "adit",
+   "name": "adit",
+   "role": "cpm",
+   "active": true
+  },
+  {
+   "id": "Ajeng Vaiki",
+   "name": "Ajeng Vaiki",
+   "role": "bizdev",
+   "active": false
+  },
+  {
+   "id": "Alya",
+   "name": "Alya",
+   "role": "bizdev",
+   "active": true
+  },
+  {
+   "id": "Aminah Alida",
+   "name": "Aminah Alida",
+   "role": "cpm",
+   "active": true
+  },
+  {
+   "id": "Andi sumayyah tenriwali",
+   "name": "Andi sumayyah tenriwali",
+   "role": "cpm",
+   "active": true
+  },
+  {
+   "id": "Andrea Herdythania",
+   "name": "Andrea Herdythania",
+   "role": "acquisition_spec",
+   "active": true
+  },
+  {
+   "id": "Anne Rahmawati",
+   "name": "Anne Rahmawati",
+   "role": "cpm",
+   "active": true
+  },
+  {
+   "id": "Arsy",
+   "name": "Arsy",
+   "role": "od_viewer",
+   "active": true
+  },
+  {
+   "id": "Arsy Rizmandha",
+   "name": "Arsy Rizmandha",
+   "role": "director",
+   "active": true
+  },
+  {
+   "id": "Banyu Bunisora Hermi Senawidjaya",
+   "name": "Banyu Bunisora Hermi Senawidjaya",
+   "role": "cm_lead",
+   "active": true
+  },
+  {
+   "id": "Bilal Fadilah",
+   "name": "Bilal Fadilah",
+   "role": "cpm",
+   "active": true
+  },
+  {
+   "id": "Dania Tiffany",
+   "name": "Dania Tiffany",
+   "role": "bizdev",
+   "active": true
+  },
+  {
+   "id": "Delliq Hastariq Atfhal",
+   "name": "Delliq Hastariq Atfhal",
+   "role": "cpm",
+   "active": true
+  },
+  {
+   "id": "Dhea Syahranie Putri",
+   "name": "Dhea Syahranie Putri",
+   "role": "cpm",
+   "active": true
+  },
+  {
+   "id": "Diana Raihanum",
+   "name": "Diana Raihanum",
+   "role": "acquisition_spec",
+   "active": true
+  },
+  {
+   "id": "Diena Shofwah",
+   "name": "Diena Shofwah",
+   "role": "campaign_ops",
+   "active": true
+  },
+  {
+   "id": "Eci",
+   "name": "Eci",
+   "role": "cpm",
+   "active": false
+  },
+  {
+   "id": "Eksantia Kumala Syafen",
+   "name": "Eksantia Kumala Syafen",
+   "role": "campaign_ops",
+   "active": true
+  },
+  {
+   "id": "Elsa Yashinta Amalia",
+   "name": "Elsa Yashinta Amalia",
+   "role": "cpm",
+   "active": false
+  },
+  {
+   "id": "Erlina sri utami",
+   "name": "Erlina sri utami",
+   "role": "bizdev",
+   "active": true
+  },
+  {
+   "id": "Fadel",
+   "name": "Fadel",
+   "role": "cpm",
+   "active": false
+  },
+  {
+   "id": "Fanny Putri Fernanda",
+   "name": "Fanny Putri Fernanda",
+   "role": "bizdev",
+   "active": true
+  },
+  {
+   "id": "gabriel",
+   "name": "gabriel",
+   "role": "cpm",
+   "active": true
+  },
+  {
+   "id": "Ghifary",
+   "name": "Ghifary",
+   "role": "director",
+   "active": true
+  },
+  {
+   "id": "Hana Nabila Qonita",
+   "name": "Hana Nabila Qonita",
+   "role": "cpm",
+   "active": true
+  },
+  {
+   "id": "Hasna Nuraini Aminah",
+   "name": "Hasna Nuraini Aminah",
+   "role": "cpm",
+   "active": true
+  },
+  {
+   "id": "Hera Sawitri",
+   "name": "Hera Sawitri",
+   "role": "cpm",
+   "active": true
+  },
+  {
+   "id": "Keizha Mayadha",
+   "name": "Keizha Mayadha",
+   "role": "cpm",
+   "active": false
+  },
+  {
+   "id": "Kent Farrel Athallah Hidayat",
+   "name": "Kent Farrel Athallah Hidayat",
+   "role": "campaign_external",
+   "active": true
+  },
+  {
+   "id": "Khoirotunnisa",
+   "name": "Khoirotunnisa",
+   "role": "cpm",
+   "active": true
+  },
+  {
+   "id": "Laila S",
+   "name": "Laila S",
+   "role": "bizdev",
+   "active": true
+  },
+  {
+   "id": "Lestari Putri Agraeni",
+   "name": "Lestari Putri Agraeni",
+   "role": "acquisition_spec",
+   "active": false
+  },
+  {
+   "id": "Lisna Rahma Fitriati",
+   "name": "Lisna Rahma Fitriati",
+   "role": "cpm",
+   "active": false
+  },
+  {
+   "id": "Lukman",
+   "name": "Lukman",
+   "role": "spv",
+   "active": true
+  },
+  {
+   "id": "M Yaumal Mizan Firdaus",
+   "name": "M Yaumal Mizan Firdaus",
+   "role": "bizdev",
+   "active": true
+  },
+  {
+   "id": "Mayra Zevanya Akilah Syah",
+   "name": "Mayra Zevanya Akilah Syah",
+   "role": "creator_support",
+   "active": true
+  },
+  {
+   "id": "Mita Mahmudah",
+   "name": "Mita Mahmudah",
+   "role": "acquisition_spec",
+   "active": true
+  },
+  {
+   "id": "Moch Rafly Nurhadi Hartono",
+   "name": "Moch Rafly Nurhadi Hartono",
+   "role": "cpm",
+   "active": true
+  },
+  {
+   "id": "Mochammad Ghifari Cahyadi",
+   "name": "Mochammad Ghifari Cahyadi",
+   "role": "cpm",
+   "active": true
+  },
+  {
+   "id": "Muhammad Fajr Al Ghazi",
+   "name": "Muhammad Fajr Al Ghazi",
+   "role": "acquisition_spec",
+   "active": true
+  },
+  {
+   "id": "Muhammad Rizqi Prijadi",
+   "name": "Muhammad Rizqi Prijadi",
+   "role": "bizdev",
+   "active": true
+  },
+  {
+   "id": "Naasyia Maharani Setiawan",
+   "name": "Naasyia Maharani Setiawan",
+   "role": "acquisition_spec",
+   "active": true
+  },
+  {
+   "id": "Nabila Vera Fenia",
+   "name": "Nabila Vera Fenia",
+   "role": "bizdev",
+   "active": true
+  },
+  {
+   "id": "Nabilla Cantika Putri",
+   "name": "Nabilla Cantika Putri",
+   "role": "bizdev",
+   "active": false
+  },
+  {
+   "id": "Nadya Maulida",
+   "name": "Nadya Maulida",
+   "role": "acquisition_spec",
+   "active": true
+  },
+  {
+   "id": "Nanthie",
+   "name": "Nanthie",
+   "role": "cpm",
+   "active": false
+  },
+  {
+   "id": "Novina Dewi Permatasari",
+   "name": "Novina Dewi Permatasari",
+   "role": "cm_lead",
+   "active": true
+  },
+  {
+   "id": "Qeila Putri Mayandra",
+   "name": "Qeila Putri Mayandra",
+   "role": "acquisition_spec",
+   "active": false
+  },
+  {
+   "id": "Raisa Qisthy",
+   "name": "Raisa Qisthy",
+   "role": "cpm",
+   "active": true
+  },
+  {
+   "id": "Ryan Nita",
+   "name": "Ryan Nita",
+   "role": "cpm",
+   "active": true
+  },
+  {
+   "id": "Silmi Eryoni",
+   "name": "Silmi Eryoni",
+   "role": "cpm",
+   "active": true
+  },
+  {
+   "id": "Sindi",
+   "name": "Sindi",
+   "role": "cpm",
+   "active": false
+  },
+  {
+   "id": "Sindi Amalia Putri",
+   "name": "Sindi Amalia Putri",
+   "role": "cpm",
+   "active": false
+  },
+  {
+   "id": "Siti Nurjanah",
+   "name": "Siti Nurjanah",
+   "role": "acquisition_lead",
+   "active": true
+  },
+  {
+   "id": "Sonya Monica Devie",
+   "name": "Sonya Monica Devie",
+   "role": "creator_support",
+   "active": true
+  },
+  {
+   "id": "Tasya Syahra Chaerani",
+   "name": "Tasya Syahra Chaerani",
+   "role": "cpm",
+   "active": true
+  },
+  {
+   "id": "Um Velika Juniardhani",
+   "name": "Um Velika Juniardhani",
+   "role": "cpm",
+   "active": true
+  },
+  {
+   "id": "Vanya Amadea Rizky",
+   "name": "Vanya Amadea Rizky",
+   "role": "acquisition_spec",
+   "active": true
+  },
+  {
+   "id": "Vickry Erinaldi",
+   "name": "Vickry Erinaldi",
+   "role": "acquisition_spec",
+   "active": true
+  },
+  {
+   "id": "Wildan Darmawan",
+   "name": "Wildan Darmawan",
+   "role": "cpm",
+   "active": true
+  },
+  {
+   "id": "Yohan Agustian",
+   "name": "Yohan Agustian",
+   "role": "director",
+   "active": true
+  },
+  {
+   "id": "zamzam",
+   "name": "zamzam",
+   "role": "cpm",
+   "active": false
+  },
+  {
+   "id": "Zul Fiqih Fahreizi",
+   "name": "Zul Fiqih Fahreizi",
+   "role": "bizdev",
+   "active": true
+  }
+ ],
+ "projectShopIds": [
+  "1733476116536526189",
+  "7493999781643847575",
+  "7494039647450596418",
+  "7494055767719183761",
+  "7494083372748212051",
+  "7494083415669179726",
+  "7494083427604399900",
+  "7494083480430347521",
+  "7494083548652799336",
+  "7494083639217390595",
+  "7494083694437893783",
+  "7494191970187446916",
+  "7494193604552722811",
+  "7494374563450226664",
+  "7494432922944572288",
+  "7494504946518690203",
+  "7494524380528937142",
+  "7494556100094363834",
+  "7494569963531176771",
+  "7494600208527362201",
+  "7494645330682546564",
+  "7494675388393228628",
+  "7494701207877225245",
+  "7494725083871611692",
+  "7494735752283785875",
+  "7494748231736592749",
+  "7494839777434241358",
+  "7494854818827700648",
+  "7494914015393057526",
+  "7494919300905863950",
+  "7494925848126982530",
+  "7495036815769701000",
+  "7495107083151640670",
+  "7495285931126393814",
+  "7495293503028562237",
+  "7495759919796160784",
+  "7496039549785770855",
+  "7645028054468724498"
+ ],
+ "handlers": {
+  "123123": [
+   "Erlina sri utami"
+  ],
+  "1341212": [
+   "Alya"
+  ],
+  "2143151": [
+   "Alya"
+  ],
+  "147607132": [
+   "Muhammad Rizqi Prijadi"
+  ],
+  "1733476116536526189": [
+   "Fanny Putri Fernanda"
+  ],
+  "7493991957026932115": [
+   "Laila S"
+  ],
+  "7493993157318051090": [
+   "Laila S"
+  ],
+  "7493994407041271768": [
+   "Laila S"
+  ],
+  "7493999781643847575": [
+   "Fanny Putri Fernanda"
+  ],
+  "7494039647450596418": [
+   "Erlina sri utami"
+  ],
+  "7494048773396071648": [
+   "Laila S"
+  ],
+  "7494083372748212051": [
+   "Fanny Putri Fernanda"
+  ],
+  "7494083411718276575": [
+   "Laila S"
+  ],
+  "7494083415669179726": [
+   "Alya"
+  ],
+  "7494083427604399900": [
+   "Alya",
+   "Erlina sri utami"
+  ],
+  "7494083658890053184": [
+   "Laila S"
+  ],
+  "7494083694437893783": [
+   "Fanny Putri Fernanda"
+  ],
+  "7494191970187446916": [
+   "Fanny Putri Fernanda"
+  ],
+  "7494193604552722811": [
+   "Fanny Putri Fernanda"
+  ],
+  "7494420619288217834": [
+   "Laila S"
+  ],
+  "7494422182333614375": [
+   "Laila S"
+  ],
+  "7494432922944572288": [
+   "Fanny Putri Fernanda"
+  ],
+  "7494518382967229229": [
+   "Laila S"
+  ],
+  "7494524380528937142": [
+   "Fanny Putri Fernanda"
+  ],
+  "7494556100094363834": [
+   "Alya",
+   "Erlina sri utami"
+  ],
+  "7494569963531176771": [
+   "Erlina sri utami"
+  ],
+  "7494675388393228628": [
+   "Fanny Putri Fernanda"
+  ],
+  "7494687833781864968": [
+   "Alya"
+  ],
+  "7494701207877225245": [
+   "Fanny Putri Fernanda"
+  ],
+  "7494706614872148889": [
+   "Erlina sri utami"
+  ],
+  "7494725083871611692": [
+   "Erlina sri utami"
+  ],
+  "7494729079531145300": [
+   "Laila S"
+  ],
+  "7494735752283785875": [
+   "Fanny Putri Fernanda"
+  ],
+  "7494748231736592749": [
+   "Fanny Putri Fernanda"
+  ],
+  "7494754655541955273": [
+   "Alya"
+  ],
+  "7494807241590606114": [
+   "Alya"
+  ],
+  "7494839777434241358": [
+   "Fanny Putri Fernanda"
+  ],
+  "7494854818827700648": [
+   "Alya"
+  ],
+  "7494862522912508574": [
+   "Erlina sri utami"
+  ],
+  "7494881384198474181": [
+   "Laila S"
+  ],
+  "7494906156684446033": [
+   "Alya"
+  ],
+  "7494914015393057526": [
+   "Fanny Putri Fernanda"
+  ],
+  "7494919300905863950": [
+   "Fanny Putri Fernanda"
+  ],
+  "7494925848126982530": [
+   "Alya"
+  ],
+  "7494928748302076708": [
+   "Alya"
+  ],
+  "7494929988145220466": [
+   "Laila S"
+  ],
+  "7495001424040659912": [
+   "Alya"
+  ],
+  "7495036815769701000": [
+   "Fanny Putri Fernanda"
+  ],
+  "7495149753706122212": [
+   "Erlina sri utami"
+  ],
+  "7495181208386570479": [
+   "Alya"
+  ],
+  "7495182677925792112": [
+   "Laila S"
+  ],
+  "7495293503028562237": [
+   "Fanny Putri Fernanda"
+  ],
+  "7495304714025077543": [
+   "Laila S"
+  ],
+  "7495481862045141587": [
+   "Laila S"
+  ],
+  "7495609693569649132": [
+   "Alya"
+  ],
+  "7495725536740870256": [
+   "Laila S"
+  ],
+  "7495759919796160784": [
+   "Erlina sri utami"
+  ],
+  "7495817678334494753": [
+   "Laila S"
+  ],
+  "7495986821446798305": [
+   "Laila S"
+  ],
+  "7496039549785770855": [
+   "Erlina sri utami"
+  ],
+  "7496055932977580622": [
+   "Alya"
+  ],
+  "7496100006925011248": [
+   "Laila S"
+  ],
+  "7496114913756744244": [
+   "Laila S"
+  ],
+  "7645028054468724498": [
+   "Fanny Putri Fernanda"
+  ]
+ }
+}
