@@ -43,3 +43,7 @@ export const MIGRATION_0094_MISSING =
 /** Pesan untuk view agregasi Summary per BizDev (migrasi 0096). */
 export const MIGRATION_0096_MISSING =
   "Migrasi 0096 belum di-apply (view bizdev_member_summary / bizdev_brand_breakdown). Hubungi admin untuk menjalankan migrasinya.";
+
+/** Pesan untuk Import Bulk Deal Brand / kolom Campaign Ops / ads support Project BD (migrasi 0097). */
+export const MIGRATION_0097_MISSING =
+  "Migrasi 0097 belum di-apply (kolom brand_deals.support_types/working_sheet/campaign_ops_id, bd_project_shops.ads_support, status Deal Brand baru). Hubungi admin untuk menjalankan migrasinya.";

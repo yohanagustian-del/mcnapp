@@ -7,6 +7,7 @@ import { getConfig } from "@/lib/config";
 import { requirePermission, type TeamMember } from "@/lib/rbac";
 import { fetchAll, fetchAllIn } from "@/lib/supabase/fetch-all";
 import { genId } from "@/lib/utils/id";
+import { writeWithDealStatusFallback } from "@/lib/deals/deal-status";
 import { parseRupiah } from "@/lib/utils/rupiah";
 import { adsNeedsDirectorApproval, isPerfDrop, latestTwoPeriods, type PeriodSummaryPoint } from "@/lib/m8/routing";
 import { assertComplaintMutationAllowed, type ComplaintCore, type ComplaintStatus, type Severity } from "@/lib/m9/portal";
@@ -418,7 +419,7 @@ export async function registerCmDeal(formData: FormData): Promise<void> {
   if (dupe) throw new Error(`Shop ID ${shopId} sudah terdaftar di deal ${dupe.id}`);
 
   const id = genId("DEAL");
-  const { error } = await admin.from("brand_deals").insert({
+  const { error } = await writeWithDealStatusFallback({
     id,
     brand_name: brandName,
     shop_id: shopId,
@@ -430,10 +431,10 @@ export async function registerCmDeal(formData: FormData): Promise<void> {
     campaign_type: campaignType,
     sourced_by_role: "cm",
     sourced_by: actor.id,
-    status: "running",
+    status: "running_1st_month",
     notes: creatorId ? `Deal dicarikan CM untuk ${creatorId}` : null,
     created_by: actor.id,
-  });
+  }, (rec) => admin.from("brand_deals").insert(rec));
   if (error) throw new Error(`Gagal menyimpan deal: ${error.message}`);
 
   // Sinkron exp_date → cooperating_shops (alert kadaluarsa M4), pola sama BizDev.
