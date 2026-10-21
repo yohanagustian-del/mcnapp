@@ -14,6 +14,11 @@ import {
 import { ReportSessionRowActions } from "@/components/report-session-row-actions";
 import { BizdevHandlerBadge } from "@/components/bizdev-handler-badge";
 import { loadHandlerIndex } from "@/lib/deals/bizdev-handlers";
+import { createAdminClient } from "@/lib/supabase/admin";
+import { loadDealOptions } from "@/lib/deals/deal-options";
+import { formatSupportTypes } from "@/lib/deals/bulk-deal-spec";
+import { isMissingRelationError, MIGRATION_0097_MISSING } from "@/lib/db/missing-migration";
+import { DealAttributesForm } from "./deal-attributes-form";
 
 function formatRp(v: number | null | undefined): string {
   return v ? `Rp${Number(v).toLocaleString("id-ID")}` : "—";
@@ -38,14 +43,35 @@ export default async function DealDetailPage({
   const { creator: creatorFilter } = await searchParams;
   const supabase = await createClient();
 
-  const { data: deal } = await supabase
+  const BASE_COLS =
+    "id, brand_name, shop_id, shop_key, niche, exp_date, campaign_name, komisi_kreator_raw, komisi_mea_raw, ads_budget, service_fee, campaign_type, sourced_by_role, status, contact_pic_brand, leads_type, priority, ads_brand, brand_link, nama_grup";
+  // Kolom 0097 (support/working sheet/Campaign Ops/label Bizdev). Selama 0097 belum di-apply
+  // di environment ini, halaman tetap tampil dengan kolom lama (form atribut disembunyikan).
+  const first = await supabase
     .from("brand_deals")
-    .select(
-      "id, brand_name, shop_id, shop_key, niche, exp_date, campaign_name, komisi_kreator_raw, komisi_mea_raw, ads_budget, service_fee, campaign_type, sourced_by_role, status, contact_pic_brand"
-    )
+    .select(`${BASE_COLS}, support_types, working_sheet, campaign_ops_id, bizdev_label`)
     .eq("id", id)
     .maybeSingle();
-  if (!deal) notFound();
+  const has0097 = !isMissingRelationError(first.error);
+  const { data: rawDeal } = has0097
+    ? first
+    : await supabase.from("brand_deals").select(BASE_COLS).eq("id", id).maybeSingle();
+  if (!rawDeal) notFound();
+  const deal = rawDeal as typeof rawDeal & {
+    support_types?: string[] | null;
+    working_sheet?: string | null;
+    campaign_ops_id?: string | null;
+    bizdev_label?: string | null;
+  };
+  const canEditAttrs = has0097 && hasPermission("deals.edit", member.role);
+  const admin = createAdminClient();
+  const [dealOptions, { data: opsMembers }] = await Promise.all([
+    canEditAttrs ? loadDealOptions(admin) : Promise.resolve(null),
+    admin.from("team_members").select("id, name, active").eq("role", "campaign_ops").order("name"),
+  ]);
+  const campaignOpsName = deal.campaign_ops_id
+    ? (opsMembers ?? []).find((m) => m.id === deal.campaign_ops_id)?.name ?? "(akun tidak dikenal)"
+    : "Non Campaign Ops";
 
   // BizDev penanggung jawab brand (migrasi 0087) — per shop_key, sama dengan tab Deal Brand.
   const handlerIndex = await loadHandlerIndex(supabase, [deal.shop_key as string]);
@@ -100,6 +126,17 @@ export default async function DealDetailPage({
     ["Didaftarkan oleh", deal.sourced_by_role === "cm" ? "CM (tanpa BizDev)" : "BizDev"],
     ["PIC Brand", deal.contact_pic_brand ?? "—"],
     ["Status", dealStatusLabel(deal.status)],
+    ["Leads", deal.leads_type ?? "—"],
+    ["Prioritas", deal.priority ?? "—"],
+    ["Grup", deal.nama_grup ?? "—"],
+    ...(has0097
+      ? ([
+          ["Sample / Flash Sale / Ads", formatSupportTypes(deal.support_types) || "—"],
+          ["Campaign Ops", campaignOpsName],
+          ["Label Bizdev (sheet)", deal.bizdev_label ?? "—"],
+        ] as [string, string][])
+      : []),
+    ["Ads Brand (lama, read-only)", deal.ads_brand ?? "—"],
   ];
 
   return (
@@ -121,6 +158,37 @@ export default async function DealDetailPage({
           </div>
         ))}
       </div>
+      {(deal.brand_link || deal.working_sheet) && (
+        <p className="mt-2 flex gap-4 text-sm">
+          {deal.brand_link && (
+            <a href={deal.brand_link} target="_blank" rel="noreferrer" className="text-blue-700 hover:underline">Link toko ↗</a>
+          )}
+          {deal.working_sheet && (
+            <a href={deal.working_sheet} target="_blank" rel="noreferrer" className="text-blue-700 hover:underline">Working sheet ↗</a>
+          )}
+        </p>
+      )}
+      {!has0097 && <p className="mt-2 text-xs text-amber-700">{MIGRATION_0097_MISSING}</p>}
+      {canEditAttrs && dealOptions && (
+        <DealAttributesForm
+          dealId={deal.id as string}
+          values={{
+            status: deal.status as string | null,
+            niche: deal.niche as string | null,
+            leads_type: deal.leads_type as string | null,
+            support_types: deal.support_types ?? null,
+            priority: deal.priority as string | null,
+            working_sheet: deal.working_sheet ?? null,
+            campaign_ops_id: deal.campaign_ops_id ?? null,
+          }}
+          nicheOptions={dealOptions.niche}
+          leadsOptions={dealOptions.leadsType}
+          campaignOps={(opsMembers ?? [])
+            .filter((m) => m.active || m.id === deal.campaign_ops_id)
+            .map((m) => ({ id: m.id as string, name: m.name as string }))}
+          canAddNiche={hasPermission("deals.niche_manage", member.role)}
+        />
+      )}
 
       <h2 className="mt-8 text-lg font-semibold">
         Produk yang Dikerjasamakan ({(products ?? []).length})

@@ -16,6 +16,9 @@ import {
 } from "@/lib/deals/bd-project";
 import { searchShopSummary, shopNumeric } from "@/lib/deals/shop-search";
 import { parseProductRowKeys } from "@/lib/m10/product-keys";
+import { loadDealOptions } from "@/lib/deals/deal-options";
+import { validateAdsSupport } from "@/lib/deals/deal-attributes";
+import { isMissingRelationError, MIGRATION_0097_MISSING } from "@/lib/db/missing-migration";
 
 export interface ProjectFormState {
   ok: boolean;
@@ -534,4 +537,54 @@ export async function deleteBdProject(
   // Nominal project yang terhapus mengubah total shop di tab Deal Brand.
   revalidatePath("/deals");
   return { ok: true, message: `Project "${project.name}" dihapus (tercatat di audit log).` };
+}
+
+/**
+ * Ads Support satu shop DI project ini (bd_project_shops.ads_support, migrasi 0097,
+ * DECISIONS D-2026-10-20-2) — pengganti kolom Ads Brand di Deal Brand. Pilihan dari
+ * app_config m8.ads_support_options; kosong = hapus pilihan.
+ */
+export async function updateProjectShopAdsSupport(
+  _prev: ProjectFormState | null,
+  formData: FormData
+): Promise<ProjectFormState> {
+  const actor = await requirePermission("bd_project.manage");
+  const projectId = String(formData.get("project_id") ?? "").trim();
+  const shopKey = String(formData.get("shop_key") ?? "").trim();
+  if (!projectId || !shopKey) return { ok: false, message: "Project / shop tidak dikenali." };
+
+  const admin = createAdminClient();
+  const options = await loadDealOptions(admin);
+  const v = validateAdsSupport(String(formData.get("ads_support") ?? ""), options.adsSupport);
+  if (!v.ok) return { ok: false, message: v.message };
+
+  const { data: row, error: readError } = await admin
+    .from("bd_project_shops")
+    .select("ads_support")
+    .eq("project_id", projectId)
+    .eq("shop_key", shopKey)
+    .maybeSingle();
+  if (isMissingRelationError(readError)) return { ok: false, message: MIGRATION_0097_MISSING };
+  if (readError) return { ok: false, message: `Gagal membaca shop: ${readError.message}` };
+  if (!row) return { ok: false, message: `Shop "${shopKey}" bukan anggota project ${projectId}. Muat ulang halaman.` };
+  if ((row.ads_support ?? null) === v.value) return { ok: true, message: "Tidak ada yang berubah." };
+
+  const { error } = await admin
+    .from("bd_project_shops")
+    .update({ ads_support: v.value })
+    .eq("project_id", projectId)
+    .eq("shop_key", shopKey);
+  if (error) return { ok: false, message: `Gagal menyimpan Ads Support: ${error.message}` };
+
+  await writeAudit({
+    actorId: actor.id,
+    action: "bd_project.shop_ads_support_update",
+    entityType: "bd_project_shops",
+    entityId: `${projectId}|${shopKey}`,
+    before: { ads_support: row.ads_support ?? null },
+    after: { project_id: projectId, shop_key: shopKey, ads_support: v.value },
+    type: "auto",
+  });
+  revalidatePath(`/bd-projects/${projectId}`);
+  return { ok: true, message: "Ads Support tersimpan." };
 }
