@@ -197,6 +197,8 @@ describe("campaign_ops — support administratif, bukan pitching/closing", () =>
     for (const perm of [
       "deals.edit", "m4.upload", "m4.run", "m4.view", "m7.manage", "m7.metrics", "m7.curate",
       "m8.handover", "m10.brief_execute", "m10.result_input", "products.edit", "products.upload_master",
+      // D-2026-10-21-2: Import Bulk Deal Brand + kelola Project BD (termasuk Ads Support per shop).
+      "deals.import_legacy", "bd_project.manage",
     ] as const) {
       expect(hasPermission(perm, "campaign_ops"), perm).toBe(true);
     }

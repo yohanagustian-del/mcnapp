@@ -94,7 +94,7 @@ export const NAV_ITEMS: NavItem[] = [
   // Project BD: beberapa shop/brand digarap sebagai satu campaign. Pemirsanya sama
   // dengan Deal Brand — isinya memang pandangan lain atas data yang sama.
   { href: "/bd-projects", label: "Project BD", roles: [...MANAGEMENT_ROLES, ...BIZDEV_ROLES, "finance"], group: "BizDev & Deal" },
-  { href: "/deals/import", label: "Import Bulk Deal Brand", roles: [...MANAGEMENT_ROLES, "bizdev_lead", "bd_admin"], group: "BizDev & Deal" },
+  { href: "/deals/import", label: "Import Bulk Deal Brand", roles: [...MANAGEMENT_ROLES, "bizdev_lead", "bd_admin", "campaign_ops"], group: "BizDev & Deal" },
   // CM ikut melihat & mencari (request 2026-10-01): brand lama yang belum winning bisa
   // dicocokkan ke kreator baru. Tambah/upload/edit tetap BizDev (leads.create/edit).
   { href: "/leads", label: "Brand Lead Bank", roles: [...MANAGEMENT_ROLES, ...BIZDEV_ROLES, ...CM_ROLES], group: "BizDev & Deal" },
@@ -187,7 +187,8 @@ export const PERMISSIONS: Record<string, Role[]> = {
   "deals.register": [...MANAGEMENT_ROLES, "bizdev_lead", "bizdev"],
   // Import Bulk Deal Brand (/deals/import, menggantikan importer master deal lama sejak
   // 2026-10-20). Kunci izin dipertahankan supaya role yang sudah memakainya tidak berubah.
-  "deals.import_legacy": [...MANAGEMENT_ROLES, "bizdev_lead", "bd_admin"],
+  // campaign_ops: keputusan Yohan 2026-10-21 (DECISIONS D-2026-10-21-2).
+  "deals.import_legacy": [...MANAGEMENT_ROLES, "bizdev_lead", "bd_admin", "campaign_ops"],
   // Halaman preview hasil load staging vs produksi (keputusan Yohan 2026-10-20):
   // hanya management + bizdev_lead.
   "deals.import_preview": [...MANAGEMENT_ROLES, "bizdev_lead"],
@@ -292,7 +293,7 @@ export const PERMISSIONS: Record<string, Role[]> = {
   // Sejajar dengan deals.register: yang menutup deal juga yang menyusun projectnya.
   // Menghapus project TIDAK menyentuh kartu produk mana pun — project cuma
   // pengelompokan — jadi izinnya sama, tanpa gerbang khusus management.
-  "bd_project.manage": [...MANAGEMENT_ROLES, "bizdev_lead", "bizdev"],
+  "bd_project.manage": [...MANAGEMENT_ROLES, "bizdev_lead", "bizdev", "campaign_ops"],
   // E-sign kontrak TC/Celeb: management + CM Lead + CPM (creator sendiri)
   "m8.esign": [...MANAGEMENT_ROLES, ...CM_ROLES],
   // Tracking closing & referral: management + Akuisisi
