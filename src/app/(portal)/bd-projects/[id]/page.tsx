@@ -2,6 +2,9 @@ import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { requireMember, canAccessNav, hasPermission, NAV_ITEMS } from "@/lib/rbac";
 import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
+import { loadDealOptions } from "@/lib/deals/deal-options";
+import { isMissingRelationError } from "@/lib/db/missing-migration";
 import { CsvUploadForm } from "@/components/csv-upload-form";
 // Pipeline report campaign BD dipakai bersama halaman detail deal — satu parser,
 // satu tabel, pemiliknya saja yang berbeda (deal_id / project_id).
@@ -71,10 +74,19 @@ export default async function BdProjectDetailPage({
     .maybeSingle();
   if (!project) notFound();
 
-  const { data: links } = await supabase
+  // ads_support (0097) dibaca bila kolomnya sudah ada; sebelum 0097 kolom Ads Support disembunyikan.
+  const linksFirst = await supabase
     .from("bd_project_shops")
-    .select("shop_key")
+    .select("shop_key, ads_support")
     .eq("project_id", id);
+  const hasAdsSupport = !isMissingRelationError(linksFirst.error);
+  const { data: links } = hasAdsSupport
+    ? linksFirst
+    : await supabase.from("bd_project_shops").select("shop_key").eq("project_id", id);
+  const adsSupportByShop = new Map(
+    (links ?? []).map((l) => [l.shop_key as string, ((l as { ads_support?: string | null }).ads_support ?? null)])
+  );
+  const adsSupportOptions = hasAdsSupport && canManage ? (await loadDealOptions(createAdminClient())).adsSupport : [];
   const shopKeys = (links ?? []).map((l) => l.shop_key as string);
 
   // Dua bacaan shop yang berbeda tujuan:
@@ -163,6 +175,7 @@ export default async function BdProjectDetailPage({
       active_count: numeric(s.active_count) ?? 0,
       needs_review_count: numeric(s.needs_review_count) ?? 0,
       campaign_count: numeric(s.campaign_count) ?? 0,
+      ads_support: adsSupportByShop.get(s.shop_key as string) ?? null,
       ads_budget: budgetByShop.get(s.shop_key as string)?.ads_budget ?? null,
       service_fee: budgetByShop.get(s.shop_key as string)?.service_fee ?? null,
       gmv_tap: numeric(s.gmv_tap),
@@ -329,6 +342,8 @@ export default async function BdProjectDetailPage({
           projectId={project.id as string}
           projectName={project.name as string}
           canManage={canManage}
+          showAdsSupport={hasAdsSupport}
+          adsSupportOptions={adsSupportOptions}
         />
       </div>
 

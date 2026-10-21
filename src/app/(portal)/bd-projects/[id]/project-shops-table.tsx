@@ -6,6 +6,7 @@ import {
   type SortConfig, type SortDir, type SortValue,
 } from "@/components/table-controls";
 import { ShopBudgetEditButton } from "./shop-budget-edit-button";
+import { ShopAdsSupportSelect } from "./shop-ads-support-select";
 
 /**
  * Satu shop anggota project. Kolom kartu (produk, campaign, komisi, GMV, exp date)
@@ -21,6 +22,8 @@ export interface ProjectShopRow {
   product_count: number;
   campaign_count: number;
   avg_commission_pct: number | null;
+  /** bd_project_shops.ads_support (0097) — skema ads shop ini di project ini. */
+  ads_support: string | null;
   ads_budget: number | null;
   service_fee: number | null;
   gmv_tap: number | null;
@@ -91,12 +94,18 @@ export function ProjectShopsTable({
   projectId,
   projectName,
   canManage = false,
+  showAdsSupport = false,
+  adsSupportOptions = [],
 }: {
   rows: ProjectShopRow[];
   projectId: string;
   projectName?: string;
   /** BizDev/management: menampilkan tombol Edit Ads Budget & Service Fee per shop. */
   canManage?: boolean;
+  /** false = migrasi 0097 belum di-apply (kolom ads_support belum ada). */
+  showAdsSupport?: boolean;
+  /** Pilihan app_config m8.ads_support_options; hanya dikirim bila canManage. */
+  adsSupportOptions?: string[];
 }) {
   const controls = useTableControls<ProjectShopRow>({
     rows,
@@ -105,7 +114,7 @@ export function ProjectShopsTable({
     itemLabel: "shop",
   });
 
-  const colCount = COLUMNS.length + (canManage ? 1 : 0);
+  const colCount = COLUMNS.length + (showAdsSupport ? 1 : 0) + (canManage ? 1 : 0);
 
   return (
     <div className="rounded-lg border border-slate-200 bg-white">
@@ -118,6 +127,7 @@ export function ProjectShopsTable({
                   {c.label}
                 </SortableTh>
               ))}
+              {showAdsSupport && <th className={th}>Ads Support</th>}
               {canManage && <th className={th}>Aksi</th>}
             </tr>
           </thead>
@@ -129,6 +139,20 @@ export function ProjectShopsTable({
                     {c.cell(s)}
                   </td>
                 ))}
+                {showAdsSupport && (
+                  <td className={td}>
+                    {canManage ? (
+                      <ShopAdsSupportSelect
+                        projectId={projectId}
+                        shopKey={s.shop_key}
+                        value={s.ads_support}
+                        options={adsSupportOptions}
+                      />
+                    ) : (
+                      s.ads_support ?? "—"
+                    )}
+                  </td>
+                )}
                 {canManage && (
                   <td className={`${td} whitespace-nowrap`}>
                     <ShopBudgetEditButton

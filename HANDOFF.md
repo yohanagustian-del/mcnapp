@@ -2,6 +2,22 @@
 
 Status per sesi 2026-10-14 (Revisi BizDev T1–T10 + F1–F3). Baca ini + `CLAUDE.md` sebelum lanjut.
 
+## ⚡ SESI 2026-10-20/21 — Bulk Load Deal Brand + role Campaign Ops (PR #129–#135)
+- Keputusan: `docs/DECISIONS.md` D-2026-10-20-*. Tutorial: `docs/TUTORIAL_BULK_DEAL_BRAND.md`.
+- Migrasi `0097_deal_brand_bulkload.sql` sudah di-apply di **staging** (`fomlangoiiywhexwoqom`), BELUM di produksi.
+  `0098` (unique index parsial) belum di-apply di mana pun. Kode toleran tanpa 0097 (`MIGRATION_0097_MISSING`,
+  `writeWithDealStatusFallback`).
+- Halaman: `/deals/import` (Preview → Simpan → Export), `/deals/import/preview` (staging vs snapshot produksi
+  `src/lib/deals/data/prod-snapshot-2026-10-20.json`), form "Edit Status & Atribut" di `/deals/[id]`,
+  kolom Ads Support per shop di `/bd-projects/[id]`.
+- Staging berisi 799 deal hasil sheet + `cooperating_shops` tersinkron + satu run log `brand_deal.bulk_import_run`.
+  BizDev handler belum ditulis di staging (anggota tim staging kosong).
+- Akun/role yang harus dibereskan tim: `docs/reports/mcn-todo-tim-21okt.md`. SQL role `scripts/sql/campaign-ops-roles.sql`
+  TIDAK dijalankan.
+- Bug lama (belum disentuh, di luar scope): `cooperating_shops` di-upsert `onConflict: "shop_id"` di
+  `deals/actions.ts` & `workspace/cm/actions.ts`, padahal PK = (platform, shop_id) → upsert gagal 42P10 diam-diam.
+- Menunggu persetujuan Yohan: apply 0097/0098 di produksi, Promote (replace data), SQL role.
+
 ## ⚡ SESI 2026-10-18 — /workspace/bizdev tidak bisa terbuka (Management/BizDev Lead)
 1. Penyebab: Summary per BizDev memuat SEMUA baris `bizdev_brand_perf` periode berjalan (Oktober = 51.370 shop) lewat 52 query berurutan, tiap query ±1–3 dtk karena policy `pt_creator_deny` (`not is_creator_user()`) dievaluasi per baris products_tap (±75rb) saat membangun `shop_key_map`; lalu ±51rb baris breakdown dikirim ke browser.
 2. **Migrasi 0096 SUDAH APPLY** ke staging & production (2026-10-18, `apply_migration`): policy deny `products_tap`/`brand_deals`/`team_members` dibungkus `(select ...)` + view `bizdev_brand_breakdown` & `bizdev_member_summary` (security_invoker). Diverifikasi production sebagai `authenticated`: kartu Oktober identik dengan agregasi baris dasar (jumlah brand, GMV MCN/TAP, revenue per BizDev); September breakdown top-1000 0,63 dtk + kartu 0,48 dtk.
