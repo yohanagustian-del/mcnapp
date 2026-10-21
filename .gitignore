@@ -12,3 +12,6 @@ coverage/
 .claude/worktrees/
 # contains Supabase personal access token — never commit
 .mcp.json
+
+# seeded credentials — never commit
+team-credentials.csv
