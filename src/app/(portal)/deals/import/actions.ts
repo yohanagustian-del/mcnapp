@@ -20,6 +20,7 @@ import {
 import { BULK_PLATFORM, type BulkDealPlan } from "@/lib/deals/bulk-deal-plan";
 import { BULK_SELECT_COLS, loadPlanContext } from "@/lib/deals/bulk-deal-load";
 import { syncShopHandlers } from "@/lib/deals/bizdev-handlers";
+import { BULK_RUN_ACTION, toRunLog } from "@/lib/deals/bulk-deal-preview";
 import { dealStatusLabel, writeWithDealStatusFallback } from "@/lib/deals/deal-status";
 
 /**
@@ -160,9 +161,10 @@ export async function commitBulkDeals(formData: FormData): Promise<BulkImportRes
   const today = todayWib();
   const coop = [...dealByShop.entries()]
     .filter(([, d]) => d.exp)
-    .map(([shop_id, d]) => ({ shop_id, deal_id: d.id, deal_end: d.exp, active_flag: d.exp! >= today }));
+    .map(([shop_id, d]) => ({ platform: BULK_PLATFORM, shop_id, deal_id: d.id, deal_end: d.exp, active_flag: d.exp! >= today }));
   for (let i = 0; i < coop.length; i += 300) {
-    const { error } = await admin.from("cooperating_shops").upsert(coop.slice(i, i + 300), { onConflict: "shop_id" });
+    // PK cooperating_shops = (platform, shop_id).
+    const { error } = await admin.from("cooperating_shops").upsert(coop.slice(i, i + 300), { onConflict: "platform,shop_id" });
     if (error) failed.push({ sheetRow: 0, brandName: "(cooperating_shops)", reason: error.message });
   }
 
@@ -181,9 +183,15 @@ export async function commitBulkDeals(formData: FormData): Promise<BulkImportRes
     }
   }
 
+  // Log run: dibaca halaman Preview (daftar perlu konfirmasi tim tidak tersimpan di brand_deals).
+  audits.push({
+    actorId: actor.id, action: BULK_RUN_ACTION, entityType: "brand_deals", entityId: null,
+    after: { ...toRunLog(plan), saved: { inserted, updated, handlers, failed: failed.length } }, type: "auto",
+  });
   await writeAuditBatch(audits);
   revalidatePath("/deals");
   revalidatePath("/deals/import");
+  revalidatePath("/deals/import/preview");
   return { ok: true, envRowCount, plan, saved: { inserted, updated, handlers, failed } };
 }
 
