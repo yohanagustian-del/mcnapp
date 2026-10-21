@@ -77,3 +77,22 @@ Sumber: Google Sheet "All Brand TAP [Database Bizdev TikTok 2026]", tab
 - Semua perubahan diuji di staging (`fomlangoiiywhexwoqom`). Produksi
   (`bqknstylbpwsnlgnzayw`) hanya DIBACA oleh dry-run. Apply migrasi, replace data, dan ubah
   role produksi menunggu persetujuan eksplisit Yohan.
+
+## 2026-10-21 — Jawaban Yohan atas pertanyaan bulk load
+
+### D-2026-10-21-1 Alias nama
+- "Fanny" (kolom Bizdev) = **Fanny Putri Fernanda**; "Diena" (kolom Campaign Ops) = **Diena Shofwah**.
+  Dipetakan lewat `CONFIRMED_NAME_ALIASES` (`lib/deals/bulk-deal-plan.ts`). Nama lain tetap tidak ditebak.
+- Lala & ZamZam (akun belum ada / nonaktif): dibiarkan dulu, tidak memblok import.
+
+### D-2026-10-21-2 Izin Campaign Ops
+- `campaign_ops` mendapat `deals.import_legacy` (menu Import Bulk Deal Brand) dan
+  `bd_project.manage` (kelola Project BD, termasuk Ads Support per shop).
+
+### D-2026-10-21-3 Data yang dibiarkan
+- 5 brand duplikat di sheet & tanggal ambigu nusantarahelm "3/1/2027": dibiarkan dulu (tetap
+  di-skip / dibaca 2027-01-03 dan dilaporkan).
+- Niche TIDAK digabung; usulan penggabungan dihapus dari laporan.
+- 22 baris produksi yang tidak ada di sheet: dibiarkan dulu — langkah Promote nanti TIDAK
+  menonaktifkan baris itu kecuali Yohan memutuskan lain (mengubah D-2026-10-20-5 untuk Promote pertama).
+- Apply 0097/0098 ke produksi, Promote, dan SQL role produksi: BELUM disetujui.

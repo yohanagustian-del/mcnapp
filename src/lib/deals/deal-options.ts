@@ -32,15 +32,11 @@ export const DEFAULT_NICHE_OPTIONS = [
 ];
 
 /**
- * Variasi ejaan niche yang TIDAK digabung otomatis (DECISIONS D-2026-10-20-7) — hanya
- * diusulkan ke tim di laporan. Kunci = nilai sheet, nilai = kandidat gabungan.
+ * Usulan penggabungan ejaan niche. KOSONG sejak keputusan Yohan 2026-10-21 (DECISIONS
+ * D-2026-10-21-3): niche "Personal care", "Mom & baby", "Fashion", "Lifestyle" dibiarkan
+ * apa adanya dan tidak diusulkan lagi. Isi hanya bila ada usulan baru.
  */
-export const NICHE_MERGE_PROPOSALS: { from: string; to: string; note: string }[] = [
-  { from: "Personal care", to: "Beauty & Personal Care", note: "ejaan/kategori induk TikTok" },
-  { from: "Mom & baby", to: "Baby & Maternity", note: "kategori TikTok = Baby & Maternity" },
-  { from: "Fashion", to: "Womenswear & Underwear / Menswear & Underwear / Muslim Fashion", note: "terlalu umum — pilih kategori TikTok" },
-  { from: "Lifestyle", to: "Home & Living / Fashion Accessories", note: "bukan kategori TikTok" },
-];
+export const NICHE_MERGE_PROPOSALS: { from: string; to: string; note: string }[] = [];
 
 export interface DealOptions {
   adsSupport: string[];

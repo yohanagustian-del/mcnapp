@@ -109,10 +109,20 @@ export interface BulkDealPlan {
 
 const norm = (s: string) => s.trim().toLowerCase().replace(/\s+/g, " ");
 
+/**
+ * Nama panggilan di sheet yang sudah DIKONFIRMASI Yohan = nama lengkap akun (DECISIONS
+ * D-2026-10-21-1). Hanya daftar ini yang dipetakan; nama lain tetap tidak ditebak.
+ */
+export const CONFIRMED_NAME_ALIASES: Record<string, string> = {
+  fanny: "Fanny Putri Fernanda",
+  diena: "Diena Shofwah",
+};
+
 /** Pencocokan nama PERSIS (tanpa beda huruf besar/kecil & spasi). Tidak menebak. */
 export function matchMemberName(name: string, members: TeamMemberLite[], roles?: readonly string[]): NameMatch {
   const pool = roles ? members.filter((m) => roles.includes(m.role)) : members;
-  const exact = pool.filter((m) => norm(m.name) === norm(name));
+  const target = norm(CONFIRMED_NAME_ALIASES[norm(name)] ?? name);
+  const exact = pool.filter((m) => norm(m.name) === target);
   const active = exact.find((m) => m.active);
   const words = norm(name).split(" ");
   const candidates = pool

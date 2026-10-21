@@ -47,19 +47,16 @@ describe("planBulkDeals", () => {
     expect(plan.missingFromSheet.map((m) => m.id)).toEqual(["DEAL-2"]);
   });
 
-  it("nama BizDev dicocokkan PERSIS; 'Fanny' tidak dipetakan otomatis ke 'Fanny Putri Fernanda'", () => {
+  it("alias yang dikonfirmasi: 'Fanny' → Fanny Putri Fernanda, handler shop ikut ditulis (D-2026-10-21-1)", () => {
     const fanny = plan.bizdevNames.find((n) => n.name === "Fanny")!;
-    expect(fanny.memberId).toBeNull();
-    expect(fanny.candidates.join()).toMatch(/Fanny Putri Fernanda/);
+    expect(fanny.memberId).toBe("m-fanny");
     const shop = plan.handlers.find((h) => h.brands.includes("Bintang leather"))!;
-    expect(shop.unmatched).toEqual(["Fanny"]);
-    expect(shop.apply).toBe(false); // handler lama tidak dihapus karena nama tak cocok
+    expect(shop.unmatched).toEqual([]);
+    expect(shop.memberIds).toContain("m-fanny");
   });
 
-  it("Campaign Ops 'Diena' tidak cocok persis dengan 'Diena Shofwah' → null + kandidat", () => {
-    const d = plan.campaignOpsNames.find((n) => n.name === "Diena")!;
-    expect(d.memberId).toBeNull();
-    expect(d.candidates.join()).toMatch(/Diena Shofwah/);
+  it("alias yang dikonfirmasi: Campaign Ops 'Diena' → Diena Shofwah", () => {
+    expect(plan.campaignOpsNames.find((n) => n.name === "Diena")!.memberId).toBe("m-diena");
   });
 
   it("Ads Brand: di luar daftar dilaporkan; brand tanpa Project BD masuk 'perlu dipasang'", () => {
@@ -68,14 +65,23 @@ describe("planBulkDeals", () => {
     expect(plan.adsNeedsProject.length).toBeGreaterThan(0);
   });
 
-  it("niche kosong & usulan penggabungan dilaporkan, tidak digabung", () => {
+  it("niche kosong dilaporkan; ejaan niche tidak digabung (D-2026-10-21-3)", () => {
     expect(plan.nicheEmpty.map((n) => n.brandName).sort()).toEqual(["Amarome.Naturals", "Cottonela.idn"]);
-    expect(plan.nicheMergeProposals.map((p) => p.from)).toContain("Mom & baby");
+    expect(plan.nicheMergeProposals).toEqual([]);
     expect(plan.inserts.some((i) => i.record.niche === "Mom & baby")).toBe(true);
   });
 
   it("matchMemberName tidak peka huruf besar/kecil tapi tidak menebak", () => {
     expect(matchMemberName("alya ", members).memberId).toBe("m-alya");
     expect(matchMemberName("Lala", members).memberId).toBeNull();
+  });
+
+  it("alias yang dikonfirmasi (Fanny, Diena) dipetakan ke nama lengkap", () => {
+    const team = [
+      { id: "m-fanny", name: "Fanny Putri Fernanda", role: "bizdev", active: true },
+      { id: "m-diena", name: "Diena Shofwah", role: "campaign_ops", active: true },
+    ];
+    expect(matchMemberName("Fanny", team, ["bizdev"]).memberId).toBe("m-fanny");
+    expect(matchMemberName(" diena ", team).memberId).toBe("m-diena");
   });
 });

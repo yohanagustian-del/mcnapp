@@ -9,7 +9,7 @@ import tetap jalan, dan item di bawah dikerjakan tim besok. Tidak ada akun produ
 | # | Nama di brief/sheet | Kondisi di produksi | Yang perlu dikerjakan |
 |---|---|---|---|
 | A1 | **Lala** | Tidak ada anggota bernama/mirip "Lala" di `team_members` | Kirim email & nama lengkap Lala → buat akun (role `campaign_ops`) lewat menu Tim |
-| A2 | **ZamZam** | Akun `zamzam` ada tapi role **`cpm`** dan **nonaktif** | Konfirmasi: aktifkan kembali + ubah role ke `campaign_ops`? |
+| A2 | **ZamZam** | Akun `zamzam` ada tapi role **`cpm`** dan **nonaktif** | Yohan 21 Okt: **biarkan dulu** (A1 juga) |
 | A3 | **Diena** | `Diena Shofwah` SUDAH `campaign_ops`, aktif | Tidak perlu ubah role. Tapi di sheet ditulis "Diena" → lihat B2 |
 | — | SQL siap pakai | `scripts/sql/campaign-ops-roles.sql` (dibungkus `rollback`) | Jalankan HANYA setelah Yohan setuju; isi email Lala dulu |
 
@@ -20,8 +20,8 @@ sama dengan nama akun, ATAU konfirmasi pemetaannya ke Yohan supaya dipasang manu
 
 | # | Kolom | Nama di sheet | Kandidat akun | Dampak sekarang |
 |---|---|---|---|---|
-| B1 | Bizdev | **Fanny** (33 brand) | `Fanny Putri Fernanda` (bizdev) | BizDev handler 33 shop TIDAK ditulis; handler lama yang sudah ada (mis. Fanny Putri Fernanda) dibiarkan |
-| B2 | Campaign Ops | **Diena** (1 brand) | `Diena Shofwah` (campaign_ops) | `campaign_ops_id` brand itu kosong |
+| B1 | Bizdev | **Fanny** (33 brand) | `Fanny Putri Fernanda` (bizdev) | ✅ Dikonfirmasi Yohan 21 Okt — dipetakan otomatis (D-2026-10-21-1) |
+| B2 | Campaign Ops | **Diena** (1 brand) | `Diena Shofwah` (campaign_ops) | ✅ Dikonfirmasi Yohan 21 Okt — dipetakan otomatis (D-2026-10-21-1) |
 
 ## C. Data sheet yang perlu dicek tim
 
