@@ -7,7 +7,7 @@
  * Pakai:
  *   # dari snapshot JSON (hasil SELECT read-only, mis. lewat Supabase SQL editor/MCP)
  *   npx tsx scripts/mcn-bulkload-dryrun.ts --sheet bulk.csv \
- *     --snapshot docs/reports/bulkload-prod-snapshot-2026-10-20.json
+ *     --snapshot src/lib/deals/data/prod-snapshot-2026-10-20.json
  *
  *   # langsung dari database (SELECT saja) — butuh .env.local berisi
  *   # NEXT_PUBLIC_SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY environment yang dibandingkan
