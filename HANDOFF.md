@@ -2,6 +2,13 @@
 
 Status per sesi 2026-10-14 (Revisi BizDev T1–T10 + F1–F3). Baca ini + `CLAUDE.md` sebelum lanjut.
 
+## ⚡ SESI 2026-10-22 — Deal Brand tampil per brand (mock Yohan)
+- `/deals` tab bawaan **Brand** = tabel per `brand_deals` aktif sesuai mock (D-2026-10-22-1):
+  `brand-view.tsx` (server, muat + saring + paginasi), `brand-filters.tsx`, `brand-table-view.tsx`
+  (menu Kolom, localStorage), logika murni `lib/deals/brand-table.ts` (+ test).
+- Tabel Shop lama pindah ke `/deals?view=shop` (Edit shop & BizDev handler tetap di sana).
+- Staging: `brand_bizdev_handlers` masih 0 baris → kolom Bizdev memakai label sheet.
+
 ## ⚡ SESI 2026-10-20/21 — Bulk Load Deal Brand + role Campaign Ops (PR #129–#135)
 - Keputusan: `docs/DECISIONS.md` D-2026-10-20-*. Tutorial: `docs/TUTORIAL_BULK_DEAL_BRAND.md`.
 - Migrasi `0097_deal_brand_bulkload.sql` sudah di-apply di **staging** (`fomlangoiiywhexwoqom`), BELUM di produksi.

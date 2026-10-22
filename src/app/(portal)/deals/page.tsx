@@ -6,6 +6,7 @@ import { ShopsTable, type ShopSummaryRow } from "./shops-table";
 import { BizdevHandlerUploadPanel } from "./bizdev-handler-upload-panel";
 import { loadBizdevMembers, loadHandlerIndex } from "@/lib/deals/bizdev-handlers";
 import { MIGRATION_0087_MISSING } from "@/lib/db/missing-migration";
+import { BrandView, type BrandViewParams } from "./brand-view";
 
 /**
  * Batas baris shop yang ditarik sekali muat. Bukan paginasi sungguhan: kalau batasnya
@@ -16,14 +17,53 @@ const SHOP_ROW_LIMIT = 500;
 export default async function DealsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ q?: string }>;
+  searchParams: Promise<BrandViewParams & { view?: string }>;
 }) {
   const member = await requireMember();
   const navItem = NAV_ITEMS.find((n) => n.href === "/deals")!;
   if (!canAccessNav(navItem, member.role)) redirect("/dashboard");
 
-  const { q } = await searchParams;
+  const params = await searchParams;
+  const { q } = params;
   const supabase = await createClient();
+  const canRegister = hasPermission("deals.register", member.role);
+  const canImport = hasPermission("deals.import_legacy", member.role);
+
+  // Tab bawaan = tabel per BRAND (D-2026-10-22-1); tabel per SHOP (ringkasan kartu
+  // Produk TAP, deal_shop_summary) tetap ada di ?view=shop karena alur Edit shop &
+  // BizDev handler hidup di sana.
+  if (params.view !== "shop") {
+    return (
+      <div>
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h1 className="text-2xl font-semibold">Deal Brand</h1>
+            <p className="mt-1 text-sm text-slate-500">Database brand, pipeline Bizdev, dan monitoring campaign.</p>
+          </div>
+          <div className="flex gap-2">
+            {canImport && (
+              <Link
+                href="/deals/import"
+                className="rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+              >
+                Import / Export
+              </Link>
+            )}
+            {canRegister && (
+              <Link
+                href="/deals/baru"
+                className="rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-700"
+              >
+                + Registrasi Brand
+              </Link>
+            )}
+          </div>
+        </div>
+        <DealsTabs active="brand" />
+        <BrandView supabase={supabase} params={params} />
+      </div>
+    );
+  }
 
   // Satu tabel, satu view: `deal_shop_summary` meringkas kartu Produk TAP per shop DAN
   // membawa shop yang deal-nya sudah terdaftar tapi kartunya belum (Registrasi Deal
@@ -102,7 +142,6 @@ export default async function DealsPage({
     bizdev_handlers: handlerIndex.missing ? null : (handlerIndex.byShopKey.get(s.shop_key as string) ?? []),
   }));
 
-  const canRegister = hasPermission("deals.register", member.role);
   // Tabel shop mengedit KARTU PRODUK (products_tap), bukan brand_deals — izinnya
   // karena itu products.edit, sama dengan tombol Edit di tab Produk TAP.
   const canEditShop = hasPermission("products.edit", member.role);
@@ -128,7 +167,10 @@ export default async function DealsPage({
         )}
       </div>
 
+      <DealsTabs active="shop" />
+
       <form method="get" className="mt-4 flex gap-2">
+        <input type="hidden" name="view" value="shop" />
         <input
           type="search"
           name="q"
@@ -143,7 +185,7 @@ export default async function DealsPage({
           Cari
         </button>
         {q && (
-          <Link href="/deals" className="self-center text-sm text-slate-500 underline">
+          <Link href="/deals?view=shop" className="self-center text-sm text-slate-500 underline">
             Reset
           </Link>
         )}
@@ -207,5 +249,24 @@ export default async function DealsPage({
         </p>
       )}
     </div>
+  );
+}
+
+function DealsTabs({ active }: { active: "brand" | "shop" }) {
+  const tab = (key: "brand" | "shop", href: string, label: string) => (
+    <Link
+      href={href}
+      className={`-mb-px border-b-2 px-4 py-2 text-sm font-medium ${
+        active === key ? "border-slate-900 text-slate-900" : "border-transparent text-slate-500 hover:text-slate-700"
+      }`}
+    >
+      {label}
+    </Link>
+  );
+  return (
+    <nav className="mt-4 flex border-b border-slate-200">
+      {tab("brand", "/deals", "Brand")}
+      {tab("shop", "/deals?view=shop", "Shop (Produk TAP)")}
+    </nav>
   );
 }
