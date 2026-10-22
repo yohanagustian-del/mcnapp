@@ -96,3 +96,18 @@ Sumber: Google Sheet "All Brand TAP [Database Bizdev TikTok 2026]", tab
 - 22 baris produksi yang tidak ada di sheet: dibiarkan dulu — langkah Promote nanti TIDAK
   menonaktifkan baris itu kecuali Yohan memutuskan lain (mengubah D-2026-10-20-5 untuk Promote pertama).
 - Apply 0097/0098 ke produksi, Promote, dan SQL role produksi: BELUM disetujui.
+
+## 2026-10-22 — Tampilan Deal Brand per brand (Yohan)
+
+### D-2026-10-22-1 Tab Deal Brand = tabel per BRAND
+- Yohan mengirim mock: `/deals` harus menampilkan database brand (kolom sheet "Database Bizdev"),
+  bukan ringkasan shop. Tab bawaan **Brand** = satu baris per `brand_deals` aktif
+  (`deactivated_at` null), kolom: Nama Brand, Bizdev, Status, Niche, Link Toko, Shop ID, Contact
+  PIC Brand, Grup Brand, GMV TAP, Avg Harga Produk, Sample/Flash Sale/Ads, Ads Brand, Leads,
+  Priority, Working Sheet, Campaign Ops, Campaign Name, Campaign ID, Exp Date, Countdown, Shop Code.
+  Cari nama brand/Shop ID; filter Platform, Bizdev, Status, Niche, Priority, Campaign Ops; menu Kolom;
+  10/halaman (bisa 25/50/100). Logika murni di `lib/deals/brand-table.ts`.
+- Bizdev = akun `brand_bizdev_handlers` bila ada, selain itu label kolom Bizdev sheet (`bizdev_label`).
+- Tabel per SHOP lama (`deal_shop_summary`, Edit shop, tombol & upload BizDev handler) TIDAK dihapus:
+  pindah ke tab **Shop (Produk TAP)** (`/deals?view=shop`).
+- Countdown dihitung saat render (tidak disimpan). Tanpa 0097 tab Brand tetap jalan dengan kolom dasar.

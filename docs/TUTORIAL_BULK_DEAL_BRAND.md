@@ -84,7 +84,15 @@ direferensikan data lain hanya dinonaktifkan (`deactivated_at`), tidak dihapus.
 - **Detail Project BD (`/bd-projects/[id]`)**: kolom **Ads Support** per shop. Pilihan langsung tersimpan begitu diganti
   (izin `bd_project.manage`, tercatat di audit). Nilainya berlaku untuk shop itu **di project itu saja**.
 
-## 6. Yang belum ada / menyusul
+## 6. Tabel Deal Brand (`/deals`)
+
+- Tab **Brand** (bawaan): satu baris per brand, kolom sama dengan sheet. Cari nama brand / Shop ID,
+  filter Platform/Bizdev/Status/Niche/Priority/Campaign Ops, menu **Kolom** untuk menyembunyikan kolom,
+  10 brand per halaman. Klik nama brand untuk detail & **Edit Status & Atribut**.
+- Tombol **Import / Export** membuka `/deals/import`; **+ Registrasi Brand** membuka form Registrasi Deal.
+- Tab **Shop (Produk TAP)**: tabel ringkasan shop lama (Edit shop, BizDev handler, upload handler).
+
+## 7. Yang belum ada / menyusul
 
 - Langkah **Promote ke Produksi**: migrasi 0097/0098 di produksi dan replace data. Langkah ini menunggu persetujuan Yohan.
 - Akun/role yang harus dibereskan tim tercatat di `docs/reports/mcn-todo-tim-21okt.md`.

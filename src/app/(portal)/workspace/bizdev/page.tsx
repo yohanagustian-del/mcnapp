@@ -183,7 +183,7 @@ export default async function BizdevWorkspacePage({
                   Brand dihandle, GMV MCN, GMV TAP, Actual Revenue Partner, dan % TAP/MCN per BizDev untuk{" "}
                   <strong>{period.label}</strong>. Brand tanpa BizDev — termasuk shop yang belum punya kartu/deal — tampil
                   sebagai Non BD Handle. Shop dengan beberapa ejaan nama tampil di tiap nama (GMV dobel). Assign lewat
-                  tombol BizDev di tab <Link href="/deals" className="underline">Deal Brand</Link>.
+                  tombol BizDev di tab <Link href="/deals?view=shop" className="underline">Deal Brand (Shop)</Link>.
                 </>
               ) : (
                 <>
