@@ -11,7 +11,7 @@ import {
   isRewardTbd,
 } from "@/lib/m3/scoring";
 import { getHandsOnRatio } from "@/lib/m3/adapters";
-import { aggregateUsageByWeek } from "@/lib/m3/usage";
+import { loadUsageAdoption } from "@/lib/m3/usage-data";
 import { describeActivity } from "@/lib/m3/activity-labels";
 import { UsageAdoptionTable, type UsageRow } from "./usage-table";
 import { getConfig } from "@/lib/config";
@@ -136,50 +136,24 @@ export default async function OkrPage() {
   if (isLead) {
     const since = new Date();
     since.setUTCDate(since.getUTCDate() - 92); // ~3 bulan terakhir
-    const [{ data: usageLogs }, { data: allMembers }, { data: recentAudit }] = await Promise.all([
-      supabase
-        .from("tool_usage_logs")
-        .select("member_id, occurred_at")
-        .gte("occurred_at", since.toISOString())
-        // Descending: API punya batas baris tersendiri (di luar kendali .limit()
-        // di sini) — kalau volume 92 hari melampauinya, baris yang KEPOTONG harus
-        // yang PALING LAMA, bukan aktivitas terbaru (yang justru dipakai Last Access).
-        .order("occurred_at", { ascending: false })
-        .limit(20000),
+    // Agregasi di database (migrasi 0099) — baris mentah via PostgREST terpotong
+    // max_rows 1000 sehingga minggu lama hilang (OD 2026-10-26). Lihat usage-data.ts.
+    const [{ weekly, lastAccessByMember, lastActivityByMember }, { data: allMembers }] = await Promise.all([
+      loadUsageAdoption(supabase, since.toISOString()),
       supabase.from("team_members").select("id, name, role").eq("active", true),
-      supabase
-        .from("audit_logs")
-        .select("actor_id, action, created_at")
-        .gte("created_at", since.toISOString())
-        .not("actor_id", "is", null)
-        .order("created_at", { ascending: false })
-        .limit(20000),
     ]);
     const memberById = new Map((allMembers ?? []).map((m) => [m.id, m]));
 
-    const lastAccessByMember = new Map<string, string>();
-    for (const l of usageLogs ?? []) {
-      // usageLogs terurut descending → kemunculan pertama per member = paling baru.
-      if (!lastAccessByMember.has(l.member_id)) {
-        lastAccessByMember.set(l.member_id, l.occurred_at);
-      }
-    }
-
-    const lastActivityByMember = new Map<string, { at: string; label: string }>();
-    for (const a of recentAudit ?? []) {
-      // recentAudit terurut descending → kemunculan pertama per actor = paling baru.
-      if (a.actor_id && !lastActivityByMember.has(a.actor_id)) {
-        lastActivityByMember.set(a.actor_id, { at: a.created_at, label: describeActivity(a.action) });
-      }
-    }
-
-    usageRows = aggregateUsageByWeek(usageLogs ?? []).map((u) => ({
-      ...u,
-      memberName: memberById.get(u.memberId)?.name ?? u.memberId,
-      role: memberById.get(u.memberId)?.role ?? "—",
-      lastAccess: lastAccessByMember.get(u.memberId) ?? null,
-      lastActivity: lastActivityByMember.get(u.memberId) ?? null,
-    }));
+    usageRows = weekly.map((u) => {
+      const activity = lastActivityByMember.get(u.memberId);
+      return {
+        ...u,
+        memberName: memberById.get(u.memberId)?.name ?? u.memberId,
+        role: memberById.get(u.memberId)?.role ?? "—",
+        lastAccess: lastAccessByMember.get(u.memberId) ?? null,
+        lastActivity: activity ? { at: activity.at, label: describeActivity(activity.action) } : null,
+      };
+    });
   }
 
   return (

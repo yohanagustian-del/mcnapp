@@ -94,7 +94,16 @@ export function aggregateUsageByWeek(
     flush(prev, views);
   }
 
-  return [...out.values()]
+  return finalizeWeeklyUsage([...out.values()]);
+}
+
+/**
+ * Pembulatan (1 desimal jam) + urutan tampil. Dipakai bersama oleh
+ * aggregateUsageByWeek dan hasil RPC usage_hours_by_week (migrasi 0099), supaya
+ * jalur JS & SQL menghasilkan angka/urutan yang sama.
+ */
+export function finalizeWeeklyUsage(rows: WeeklyUsage[]): WeeklyUsage[] {
+  return rows
     .map((u) => ({ ...u, hours: Math.round(u.hours * 10) / 10 }))
     .sort((a, b) => (a.weekStart === b.weekStart ? b.hours - a.hours : b.weekStart.localeCompare(a.weekStart)));
 }
