@@ -1,0 +1,338 @@
+[
+  {
+    "name": "Hasna Nuraini Aminah",
+    "email": "hasnanuraini100@gmail.com",
+    "divisi": "CM",
+    "role": "cpm",
+    "team_group": "cm",
+    "phone_office": "08131465706",
+    "phone_personal": "081313516835",
+    "flags": []
+  },
+  {
+    "name": "Fanny Putri Fernanda",
+    "email": "fannyfernanda42@gmail.com",
+    "divisi": "BD",
+    "role": "bizdev",
+    "team_group": "bizdev",
+    "phone_office": "082246776152",
+    "phone_personal": "083104584422",
+    "flags": []
+  },
+  {
+    "name": "Moch Rafly Nurhadi Hartono",
+    "email": "raflynurhadi04@gmail.com",
+    "divisi": "CM",
+    "role": "cpm",
+    "team_group": "cm",
+    "phone_office": "081318557597",
+    "phone_personal": "081313084334",
+    "flags": []
+  },
+  {
+    "name": "Aminah alida",
+    "email": "amialida0510@gmail.com",
+    "divisi": "CM",
+    "role": "cpm",
+    "team_group": "cm",
+    "phone_office": "082321221412",
+    "phone_personal": "085973214369",
+    "flags": []
+  },
+  {
+    "name": "Ryan Nita",
+    "email": "ryannita94@gmail.com",
+    "divisi": "CM",
+    "role": "cpm",
+    "team_group": "cm",
+    "phone_office": "082122786919",
+    "phone_personal": "081395768556",
+    "flags": []
+  },
+  {
+    "name": "Lestari Putri Agraeni",
+    "email": "putriagraenilestari@gmail.com",
+    "divisi": "Akuisisi",
+    "role": "acquisition_spec",
+    "team_group": "acquisition",
+    "phone_office": "081318538850",
+    "phone_personal": "081211820818",
+    "flags": []
+  },
+  {
+    "name": "Vickry Erinaldi",
+    "email": "vickryerinaldi@gmail.com",
+    "divisi": "Akuisisi",
+    "role": "acquisition_spec",
+    "team_group": "acquisition",
+    "phone_office": null,
+    "phone_personal": "082113746311",
+    "flags": []
+  },
+  {
+    "name": "Nabilla Cantika Putri",
+    "email": "nabillaacp@gmail.com",
+    "divisi": "BD",
+    "role": "bizdev",
+    "team_group": "bizdev",
+    "phone_office": "0811313295711",
+    "phone_personal": "089656114035",
+    "flags": []
+  },
+  {
+    "name": "Nabila Vera Fenia",
+    "email": "nabilaveraf77@gmail.com",
+    "divisi": "BD",
+    "role": "bizdev",
+    "team_group": "bizdev",
+    "phone_office": "082343417903",
+    "phone_personal": "085624620017",
+    "flags": []
+  },
+  {
+    "name": "Annisa Intan",
+    "email": null,
+    "divisi": "BD",
+    "role": "bizdev",
+    "team_group": "bizdev",
+    "phone_office": "082315216857",
+    "phone_personal": "082261407752",
+    "flags": [
+      "missing_email"
+    ]
+  },
+  {
+    "name": "Kent Farrel Athallah Hidayat",
+    "email": "farrelkriboww@gmail.com",
+    "divisi": "External",
+    "role": "campaign_external",
+    "team_group": "external",
+    "phone_office": "08216734421",
+    "phone_personal": "0811978858",
+    "flags": []
+  },
+  {
+    "name": "Anne Rahmawati",
+    "email": "annerhmwt03@gmail.com",
+    "divisi": "CM",
+    "role": "cpm",
+    "team_group": "cm",
+    "phone_office": "085318189719",
+    "phone_personal": "081380643863",
+    "flags": []
+  },
+  {
+    "name": "Qeila Putri Mayandra",
+    "email": "qmayandra@gmail.com",
+    "divisi": "Akuisisi",
+    "role": "acquisition_spec",
+    "team_group": "acquisition",
+    "phone_office": "081318693137",
+    "phone_personal": "082127092656",
+    "flags": []
+  },
+  {
+    "name": "Tasya Syahra Chaerani",
+    "email": "syahratasya9@gmail.com",
+    "divisi": "CM",
+    "role": "cpm",
+    "team_group": "cm",
+    "phone_office": "08991375615",
+    "phone_personal": "08991375615",
+    "flags": []
+  },
+  {
+    "name": "Lisna Rahma Fitriati",
+    "email": "lisnarahma36@gmail.com",
+    "divisi": "CM",
+    "role": "cpm",
+    "team_group": "cm",
+    "phone_office": "082129098035",
+    "phone_personal": "085872006594",
+    "flags": []
+  },
+  {
+    "name": "Mita Mahmudah",
+    "email": "mitamahmudah3102@gmail.com",
+    "divisi": "Akuisisi",
+    "role": "acquisition_spec",
+    "team_group": "acquisition",
+    "phone_office": "082319269547",
+    "phone_personal": "087718865369",
+    "flags": []
+  },
+  {
+    "name": "Bilal Fadilah",
+    "email": "bilalfdlh1501@gmail.com",
+    "divisi": "CM",
+    "role": "cpm",
+    "team_group": "cm",
+    "phone_office": "082312505091",
+    "phone_personal": "089673863492",
+    "flags": []
+  },
+  {
+    "name": "Dhea Syahranie Putri",
+    "email": "dsyahranieputri@gmail.com",
+    "divisi": "CM",
+    "role": "cpm",
+    "team_group": "cm",
+    "phone_office": "082130703196",
+    "phone_personal": "085523785559",
+    "flags": []
+  },
+  {
+    "name": "Sonya Monica Devie",
+    "email": "sonyamonicaaaa@gmail.com",
+    "divisi": "CS",
+    "role": "creator_support",
+    "team_group": "support",
+    "phone_office": "082315272683",
+    "phone_personal": "085722417558",
+    "flags": []
+  },
+  {
+    "name": "Eksantia Kumala Syafen",
+    "email": "eksantiaks17@gmail.com",
+    "divisi": "Campaign Ops",
+    "role": "campaign_ops",
+    "team_group": "bizdev",
+    "phone_office": "082297808089",
+    "phone_personal": "085161707102",
+    "flags": []
+  },
+  {
+    "name": "Um Velika Juniardhani",
+    "email": "uma.velika@gmail.com",
+    "divisi": "CM",
+    "role": "cpm",
+    "team_group": "cm",
+    "phone_office": "082343899701",
+    "phone_personal": "081252766863",
+    "flags": []
+  },
+  {
+    "name": "Hera Sawitri",
+    "email": "hsawitry@gmail.com",
+    "divisi": "CM",
+    "role": "cpm",
+    "team_group": "cm",
+    "phone_office": "085222347812",
+    "phone_personal": "0895606497806",
+    "flags": []
+  },
+  {
+    "name": "Raisa Qisthy",
+    "email": "raisaqisthyhp@gmail.com",
+    "divisi": "CM",
+    "role": "cpm",
+    "team_group": "cm",
+    "phone_office": "08216734420",
+    "phone_personal": "08814560820",
+    "flags": []
+  },
+  {
+    "name": "Adinda Ayu Kustianingrum",
+    "email": "adindayu.k@gmail.com",
+    "divisi": "Leader CM",
+    "role": "cm_lead",
+    "team_group": "cm",
+    "phone_office": "081318557488",
+    "phone_personal": "087784601796",
+    "flags": []
+  },
+  {
+    "name": "Sindi Amalia Putri",
+    "email": "amliaputrisindi9@gmail.com",
+    "divisi": "CM",
+    "role": "cpm",
+    "team_group": "cm",
+    "phone_office": "08133011759",
+    "phone_personal": "085624468190",
+    "flags": []
+  },
+  {
+    "name": "Delliq Hastariq Atfhal",
+    "email": "delliqha24@gmail.com",
+    "divisi": "CM",
+    "role": "cpm",
+    "team_group": "cm",
+    "phone_office": "082123889074",
+    "phone_personal": "081222885024",
+    "flags": []
+  },
+  {
+    "name": "Mayra Zevanya Akilah Syah",
+    "email": "mayrazevanya03@gmail.com",
+    "divisi": "CS",
+    "role": "creator_support",
+    "team_group": "support",
+    "phone_office": "0823343417952",
+    "phone_personal": "085315285773",
+    "flags": []
+  },
+  {
+    "name": "Ajeng Vaiki",
+    "email": "ajengvaikii24@gmail.com",
+    "divisi": "BD",
+    "role": "bizdev",
+    "team_group": "bizdev",
+    "phone_office": "082130377693",
+    "phone_personal": "082295033135",
+    "flags": []
+  },
+  {
+    "name": "Keizha Mayadha",
+    "email": "keizhamayadha11@gmail.com",
+    "divisi": "CM",
+    "role": "cpm",
+    "team_group": "cm",
+    "phone_office": "08131453873",
+    "phone_personal": "085722275741",
+    "flags": []
+  },
+  {
+    "name": "Laila S",
+    "email": "sorayalaila13@gmail.com",
+    "divisi": "BD",
+    "role": "bizdev",
+    "team_group": "bizdev",
+    "phone_office": "08132027102",
+    "phone_personal": "08132027102",
+    "flags": [
+      "review_name"
+    ]
+  },
+  {
+    "name": "alya",
+    "email": "aldifffs@gmail.com",
+    "divisi": "BD",
+    "role": "bizdev",
+    "team_group": "bizdev",
+    "phone_office": "082122789621",
+    "phone_personal": "082122789621",
+    "flags": [
+      "review_name"
+    ]
+  },
+  {
+    "name": "Mochammad Ghifari Cahyadi",
+    "email": "mghifaric@gmail.com",
+    "divisi": "CM",
+    "role": "cpm",
+    "team_group": "cm",
+    "phone_office": "08131465708",
+    "phone_personal": "0882000006205",
+    "flags": []
+  },
+  {
+    "name": "Elsa Yashinta Amalia",
+    "email": "elsyashinta25@gmail.com",
+    "divisi": "CM",
+    "role": "cpm",
+    "team_group": "cm",
+    "phone_office": "08131465709",
+    "phone_personal": "081460910078",
+    "flags": []
+  }
+]
