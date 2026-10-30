@@ -6,7 +6,58 @@ import { changePassword, type ChangePasswordState } from "@/app/account/actions"
 
 const labelCls = "block text-xs font-medium text-slate-600";
 const inputCls =
-  "mt-1 w-full rounded-md border border-slate-300 px-2 py-1.5 text-sm focus:border-slate-500 focus:outline-none";
+  "mt-1 w-full rounded-md border border-slate-300 px-2 py-1.5 pr-16 text-sm focus:border-slate-500 focus:outline-none";
+
+/**
+ * Reusable password input field with per-field show/hide toggle.
+ */
+function PasswordField({
+  id,
+  name,
+  label,
+  autoComplete,
+  minLength,
+  required,
+  show,
+  onToggle,
+}: {
+  id: string;
+  name: string;
+  label: string;
+  autoComplete: string;
+  minLength?: number;
+  required?: boolean;
+  show: boolean;
+  onToggle: () => void;
+}) {
+  return (
+    <div>
+      <label className={labelCls} htmlFor={id}>
+        {label}
+      </label>
+      <div className="relative">
+        <input
+          id={id}
+          name={name}
+          type={show ? "text" : "password"}
+          required={required}
+          autoComplete={autoComplete}
+          minLength={minLength}
+          className={inputCls}
+        />
+        <button
+          type="button"
+          onClick={onToggle}
+          tabIndex={-1}
+          aria-label={show ? "Sembunyikan password" : "Tampilkan password"}
+          className="absolute inset-y-0 right-2 flex items-center text-[11px] font-medium text-slate-500 hover:text-slate-800"
+        >
+          {show ? "Sembunyikan" : "Lihat"}
+        </button>
+      </div>
+    </div>
+  );
+}
 
 /**
  * Tombol "Ganti Password" + modal, dipasang di sidebar (internal & portal kreator),
@@ -15,6 +66,7 @@ const inputCls =
  */
 export function ChangePasswordButton({ className }: { className?: string }) {
   const [open, setOpen] = useState(false);
+  const [show, setShow] = useState({ current: false, new: false, confirm: false });
   const [state, action, pending] = useActionState<ChangePasswordState, FormData>(
     changePassword,
     null
@@ -33,6 +85,13 @@ export function ChangePasswordButton({ className }: { className?: string }) {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
+  }, [open]);
+
+  // Reset password visibility ketika modal ditutup.
+  useEffect(() => {
+    if (!open) {
+      setShow({ current: false, new: false, confirm: false });
+    }
   }, [open]);
 
   return (
@@ -67,50 +126,40 @@ export function ChangePasswordButton({ className }: { className?: string }) {
             </div>
 
             <form action={action} className="mt-4 space-y-3">
-              <div>
-                <label className={labelCls} htmlFor="current_password">
-                  Password Saat Ini
-                </label>
-                <input
-                  id="current_password"
-                  name="current_password"
-                  type="password"
-                  required
-                  autoComplete="current-password"
-                  className={inputCls}
-                />
-              </div>
+              <PasswordField
+                id="current_password"
+                name="current_password"
+                label="Password Saat Ini"
+                autoComplete="current-password"
+                required
+                show={show.current}
+                onToggle={() => setShow((p) => ({ ...p, current: !p.current }))}
+              />
 
               <div>
-                <label className={labelCls} htmlFor="new_password">
-                  Password Baru
-                </label>
-                <input
+                <PasswordField
                   id="new_password"
                   name="new_password"
-                  type="password"
-                  required
-                  minLength={8}
+                  label="Password Baru"
                   autoComplete="new-password"
-                  className={inputCls}
+                  minLength={8}
+                  required
+                  show={show.new}
+                  onToggle={() => setShow((p) => ({ ...p, new: !p.new }))}
                 />
                 <p className="mt-1 text-[11px] text-slate-400">Minimal 8 karakter.</p>
               </div>
 
-              <div>
-                <label className={labelCls} htmlFor="confirm_password">
-                  Konfirmasi Password Baru
-                </label>
-                <input
-                  id="confirm_password"
-                  name="confirm_password"
-                  type="password"
-                  required
-                  minLength={8}
-                  autoComplete="new-password"
-                  className={inputCls}
-                />
-              </div>
+              <PasswordField
+                id="confirm_password"
+                name="confirm_password"
+                label="Konfirmasi Password Baru"
+                autoComplete="new-password"
+                minLength={8}
+                required
+                show={show.confirm}
+                onToggle={() => setShow((p) => ({ ...p, confirm: !p.confirm }))}
+              />
 
               {state && !state.ok && (
                 <p className="text-xs text-red-600">{state.error}</p>
