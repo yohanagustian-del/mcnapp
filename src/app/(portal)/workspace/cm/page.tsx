@@ -832,9 +832,14 @@ export default async function CmWorkspacePage({
               </select>
               <select name="type" required className={input}>
                 <option value="sample">Sample produk</option>
-                <option value="ads">Ads support (cek ads cap)</option>
                 <option value="hsl">Harga Special Live (per sesi)</option>
               </select>
+              {/* D-2026-10-31-7: req ads pindah ke Request Ads (/ads) — pendanaan, ACC
+                  Finance/Head CM, executor Creator Support. Jalur lama ditutup di server. */}
+              <p className="text-xs text-slate-500 sm:col-span-2">
+                Request <strong>ads</strong> tidak lagi lewat form ini — ajukan dari slot Jadwal Live atau Special Project
+                (<a href="/ads" className="text-blue-700 hover:underline">Request Ads</a>).
+              </p>
               <input name="target_brand" placeholder="Brand tujuan" className={input} />
               <input name="amount" placeholder="Nominal (Rp, untuk ads)" className={input} />
               <input name="notes" placeholder="Catatan" className={`${input} sm:col-span-2`} />

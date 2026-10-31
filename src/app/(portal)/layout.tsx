@@ -2,6 +2,7 @@ import { requireMember, NAV_ITEMS, NAV_GROUPS, canAccessNav, hasPermission } fro
 import { countPendingCmRequests } from "@/lib/creators/cm-requests";
 import { countExpiringContracts } from "@/lib/creators/contract-alerts";
 import { loadPicTapScheduleAlert } from "@/lib/schedule/pic-tap-alerts";
+import { loadAdsBadges } from "@/lib/m10/badges";
 import { PortalSidebar, type SidebarGroup } from "@/components/portal-sidebar";
 
 const ROLE_LABELS: Record<string, string> = {
@@ -54,6 +55,10 @@ export default async function PortalLayout({ children }: { children: React.React
     ? await countExpiringContracts(member.role === "cpm" ? member.id : null)
     : 0;
 
+  // Badge Request Ads & Finance (D-2026-10-31-6): antrean eksekusi / approval Director /
+  // request ditolak, dan request menunggu ACC + invoice jatuh tempo — dihitung dari sumber.
+  const adsBadges = await loadAdsBadges(member);
+
   // Pengelompokan menu per divisi. Filter RBAC sudah dilakukan di atas, jadi grup
   // yang seluruh itemnya tidak boleh diakses role ini tidak ikut dirender.
   const groups: SidebarGroup[] = NAV_GROUPS.map((group) => ({
@@ -70,7 +75,11 @@ export default async function PortalLayout({ children }: { children: React.React
               ? picTapSchedule.count
               : item.href === "/workspace/acquisition/perpanjangan"
                 ? expiringContracts
-                : 0,
+                : item.href === "/ads"
+                  ? adsBadges.ads
+                  : item.href === "/finance"
+                    ? adsBadges.finance
+                    : 0,
         badgeTitle:
           item.href === "/creators"
             ? `${pendingCmRequests} request penugasan CM menunggu keputusan Anda`
@@ -78,7 +87,11 @@ export default async function PortalLayout({ children }: { children: React.React
               ? picTapTitle
               : item.href === "/workspace/acquisition/perpanjangan"
                 ? `${expiringContracts} kreator kontraknya sudah habis atau segera habis`
-                : undefined,
+                : item.href === "/ads"
+                  ? adsBadges.adsTitle
+                  : item.href === "/finance"
+                    ? adsBadges.financeTitle
+                    : undefined,
       })),
   })).filter((group) => group.items.length > 0);
 
