@@ -301,11 +301,11 @@ Tabel pertanyaan asli dipertahankan di bawah sebagai arsip.
 
 | Butir | Status |
 |---|---|
-| 1. Apply 0100 ke produksi | **Belum** — menunggu persetujuan Yohan (tidak disentuh). |
-| 2. Akun role `finance` | **Belum** — perlu nama/email orang Finance dari Yohan; dibuat lewat `/tim` di produksi setelah 0100. |
+| 1. Apply 0100 ke produksi | **Selesai 2026-10-31** (disetujui Yohan) — terverifikasi: 7 kolom `ads_briefs`, 3 tabel, 3 view, 3 policy deny RESTRICTIVE, trigger immutable, 3 `app_config m10.invoice_*`, constraint `platform_alerts` memuat 3 tipe baru (tipe lama termasuk `partnership_drop` tetap), job cron `m10_invoice_reminders` `0 23 * * *` aktif. 0098 tetap ditunda (tidak terkait). |
+| 2. Akun role `finance` | **Menunggu Management** — Finance = Endang Puji Astuti (`endangpujia046@gmail.com`). Dibuat lewat `/tim` → Tambah anggota (izin `team.add_single` = director/head/spv), role `finance`; password sementara dikirim lewat WA. Tidak bisa dari sesi agent (butuh Auth Admin). |
 | 3. Template invoice resmi | **Belum** — template belum dikirim; `buildInvoicePdf` tetap placeholder. |
 | 4. QA manual per role di staging | **Belum** — butuh akun per role di staging (checklist tetap di butir 4 di atas). |
-| 5. Asumsi A1 | Ditanyakan ulang ke Yohan; kode tetap A1 (`accRolesFor`) sampai dijawab. |
+| 5. Asumsi A1 | **Dikonfirmasi** — A1 tetap (DECISIONS D-2026-10-31-3). |
 | 6. `compact-list.tsx` | **Selesai** — kolom "Request Ads" + "Nominal / Catatan Ads" + facet "Pendanaan Ads" dari request (`loadSlotAdsRequestSummaries` + `slotAdsDisplay`, dipakai juga kalender); slot lama = "(lama)". |
 | 7. Alert `ads_mea_budget_exhausted` | **Selesai** — `lib/m10/mea-budget-alert.ts` (`syncMeaBudgetExhaustedAlert`), dipanggil saat buat request, `applyTransition`, dan set jatah; tampil di `/ads/jatah` + badge `/ads`. Tidak butuh migrasi baru (tipe sudah ada di constraint 0100). |
 

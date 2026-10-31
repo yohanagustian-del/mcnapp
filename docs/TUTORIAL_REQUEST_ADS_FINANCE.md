@@ -77,6 +77,6 @@ tanpa request tetap menampilkan pembayar/catatan lama dengan tanda *(lama)*.
 
 ## 7. Yang perlu disiapkan tim
 
-- Buat akun role **finance** di menu Tim (belum ada di produksi per 2026-10-31).
-- Apply migrasi `0100_ads_request_finance.sql` ke produksi (sudah di staging) — persetujuan Yohan.
+- Buat akun role **finance** di menu Tim untuk Endang Puji Astuti (`endangpujia046@gmail.com`).
+- ~~Apply migrasi 0100 ke produksi~~ — sudah di-apply & diverifikasi 2026-10-31.
 - Kirim template invoice resmi → ganti layout di `src/lib/m10/invoice-pdf.ts`.
