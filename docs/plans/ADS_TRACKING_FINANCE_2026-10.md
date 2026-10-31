@@ -253,3 +253,46 @@ Tabel pertanyaan asli dipertahankan di bawah sebagai arsip.
   → gagasan "request → Finance → eksekusi" sama dengan §2.4.
 - Bridge CDPS↔MCN yang ada (MSDPS order, PX) **tidak menyentuh ads/finance**; sinkron invoice MCN ke CDPS
   **tidak** direncanakan (Q9).
+
+---
+
+## 7. Status eksekusi (2026-10-31, PR #139, branch `claude/ads-tracking-finance-mcn-c0e49s`)
+
+**Selesai (T0–T10), semua di-push dan tsc/vitest/build hijau:**
+
+| Tiket | Hasil | File utama |
+|---|---|---|
+| T0 | Keputusan Yohan dicatat | `docs/DECISIONS.md` D-2026-10-31-1…7 |
+| T1 | Migrasi 0100 — **sudah di-apply & diverifikasi di STAGING** (`fomlangoiiywhexwoqom`), **belum di produksi** | `supabase/migrations/0100_ads_request_finance.sql` |
+| T2 | RBAC & nav | `src/lib/rbac-constants.ts` (`ADS_REQUESTER_ROLES`, `ADS_EXECUTOR_ROLES`, `finance.*`, `m10.mea_budget_set`, nav `/ads` + grup Finance `/finance`), `src/lib/nav-ui.ts`, `src/lib/__tests__/rbac.test.ts` |
+| T3 | Lib murni + 19 test | `src/lib/m10/funding-spec.ts`, `src/lib/m10/request.ts`, `src/lib/m10/__tests__/request.test.ts` |
+| T4 | Halaman Request Ads | `src/app/(portal)/ads/{page,actions}.tsx`, `ads/baru/{page,request-form}.tsx`, `ads/[id]/{page,request-actions}.tsx`, `ads/jatah/{page,mea-budget-form}.tsx`, pemuat `src/lib/m10/request-data.ts`, badge `src/components/ads-request-badge.tsx` |
+| T5 | Halaman Finance + invoice PDF | `src/app/(portal)/finance/{page,actions}.tsx`, `finance/invoice/[id]/{page,invoice-actions}.tsx`, `finance/invoice/[id]/pdf/route.ts`, `src/lib/m10/invoice-data.ts`, `src/lib/m10/invoice-pdf.ts` (pdf-lib, layout placeholder) |
+| T6 | Jadwal Live | `schedule/slot-form.tsx` (tombol Request Ads, `ads_payer` lama hidden), `schedule-board.tsx` (badge), `schedule/page.tsx` (muat request per slot), `src/lib/schedule/types.ts` (`SlotAdsRequestSummary`) |
+| T7 | Special Project | `projects/[id]/page.tsx` (panel ads per pendanaan, tombol Request Ads per peserta, margin hanya ads MEA) |
+| T8 | Jalur lama ditutup | `workspace/cm/{page,actions}.tsx` (type `ads` ditolak), `workspace/ads/page.tsx` → redirect `/ads` |
+| T9 | Badge & pengingat | `src/lib/m10/badges.ts`, `(portal)/layout.tsx`; cron `run_m10_invoice_reminders()` di 0100 |
+| T10 | Dokumentasi | CLAUDE.md #10, `docs/TUTORIAL_REQUEST_ADS_FINANCE.md`, HANDOFF.md |
+
+**Sisa pekerjaan (urutan yang disarankan untuk sesi berikutnya):**
+
+1. **Apply 0100 ke produksi** (`bqknstylbpwsnlgnzayw`) lewat `apply_migration` — hanya setelah Yohan menyetujui
+   (D-2026-10-20-8). Setelah apply, verifikasi dengan query yang sama seperti staging: 7 kolom `ads_briefs`,
+   3 tabel, 3 view, 3 policy deny RESTRICTIVE, trigger `trg_ads_invoice_events_immutable`, 3 `app_config m10.invoice_*`,
+   constraint `platform_alerts` memuat `ads_invoice_due/overdue/ads_mea_budget_exhausted`, job cron `m10_invoice_reminders`.
+   Catatan: constraint `platform_alerts_alert_type_check` berbentuk `= ANY('{…}'::text[])` — blok di 0100 sudah
+   membaca bentuk itu (diperbaiki 2026-10-31 setelah ketahuan di staging).
+2. **Buat akun role `finance`** di `/tim` (produksi belum punya satu pun). Tanpa itu tidak ada yang bisa ACC cash
+   atau mencatat pembayaran invoice.
+3. **Template invoice resmi** dari Yohan → ganti layout di `src/lib/m10/invoice-pdf.ts` (`buildInvoicePdf`);
+   pemanggilnya (`/finance/invoice/[id]/pdf`) tidak perlu diubah.
+4. **QA manual per role di staging**: CPM buat request dari slot Jadwal Live (cek sisa jatah MEA & scope kreator) →
+   Head/Director set jatah di `/ads/jatah` → Finance catat uang masuk & ACC (cash) / Head CM ACC (invoice → invoice
+   terbit) → Creator Support klaim, input realisasi, selesai → Finance unduh PDF, catat terkirim, catat lunas →
+   cek margin Special Project hanya memakai ads MEA.
+5. **Konfirmasi asumsi A1** (D-2026-10-31-3): ACC Budget MEA & TikTok credit oleh Head CM atau Finance. Bila
+   Yohan ingin lain → ubah `accRolesFor()` di `src/lib/m10/request.ts` + test + DECISIONS.
+6. Opsional: `compact-list.tsx` Jadwal Live masih menampilkan kolom "Pembayar Ads"/"Catatan Ads" dari nilai lama;
+   kalau mau, ganti sumbernya ke request (pola `SlotAdsRequestSummary` di board).
+7. Opsional: alert `ads_mea_budget_exhausted` sudah terdaftar di constraint tetapi belum ada penulisnya —
+   kandidat: tulis saat `checkMeaBudget().remaining === 0` di `createAdsRequestAction`.
