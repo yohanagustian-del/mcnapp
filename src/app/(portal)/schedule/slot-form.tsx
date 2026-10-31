@@ -4,7 +4,10 @@ import Link from "next/link";
 import { slotUploadEligibility } from "@/lib/schedule/live-report";
 
 import { useEffect, useRef, useState, useTransition } from "react";
-import type { LiveScheduleSlot, SlotStatus } from "@/lib/schedule/types";
+import type { LiveScheduleSlot, SlotAdsRequestSummary, SlotStatus } from "@/lib/schedule/types";
+import { fundingBadgeLabel } from "@/lib/m10/funding-spec";
+import { REQUEST_STATUS_LABELS } from "@/lib/m10/request";
+import { adsPayerLabel } from "@/lib/schedule/indicators";
 import { SHOP_PICKER_LIMIT } from "@/lib/deals/shop-search";
 import {
   createSlotAction,
@@ -254,10 +257,13 @@ export function SlotForm({
   date,
   creators,
   initialShops,
+  adsRequest = null,
   onDone,
   onCancel,
 }: {
   slot: LiveScheduleSlot | null;
+  /** Request Ads slot ini (0100), null = belum ada. */
+  adsRequest?: SlotAdsRequestSummary | null;
   creatorId: string;
   date: string;
   creators: RosterCreatorOption[];
@@ -426,25 +432,30 @@ export function SlotForm({
                 </select>
               </div>
               <div>
-                <label className="block text-xs font-medium text-slate-600">Pembayar ads</label>
-                <select name="ads_payer" disabled={locked} defaultValue={slot?.ads_payer ?? ""} className={input}>
-                  <option value="">—</option>
-                  <option value="brand">Brand</option>
-                  <option value="mea">MEA</option>
-                  <option value="invoicing_mea">Invoicing MEA</option>
-                  <option value="organik">Organik</option>
-                </select>
+                <label className="block text-xs font-medium text-slate-600">Ads</label>
+                {/* D-2026-10-31-7: slot tidak lagi menanyakan "Pembayar ads" — pendanaan,
+                    ACC Finance, dan eksekusi hidup di Request Ads (/ads). Nilai lama
+                    tetap dibawa (hidden) supaya edit slot tidak menghapusnya. */}
+                <input type="hidden" name="ads_payer" value={slot?.ads_payer ?? ""} />
+                <input type="hidden" name="ads_note" value={slot?.ads_note ?? ""} />
+                <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-xs">
+                  {adsRequest ? (
+                    <Link href={`/ads/${adsRequest.requestId}`} className="text-blue-700 hover:underline">
+                      Request #{adsRequest.requestId} · {fundingBadgeLabel(adsRequest.fundingType, adsRequest.paymentMethod) ?? "—"} ·{" "}
+                      {REQUEST_STATUS_LABELS[adsRequest.status] ?? adsRequest.status} →
+                    </Link>
+                  ) : slot ? (
+                    <Link href={`/ads/baru?slot_id=${slot.id}`} className="font-medium text-blue-700 hover:underline">
+                      + Request Ads untuk slot ini →
+                    </Link>
+                  ) : (
+                    <span className="text-slate-500">Simpan slot dulu, lalu ajukan Request Ads dari slot.</span>
+                  )}
+                  {slot?.ads_payer && !adsRequest && (
+                    <span className="block text-slate-500">Catatan lama: {adsPayerLabel(slot.ads_payer)}{slot.ads_note ? ` — ${slot.ads_note}` : ""}</span>
+                  )}
+                </div>
               </div>
-            </div>
-
-            <div>
-              <label className="block text-xs font-medium text-slate-600">Catatan ads</label>
-              <input
-                name="ads_note" disabled={locked}
-                defaultValue={slot?.ads_note ?? ""}
-                placeholder="nominal / detail ads"
-                className={input}
-              />
             </div>
 
             <div className="flex gap-4 text-sm">

@@ -34,6 +34,10 @@ import { ProjectBrandsPanel, type BizdevOption, type ProjectBrandRow } from "./p
 import { canManageProjectBrands } from "@/lib/m7/access";
 import { isMissingRelationError } from "@/lib/db/missing-migration";
 import { MIGRATION_0091_MISSING } from "@/lib/m7/project-brands";
+import { loadAdsRequests } from "@/lib/m10/request-data";
+import { FUNDING_LABELS, type FundingType } from "@/lib/m10/funding-spec";
+import { OPEN_STATUSES } from "@/lib/m10/request";
+import { FundingBadge, RequestStatusBadge } from "@/components/ads-request-badge";
 
 const STATUS_LABELS: Record<string, string> = {
   on_track: "On-track", behind: "Behind", ahead: "Ahead",
@@ -58,6 +62,8 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
   // Reset Password = m9.invite only; project-only inviters (Q5) can invite, not reset.
   const canResetPortal = portalInviteGate(member.role) === "any";
   const canDecideJoin = hasPermission("m9.project_join_decide", member.role);
+  // Request Ads (D-2026-10-31-1): CM/BizDev/Campaign Ops + management; CPM hanya kreator miliknya.
+  const canCreateAds = hasPermission("m10.brief_create", member.role);
 
   const supabase = await createClient();
   const { data: project } = await supabase
@@ -147,6 +153,33 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
       getConfig<number>("m7.status_tolerance"),
       getConfig<number>("m7.live_active_min"),
     ]);
+
+  // ===== Ads per pendanaan (0100, D-2026-10-31-5) =====
+  // Biaya MEA = hanya mea_budget (sudah masuk project_daily_metrics.ads_spend lewat
+  // project_ads_spend_v). Tipe lain tampil sebagai informasi, bukan biaya MEA.
+  const adsFundingRows: { fundingType: FundingType; requestCount: number; budgetTotal: number; adsSpend: number }[] = [];
+  let adsMigrationMissing = false;
+  {
+    const adminAds = createAdminClient();
+    const { data: fundingRows, error: fundingErr } = await adminAds
+      .from("project_ads_spend_by_funding_v")
+      .select("funding_type, request_count, budget_total, ads_spend")
+      .eq("project_id", projectId);
+    if (fundingErr) {
+      adsMigrationMissing = isMissingRelationError(fundingErr);
+    } else {
+      for (const r of (fundingRows ?? []) as { funding_type: string; request_count: number; budget_total: number; ads_spend: number }[]) {
+        adsFundingRows.push({
+          fundingType: r.funding_type as FundingType,
+          requestCount: Number(r.request_count ?? 0),
+          budgetTotal: Number(r.budget_total ?? 0),
+          adsSpend: Number(r.ads_spend ?? 0),
+        });
+      }
+    }
+  }
+  const projectAdsRequests = (await loadAdsRequests({ projectId, limit: 100 })).rows;
+  const openAdsRequests = projectAdsRequests.filter((r) => OPEN_STATUSES.includes(r.status));
 
   const shape = ((project.daily_target_curve as { shape?: CurveShape } | null)?.shape ?? "ramp") as CurveShape;
   const today = new Date().toISOString().slice(0, 10);
@@ -569,7 +602,8 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
           <p className="text-xs uppercase text-slate-500">Profitabilitas</p>
           <p className={`mt-1 text-lg font-semibold ${cumMea - cumAds < 0 ? "text-red-700" : ""}`}>{rupiah(cumMea - cumAds)}</p>
           <p className="text-xs text-slate-400">
-            Revenue MEA {rupiah(cumMea)} − ads {rupiah(cumAds)} · komisi creator {rupiah(cumKomisiCreator)}
+            Revenue MEA {rupiah(cumMea)} − ads MEA {rupiah(cumAds)} · komisi creator {rupiah(cumKomisiCreator)}
+            <span className="block">Ads yang dibayar brand/kreator/credit tidak dihitung sebagai biaya MEA (D-2026-10-31-5).</span>
           </p>
         </div>
       </div>
@@ -590,6 +624,58 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
           <p className="mt-1 text-lg font-semibold">{(liveContribution * 100).toFixed(0)}%</p>
           <p className="text-xs text-slate-400">GMV live {rupiah(cumLiveGmv)} dari total {rupiah(tracking.cumActual)}</p>
         </div>
+      </div>
+
+      {/* ===== Request Ads per pendanaan (0100) ===== */}
+      <div className="mt-6 rounded-lg border border-slate-200 bg-white p-4">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h2 className="text-sm font-semibold">Ads project per pendanaan</h2>
+          <div className="flex items-center gap-2">
+            <Link href={`/ads?view=semua`} className="text-xs text-blue-700 hover:underline">Semua request →</Link>
+            {canCreateAds && project.status !== "selesai" && project.status !== "dibatalkan" && (
+              <Link href={`/ads/baru?project_id=${project.id}`}
+                className="rounded-md bg-slate-900 px-3 py-1.5 text-xs font-medium text-white hover:bg-slate-700">
+                + Request Ads
+              </Link>
+            )}
+          </div>
+        </div>
+        {adsMigrationMissing ? (
+          <p className="mt-2 text-xs text-amber-700">Migrasi 0100 (Request Ads & Finance) belum di-apply — rincian per pendanaan belum tersedia.</p>
+        ) : adsFundingRows.length === 0 ? (
+          <p className="mt-2 text-xs text-slate-500">Belum ada request ads untuk project ini. Budget MEA, Creator/Brand budget (cash/invoice), dan TikTok Ads Credit dicatat lewat Request Ads.</p>
+        ) : (
+          <table className="mt-2 min-w-[480px] text-sm">
+            <thead className="text-left text-xs uppercase text-slate-500">
+              <tr><th className="py-1 pr-4">Pendanaan</th><th className="py-1 pr-4 text-right">Request</th><th className="py-1 pr-4 text-right">Budget disetujui</th><th className="py-1 pr-4 text-right">Realisasi ads</th><th className="py-1">Biaya MEA?</th></tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {adsFundingRows.map((r) => (
+                <tr key={r.fundingType}>
+                  <td className="py-1 pr-4">{FUNDING_LABELS[r.fundingType] ?? r.fundingType}</td>
+                  <td className="py-1 pr-4 text-right">{r.requestCount}</td>
+                  <td className="py-1 pr-4 text-right">{rupiah(r.budgetTotal)}</td>
+                  <td className="py-1 pr-4 text-right">{rupiah(r.adsSpend)}</td>
+                  <td className="py-1 text-xs">{r.fundingType === "mea_budget" ? "ya" : "tidak"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+        {openAdsRequests.length > 0 && (
+          <ul className="mt-3 space-y-1 text-xs">
+            {openAdsRequests.slice(0, 8).map((r) => (
+              <li key={r.id} className="flex flex-wrap items-center gap-2">
+                <Link href={`/ads/${r.id}`} className="font-medium text-blue-700 hover:underline">#{r.id}</Link>
+                <span>{r.creatorName ?? "seluruh project"}</span>
+                <FundingBadge fundingType={r.fundingType} paymentMethod={r.paymentMethod} />
+                <RequestStatusBadge status={r.status} />
+                <span className="text-slate-500">{rupiah(r.budgetApproved ?? r.budgetRequested)}</span>
+              </li>
+            ))}
+            {openAdsRequests.length > 8 && <li className="text-slate-400">+{openAdsRequests.length - 8} request lain masih berjalan.</li>}
+          </ul>
+        )}
       </div>
 
       {/* ===== Brand bergabung (0091) ===== */}
@@ -706,6 +792,7 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
                   <th className="px-4 py-3">Binding</th>
                   <th className="px-4 py-3">Report</th>
                   {canInvitePortal && <th className="px-4 py-3">Akun Portal</th>}
+                  {canCreateAds && <th className="px-4 py-3">Ads</th>}
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
@@ -759,11 +846,22 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
                         )}
                       </td>
                     )}
+                    {canCreateAds && (
+                      <td className="px-4 py-2">
+                        {isCreatorInScope(member, c?.owner_cpm_id) && project.status !== "selesai" && project.status !== "dibatalkan" ? (
+                          <Link href={`/ads/baru?project_id=${project.id}&creator_id=${p.creator_id}`} className="text-xs text-blue-700 hover:underline">
+                            + Request Ads
+                          </Link>
+                        ) : (
+                          <span className="text-xs text-slate-400">—</span>
+                        )}
+                      </td>
+                    )}
                   </tr>
                   );
                 })}
                 {(participants ?? []).length === 0 && (
-                  <tr><td colSpan={canInvitePortal ? 6 : 5} className="px-4 py-6 text-center text-slate-400">Belum ada peserta.</td></tr>
+                  <tr><td colSpan={5 + (canInvitePortal ? 1 : 0) + (canCreateAds ? 1 : 0)} className="px-4 py-6 text-center text-slate-400">Belum ada peserta.</td></tr>
                 )}
               </tbody>
             </table>

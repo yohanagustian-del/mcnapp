@@ -5,7 +5,8 @@ import { getWeekStart, getWeekDays, formatDayLabel, prevWeek, nextWeek } from "@
 import { todayWib } from "@/lib/utils/date";
 import { buildWeekMatrix } from "@/lib/schedule/matrix";
 import { summarizeSlotLive, type SlotLiveSummary } from "@/lib/schedule/live-report";
-import type { LiveScheduleSlot } from "@/lib/schedule/types";
+import type { LiveScheduleSlot, SlotAdsRequestSummary } from "@/lib/schedule/types";
+import { loadAdsRequests } from "@/lib/m10/request-data";
 import { ScheduleBoard, type BoardWeekMatrix } from "./schedule-board";
 import { loadPicTapScheduleAlert } from "@/lib/schedule/pic-tap-alerts";
 import { SHOP_PICKER_LIMIT } from "@/lib/deals/shop-search";
@@ -214,6 +215,25 @@ export default async function SchedulePage({
     ];
   }
 
+  // ===== Request Ads per slot (0100) =====
+  // Badge pendanaan + status di kalender dibaca dari request, bukan lagi ads_payer
+  // (D-2026-10-31-7); slot lama tanpa request tetap menampilkan ads_payer-nya.
+  // Satu slot hanya punya satu request berjalan; yang terbaru dipakai bila ada riwayat.
+  let slotAdsRequests: SlotAdsRequestSummary[] = [];
+  if (weekSlotIds.length > 0) {
+    const reqs = await loadAdsRequests({ scheduleSlotIds: weekSlotIds, limit: 1000 });
+    const seen = new Set<number>();
+    for (const r of reqs.rows) {
+      if (r.scheduleSlotId == null || seen.has(r.scheduleSlotId)) continue;
+      seen.add(r.scheduleSlotId);
+      slotAdsRequests.push({
+        slotId: r.scheduleSlotId, requestId: r.id, status: r.status,
+        fundingType: r.fundingType, paymentMethod: r.paymentMethod,
+        budget: r.budgetApproved ?? r.budgetRequested,
+      });
+    }
+  }
+
   const matrixCreators = ((rosterCreators ?? []) as CreatorRow[]).map((c) => ({
     id: c.id,
     name: c.name,
@@ -327,6 +347,7 @@ export default async function SchedulePage({
             todayIso={today}
             canEdit={canEdit}
             liveSummaries={liveSummaries}
+            adsRequests={slotAdsRequests}
           />
         </section>
 

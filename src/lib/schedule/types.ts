@@ -1,3 +1,6 @@
+import type { FundingType, PaymentMethod } from "@/lib/m10/funding-spec";
+import type { RequestStatus } from "@/lib/m10/request";
+
 // M13 live-schedule domain types. Row shapes are hand-declared (no generated supabase
 // types in this repo) to match the `live_schedule_slots` select (snake_case columns).
 
@@ -73,4 +76,17 @@ export interface SlotInsert {
   product_connected_tap: boolean;
   fokus_produk: string | null;
   created_by: string;
+}
+
+/**
+ * Ringkasan Request Ads (0100) untuk satu slot — dikirim server → klien sebagai array
+ * (pola SlotLiveSummary). Satu slot maksimal satu request yang masih berjalan.
+ */
+export interface SlotAdsRequestSummary {
+  slotId: number;
+  requestId: number;
+  status: RequestStatus;
+  fundingType: FundingType | null;
+  paymentMethod: PaymentMethod | null;
+  budget: number | null;
 }
