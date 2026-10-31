@@ -1,6 +1,6 @@
 # Plan Build — Tracking Ads (Jadwal Live + Special Project) & Akses Finance (2026-10)
 
-Sumber request: pesan Yohan 2026-10-31 (sesi Claude Code). Status: **DRAFT — menunggu jawaban Q1–Q10 (§4)**.
+Sumber request: pesan Yohan 2026-10-31 (sesi Claude Code). Status: **DISETUJUI 2026-10-31** — jawaban Yohan dicatat di `docs/DECISIONS.md` D-2026-10-31-1…7 (lihat §4). Dieksekusi T0 → T10.
 Repo yang disentuh: **hanya `mcnapp`**. `AgencyAPP` (CDPS) dibaca sebagai rujukan pola (M5 Admin Finance,
 M8 Ads, permintaan Top-up Saldo) — tidak ada perubahan di sana (lihat §6).
 
@@ -194,7 +194,24 @@ produksi menunggu persetujuan Yohan.
 
 ---
 
-## 4. Pertanyaan yang harus dijawab sebelum T1 (Q1–Q10)
+## 4. Pertanyaan Q1–Q10 — DIJAWAB 2026-10-31 (ringkasan; detail di DECISIONS.md)
+
+| # | Jawaban Yohan |
+|---|---|
+| Q1 | Pembuat request = CM, BizDev, Campaign Ops (D-1). |
+| Q2 | ads_support & creator_support = satu divisi → executor `creator_support` (D-2). |
+| Q3 | Brand budget juga cash di awal / invoice (D-3). |
+| Q4 | Jatah MEA beda per kreator, ditetapkan Head, sisa hangus (D-4). |
+| Q5 | Cash → Finance cek uang masuk; invoice → ACC Head CM atau Finance (D-3). |
+| Q6 | Default (slot baru tanpa ads_payer) (D-7). |
+| Q7 | Ya, margin hanya ads MEA (D-5). |
+| Q8 | Default (brief lama dibiarkan) (D-7). |
+| Q9 | PDF, template menyusul, PPN otomatis, tanpa sinkron CDPS (D-6). |
+| Q10 | Default (in-app) (D-6). |
+
+Tabel pertanyaan asli dipertahankan di bawah sebagai arsip.
+
+### Arsip pertanyaan
 
 | # | Pertanyaan | Usulan default kalau tidak dijawab |
 |---|---|---|

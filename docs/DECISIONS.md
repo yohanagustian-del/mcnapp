@@ -111,3 +111,57 @@ Sumber: Google Sheet "All Brand TAP [Database Bizdev TikTok 2026]", tab
 - Tabel per SHOP lama (`deal_shop_summary`, Edit shop, tombol & upload BizDev handler) TIDAK dihapus:
   pindah ke tab **Shop (Produk TAP)** (`/deals?view=shop`).
 - Countdown dihitung saat render (tidak disimpan). Tanpa 0097 tab Brand tetap jalan dengan kolom dasar.
+
+## 2026-10-31 — Request Ads (Jadwal Live + Special Project) & akses Finance (Yohan)
+
+Sumber: jawaban Yohan 2026-10-31 atas `docs/plans/ADS_TRACKING_FINANCE_2026-10.md` §4.
+Migrasi `0100_ads_request_finance.sql`.
+
+### D-2026-10-31-1 Pembuat Request Ads
+- Yang boleh mengajukan request ads: **CM** (`cm_lead`, `cpm` — CPM hanya kreator miliknya),
+  **BizDev** (`bizdev_lead`, `bizdev`), dan **Campaign Ops** (`campaign_ops`), plus management.
+  Izin `m10.brief_create`. Menggantikan jawaban awal "hanya CM".
+
+### D-2026-10-31-2 Executor = Creator Support (satu divisi)
+- Role `ads_support` tidak pernah dipakai (0 akun di produksi 2026-10-31) dan secara
+  organisasi sama dengan Creator Support. Executor request ads = **`creator_support`**
+  (+ management; `campaign_ops` tetap boleh mengeksekusi sesuai D-2026-10-20-6).
+  `ads_support` dicabut dari semua izin dan nav; nilai enum DB dibiarkan (tidak bisa dihapus),
+  `ROLES` tetap memuatnya hanya untuk kompatibilitas tipe — jangan beri akun role itu lagi.
+
+### D-2026-10-31-3 Empat tipe pendanaan, cash/invoice untuk kreator DAN brand
+- `funding_type`: `mea_budget` | `creator_budget` | `brand_budget` | `tiktok_ads_credit`.
+- `creator_budget` **dan** `brand_budget` punya `payment_method`: `cash_upfront` | `invoice`.
+- **Cash di awal**: Finance WAJIB mencatat uang sudah masuk (`cash_received_at`) sebelum request
+  boleh lanjut ke eksekusi; ACC-nya hanya Finance (+ Director override, ter-log).
+- **Invoice**: ACC boleh oleh **Head CM** (`head`, `cm_lead`) **atau Finance**; invoice terbit saat ACC,
+  eksekusi boleh jalan sebelum lunas, tanggal bayar dicatat Finance di invoice.
+- `mea_budget` & `tiktok_ads_credit` tidak dijawab eksplisit → **asumsi A1**: ACC-nya sama dengan
+  jalur invoice (Head CM atau Finance), tanpa invoice. Kalau Yohan ingin lain = revisi di sini.
+
+### D-2026-10-31-4 Jatah budget MEA per kreator per bulan
+- Berbeda per kreator, ditetapkan **Head** (`head`, `director`; izin `m10.mea_budget_set`).
+  Tabel `creator_ads_monthly_budgets (creator_id, month)`; tanpa baris = 0 (tidak ada jatah).
+- Sisa bulan **hangus** (tidak carry-over). Terpakai = Σ `budget_approved` (fallback
+  `budget_requested`) request `mea_budget` bulan itu yang tidak `batal`/`ditolak`.
+- Request `mea_budget` yang membuat terpakai > jatah → approval **Director** (`m10.budget_approve`)
+  sebelum masuk antrean ACC. `creators.ads_budget_cap` tidak lagi dibaca.
+
+### D-2026-10-31-5 Margin Special Project
+- Hanya ads **`mea_budget`** (dan brief lama tanpa `funding_type`) yang mengurangi revenue MEA di
+  `project_ads_spend_v` → `project_daily_metrics.ads_spend` → margin & alert `project_over_cap`.
+  Ads kreator/brand/credit tampil sebagai informasi (`project_ads_spend_by_funding_v`).
+
+### D-2026-10-31-6 Invoice
+- File **PDF** dari MCN app (nomor `INV-YYYYMM-NNNN`, tidak pernah dipakai ulang; batal = status).
+  Template resmi menyusul dari Yohan — layout awal = placeholder di `lib/m10/invoice-pdf.ts`.
+- **PPN otomatis**: tarif dari `app_config m10.invoice_ppn_rate` (default 0.11), DPP = nominal request,
+  total = DPP + PPN. Tidak sinkron ke CDPS (beda perusahaan).
+- Jatuh tempo = `issued_at + m10.invoice_due_days` (default 14); pengingat H-`m10.invoice_reminder_days`
+  (default 3) dan setelah lewat, in-app (badge + `platform_alerts`), tanpa WA/email otomatis.
+
+### D-2026-10-31-7 Yang dibiarkan (default plan, tidak dibantah)
+- Slot Jadwal Live baru tidak lagi menanyakan `ads_payer`/`ads_note` — diganti tombol Request Ads;
+  nilai lama tetap tampil.
+- Brief M10 lama dibiarkan apa adanya (`funding_type` null); hanya request baru wajib pendanaan.
+- Jalur `creator_requests` type `ads` (CM Workspace) ditutup; sample/HSL tetap.
