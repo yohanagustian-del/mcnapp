@@ -7,9 +7,10 @@ import { todayWib } from "@/lib/utils/date";
 import { canAccRequest, type RequestStatus } from "./request";
 import type { FundingType, PaymentMethod } from "./funding-spec";
 import { loadInvoiceConfig } from "./invoice-data";
+import { MEA_BUDGET_ALERT_TYPE } from "./mea-budget-alert";
 
 export interface AdsBadges {
-  /** Badge menu Request Ads: antrean eksekusi (executor) + approval Director + request saya yang ditolak 7 hari terakhir. */
+  /** Badge menu Request Ads: antrean eksekusi (executor) + approval Director + request saya yang ditolak 7 hari terakhir + jatah MEA habis bulan ini (Head/Director). */
   ads: number;
   adsTitle: string | undefined;
   /** Badge menu Finance: request menunggu ACC yang bisa di-ACC role ini + invoice jatuh tempo / segera. */
@@ -37,6 +38,12 @@ export async function loadAdsBadges(member: TeamMember): Promise<AdsBadges> {
       const { count } = await admin.from("ads_briefs").select("id", { count: "exact", head: true })
         .eq("created_by", member.id).eq("status", "ditolak").gte("updated_at", since);
       if (count) { ads += count; parts.push(`${count} request Anda ditolak (7 hari terakhir)`); }
+    }
+    if (hasPermission("m10.mea_budget_set", member.role)) {
+      // Jatah bulan lalu hangus — hanya alert bulan berjalan yang perlu ditindak.
+      const { count } = await admin.from("platform_alerts").select("id", { count: "exact", head: true })
+        .eq("alert_type", MEA_BUDGET_ALERT_TYPE).eq("resolved", false).eq("week", `${todayWib().slice(0, 7)}-01`);
+      if (count) { ads += count; parts.push(`${count} kreator jatah Budget MEA-nya habis bulan ini`); }
     }
   } catch {
     return EMPTY;

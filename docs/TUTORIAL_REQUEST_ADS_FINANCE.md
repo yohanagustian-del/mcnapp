@@ -67,6 +67,14 @@ Menu **Request Ads** → **Jatah Budget MEA** → pilih bulan → isi kreator (I
 Tanpa baris = 0. Sisa bulan hangus. Tabel menampilkan jatah, terpakai (request yang tidak batal/ditolak),
 sisa; kreator yang memakai jatah tanpa baris ikut tampil dengan jatah 0.
 
+Begitu terpakai mencapai jatah (jatah > 0), muncul alert **"Jatah habis bulan ini"** di halaman ini dan
+badge menu Request Ads (Head/Director). Alert tertutup sendiri saat jatah dinaikkan atau request Budget
+MEA kreator itu dibatalkan/ditolak. Request berikutnya tetap bisa diajukan — langsung masuk approval Director.
+
+Di CM Workspace & BizDev Workspace, kolom **Request Ads** daftar jadwal kini membaca request (pendanaan +
+status, klik → detail request) dan kolom **Nominal / Catatan Ads** menampilkan nominal request. Slot lama
+tanpa request tetap menampilkan pembayar/catatan lama dengan tanda *(lama)*.
+
 ## 7. Yang perlu disiapkan tim
 
 - Buat akun role **finance** di menu Tim (belum ada di produksi per 2026-10-31).

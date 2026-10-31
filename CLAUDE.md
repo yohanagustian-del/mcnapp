@@ -253,8 +253,14 @@ Platform internal MCN MEA (agency creator TikTok/Shopee). Menggabungkan tools te
 - **Pengingat** = badge sidebar (`lib/m10/badges.ts`, dihitung saat render) + job pg_cron harian
   `run_m10_invoice_reminders()` → `platform_alerts` (`ads_invoice_due`/`ads_invoice_overdue`) +
   event `diingatkan`, idempoten per invoice selama alert belum resolved. In-app saja.
+- **Alert jatah MEA habis** (`ads_mea_budget_exhausted`) = SATU penulis `syncMeaBudgetExhaustedAlert`
+  (`lib/m10/mea-budget-alert.ts`, aturan `meaBudgetExhausted`: jatah > 0 dan terpakai ≥ jatah), dipanggil
+  saat request `mea_budget` dibuat, tiap `applyTransition`, dan `setMeaBudgetAction` — buka/perbarui/tutup,
+  idempoten per (kreator, bulan), entity `creator_ads_monthly_budgets` `CRT-x:YYYY-MM-01`. Bukan approval
+  (yang lewat jatah sudah ditahan Director). Tampil di badge `/ads` (Head/Director, bulan berjalan) + `/ads/jatah`.
 - Slot Jadwal Live tidak lagi menanyakan `ads_payer`/`ads_note` (nilai lama dibawa hidden & tampil);
-  board membaca request lewat `SlotAdsRequestSummary`. Tabel/view baru wajib deny `is_creator_user()`
+  kalender DAN daftar ringkas CM/BizDev Workspace membaca request lewat SATU pemuat
+  `loadSlotAdsRequestSummaries` + SATU label `slotAdsDisplay` (`lib/schedule/ads-display.ts`; slot lama = "(lama)"). Tabel/view baru wajib deny `is_creator_user()`
   (dijaga `missing-migration.test.ts` blok 0100).
 
 ## Konvensi kode

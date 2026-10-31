@@ -4,6 +4,7 @@ import { requireMember, hasPermission } from "@/lib/rbac";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { todayWib } from "@/lib/utils/date";
 import { loadMeaBudgetList, MIGRATION_0100_MISSING } from "@/lib/m10/request-data";
+import { loadOpenMeaBudgetAlerts } from "@/lib/m10/mea-budget-alert";
 import { rupiah } from "@/lib/utils/format";
 import { MeaBudgetForm } from "./mea-budget-form";
 
@@ -24,9 +25,11 @@ export default async function MeaBudgetPage({
   const month = /^\d{4}-\d{2}$/.test(params.month ?? "") ? (params.month as string) : todayWib().slice(0, 7);
   const monthIso = `${month}-01`;
 
-  const [{ rows, migrationMissing }, { data: creatorRows }] = await Promise.all([
+  const admin = createAdminClient();
+  const [{ rows, migrationMissing }, { data: creatorRows }, exhaustedAlerts] = await Promise.all([
     loadMeaBudgetList(monthIso),
-    createAdminClient().from("creators").select("id, name, username").eq("status", "aktif").order("name").limit(3000),
+    admin.from("creators").select("id, name, username").eq("status", "aktif").order("name").limit(3000),
+    loadOpenMeaBudgetAlerts(admin, monthIso),
   ]);
   const creators = ((creatorRows ?? []) as { id: string; name: string; username: string | null }[]);
   const totalBudget = rows.reduce((s, r) => s + r.budget, 0);
@@ -54,6 +57,18 @@ export default async function MeaBudgetPage({
         <Link href={`/ads/jatah?month=${next}`} className="rounded border border-slate-300 px-2 py-1 hover:bg-slate-50">{next} ›</Link>
         <span className="ml-4 text-slate-500">Total jatah {rupiah(totalBudget)} · terpakai {rupiah(totalUsed)}</span>
       </div>
+
+      {exhaustedAlerts.length > 0 && (
+        <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+          <p className="font-medium">Jatah habis bulan ini ({exhaustedAlerts.length} kreator)</p>
+          <ul className="mt-1 list-disc space-y-0.5 pl-5">
+            {exhaustedAlerts.map((a) => <li key={a.id}>{a.message}</li>)}
+          </ul>
+          <p className="mt-1 text-xs text-amber-800">
+            Alert tertutup otomatis saat jatah dinaikkan atau request Budget MEA dibatalkan/ditolak.
+          </p>
+        </div>
+      )}
 
       {canSet && <MeaBudgetForm month={month} creators={creators} />}
 

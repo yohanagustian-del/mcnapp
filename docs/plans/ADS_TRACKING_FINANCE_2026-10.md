@@ -296,3 +296,16 @@ Tabel pertanyaan asli dipertahankan di bawah sebagai arsip.
    kalau mau, ganti sumbernya ke request (pola `SlotAdsRequestSummary` di board).
 7. Opsional: alert `ads_mea_budget_exhausted` sudah terdaftar di constraint tetapi belum ada penulisnya —
    kandidat: tulis saat `checkMeaBudget().remaining === 0` di `createAdsRequestAction`.
+
+### 7.1 Sesi lanjutan 2026-10-31 (PR #139 sudah merge → PR baru dari `claude/ads-tracking-finance-mcn-xk3imf`)
+
+| Butir | Status |
+|---|---|
+| 1. Apply 0100 ke produksi | **Belum** — menunggu persetujuan Yohan (tidak disentuh). |
+| 2. Akun role `finance` | **Belum** — perlu nama/email orang Finance dari Yohan; dibuat lewat `/tim` di produksi setelah 0100. |
+| 3. Template invoice resmi | **Belum** — template belum dikirim; `buildInvoicePdf` tetap placeholder. |
+| 4. QA manual per role di staging | **Belum** — butuh akun per role di staging (checklist tetap di butir 4 di atas). |
+| 5. Asumsi A1 | Ditanyakan ulang ke Yohan; kode tetap A1 (`accRolesFor`) sampai dijawab. |
+| 6. `compact-list.tsx` | **Selesai** — kolom "Request Ads" + "Nominal / Catatan Ads" + facet "Pendanaan Ads" dari request (`loadSlotAdsRequestSummaries` + `slotAdsDisplay`, dipakai juga kalender); slot lama = "(lama)". |
+| 7. Alert `ads_mea_budget_exhausted` | **Selesai** — `lib/m10/mea-budget-alert.ts` (`syncMeaBudgetExhaustedAlert`), dipanggil saat buat request, `applyTransition`, dan set jatah; tampil di `/ads/jatah` + badge `/ads`. Tidak butuh migrasi baru (tipe sudah ada di constraint 0100). |
+
