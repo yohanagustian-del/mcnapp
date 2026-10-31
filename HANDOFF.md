@@ -2,6 +2,26 @@
 
 Status per sesi 2026-10-14 (Revisi BizDev T1–T10 + F1–F3). Baca ini + `CLAUDE.md` sebelum lanjut.
 
+## ⚡ SESI 2026-10-31 — Request Ads (Jadwal Live + Special Project) & akses Finance (PR #139)
+- Plan `docs/plans/ADS_TRACKING_FINANCE_2026-10.md`; keputusan Yohan `docs/DECISIONS.md` D-2026-10-31-1…7;
+  aturan ringkas CLAUDE.md #10; tutorial `docs/TUTORIAL_REQUEST_ADS_FINANCE.md`.
+- Migrasi **0100_ads_request_finance.sql** (ads_briefs + pendanaan/pemilik slot/ACC, `creator_ads_monthly_budgets`,
+  `ads_invoices` + `ads_invoice_events` immutable, view jatah MEA & ads per pendanaan, `project_ads_spend_v` hanya
+  biaya MEA, alert `ads_invoice_due/overdue/ads_mea_budget_exhausted`, cron `m10_invoice_reminders` 23:00 UTC).
+  **SUDAH APPLY ke staging** (`fomlangoiiywhexwoqom`, `apply_migration` 2026-10-31, diverifikasi SQL: 7 kolom, 3 tabel,
+  3 view, 3 deny RESTRICTIVE, trigger immutable, 3 app_config, tipe alert, cron job). **BELUM di produksi**
+  (`bqknstylbpwsnlgnzayw`) — menunggu persetujuan Yohan (D-2026-10-20-8). Tanpa 0100, halaman /ads & /finance
+  tetap terbuka dengan pesan `MIGRATION_0100_MISSING`.
+- Halaman baru: `/ads` (daftar per role, `/ads/baru` dari slot/project, `/ads/[id]` + aksi, `/ads/jatah`),
+  `/finance` (antrean ACC, invoice, piutang), `/finance/invoice/[id]` (+ `/pdf` via pdf-lib — layout placeholder,
+  template resmi menyusul dari Yohan). `/workspace/ads` → redirect `/ads`. Form slot Jadwal Live tidak lagi
+  menanyakan Pembayar ads; board menampilkan request. Special Project: panel ads per pendanaan + tombol Request Ads.
+- RBAC: `ADS_REQUESTER_ROLES` (CM/BizDev/Campaign Ops), `ADS_EXECUTOR_ROLES` (creator_support, campaign_ops),
+  `finance.ads_review` (director/head/cm_lead/finance), `finance.invoice_manage` (director/finance),
+  `finance.view`, `m10.mea_budget_set` (director/head). `ads_support` dicabut dari semua izin (0 akun produksi).
+- Dependensi baru: `pdf-lib`. Verifikasi: tsc 0 error, vitest 1468 lulus / 6 skip, next build sukses.
+- **Belum**: akun role `finance` belum ada di produksi; QA manual UI per role belum; template invoice.
+
 ## ⚡ SESI 2026-10-22 — Deal Brand tampil per brand (mock Yohan)
 - `/deals` tab bawaan **Brand** = tabel per `brand_deals` aktif sesuai mock (D-2026-10-22-1):
   `brand-view.tsx` (server, muat + saring + paginasi), `brand-filters.tsx`, `brand-table-view.tsx`
