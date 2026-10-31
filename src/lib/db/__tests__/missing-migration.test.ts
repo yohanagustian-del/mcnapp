@@ -247,3 +247,37 @@ describe("migrasi 0097/0098 — bulk load Deal Brand", () => {
     expect(uniq).not.toMatch(/lower\(/);
   });
 });
+
+describe("migrasi 0100 — Request Ads & Finance: penjaga CLAUDE.md #9 & K23", () => {
+  const sql = readFileSync(
+    join(process.cwd(), "supabase/migrations/0100_ads_request_finance.sql"),
+    "utf8"
+  );
+
+  it("setiap tabel baru punya restrictive deny is_creator_user()", () => {
+    const tables = [...sql.matchAll(/create table if not exists (\w+)/g)].map((m) => m[1]);
+    expect(tables).toEqual(["creator_ads_monthly_budgets", "ads_invoices", "ads_invoice_events"]);
+    for (const t of tables) {
+      const re = new RegExp(`on ${t} as restrictive for select\\s+using \\(not is_creator_user\\(\\)\\)`);
+      expect(sql, t).toMatch(re);
+    }
+  });
+
+  it("view baru security_invoker", () => {
+    for (const v of ["creator_mea_budget_usage_v", "project_ads_spend_v", "project_ads_spend_by_funding_v"]) {
+      expect(sql).toMatch(new RegExp(`create or replace view ${v}\\s+with \\(security_invoker = on\\)`));
+    }
+  });
+
+  it("tanpa DROP POLICY/TRIGGER (apply_migration menggantung, HANDOFF 2026-10-13)", () => {
+    expect(sql).not.toMatch(/drop\s+(policy|trigger)/i);
+  });
+
+  it("project_ads_spend_v hanya menghitung biaya MEA (D-2026-10-31-5)", () => {
+    expect(sql).toMatch(/b\.funding_type is null or b\.funding_type = 'mea_budget'/);
+  });
+
+  it("riwayat invoice immutable (trigger tolak update/delete)", () => {
+    expect(sql).toMatch(/before update or delete on ads_invoice_events/);
+  });
+});
