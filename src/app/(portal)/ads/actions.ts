@@ -28,6 +28,7 @@ import {
 } from "@/lib/m10/request";
 import { loadMeaBudgetContext, MIGRATION_0100_MISSING } from "@/lib/m10/request-data";
 import { issueInvoiceForRequest } from "@/lib/m10/invoice-data";
+import { syncMeaBudgetExhaustedAlert } from "@/lib/m10/mea-budget-alert";
 
 /**
  * Server action Request Ads (D-2026-10-31). Pola: tidak pernah throw ke klien —
@@ -65,7 +66,11 @@ async function applyTransition(
   auditAction: string,
   auditType: "auto" | "approval" = "auto"
 ): Promise<AdsActionResult> {
-  const { data: row, error } = await admin.from("ads_briefs").select("id, status").eq("id", id).maybeSingle();
+  const { data: row, error } = await admin
+    .from("ads_briefs")
+    .select("id, status, funding_type, creator_id, budget_month")
+    .eq("id", id)
+    .maybeSingle();
   if (error) return { ok: false, error: isMissingRelationError(error) ? MIGRATION_0100_MISSING : error.message };
   if (!row) return { ok: false, error: "[request ads tidak ditemukan]" };
   const t = transition(row.status as RequestStatus, action);
@@ -80,6 +85,10 @@ async function applyTransition(
     actorId: actor.id, action: auditAction, entityType: "ads_briefs", entityId: String(id),
     before: { status: row.status }, after: { status: t.to, ...patch }, type: auditType,
   });
+  // Tolak/batal/ACC (nominal disetujui) mengubah terpakai jatah MEA → sinkron alert jatah habis.
+  if (row.funding_type === "mea_budget" && row.creator_id && row.budget_month) {
+    await syncMeaBudgetExhaustedAlert(admin, row.creator_id, row.budget_month, actor.id);
+  }
   return { ok: true, id };
 }
 
@@ -231,6 +240,9 @@ export async function createAdsRequestAction(fd: FormData): Promise<AdsActionRes
     },
     type: status === "menunggu_approval_director" ? "approval" : "auto",
   });
+  if (ft === "mea_budget" && creatorId && budgetMonth) {
+    await syncMeaBudgetExhaustedAlert(admin, creatorId, budgetMonth, actor.id);
+  }
   revalidateAll(row.id);
   return {
     ok: true,
@@ -514,6 +526,8 @@ export async function setMeaBudgetAction(fd: FormData): Promise<AdsActionResult>
     before: before ? { budget: Number(before.budget) } : null, after: { budget, note },
     type: before && budget < Number(before.budget) ? "approval" : "auto",
   });
+  // Jatah dinaikkan → alert jatah habis tertutup; diturunkan sampai ≤ terpakai → alert terbuka.
+  await syncMeaBudgetExhaustedAlert(admin, creatorId, monthIso, actor.id);
   revalidatePath("/ads/jatah");
   revalidatePath("/ads");
   return { ok: true };

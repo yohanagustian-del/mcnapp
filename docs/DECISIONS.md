@@ -137,7 +137,8 @@ Migrasi `0100_ads_request_finance.sql`.
 - **Invoice**: ACC boleh oleh **Head CM** (`head`, `cm_lead`) **atau Finance**; invoice terbit saat ACC,
   eksekusi boleh jalan sebelum lunas, tanggal bayar dicatat Finance di invoice.
 - `mea_budget` & `tiktok_ads_credit` tidak dijawab eksplisit → **asumsi A1**: ACC-nya sama dengan
-  jalur invoice (Head CM atau Finance), tanpa invoice. Kalau Yohan ingin lain = revisi di sini.
+  jalur invoice (Head CM atau Finance), tanpa invoice. **Dikonfirmasi Yohan 2026-10-31 (sesi lanjutan):
+  A1 tetap** — `accRolesFor()` tidak berubah.
 
 ### D-2026-10-31-4 Jatah budget MEA per kreator per bulan
 - Berbeda per kreator, ditetapkan **Head** (`head`, `director`; izin `m10.mea_budget_set`).

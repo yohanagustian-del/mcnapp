@@ -6,6 +6,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { isMissingRelationError } from "@/lib/db/missing-migration";
 import type { FundingType, PaymentMethod } from "./funding-spec";
 import type { InvoiceStatus, RequestStatus } from "./request";
+import type { SlotAdsRequestSummary } from "@/lib/schedule/types";
 import { checkMeaBudget, type MeaBudgetCheck } from "./request";
 
 export const MIGRATION_0100_MISSING =
@@ -189,6 +190,49 @@ async function hydrate(admin: SupabaseClient, raw: RawRow[]): Promise<AdsRequest
       invoice: invByReq.get(id) ?? null,
     };
   });
+}
+
+// ---------- Ringkasan per slot Jadwal Live ----------
+
+/**
+ * Request Ads per slot Jadwal Live (satu baris per slot = request TERBARU; satu slot
+ * hanya boleh punya satu request berjalan). Query ringan tanpa hydrate — dipakai
+ * kalender `/schedule` dan daftar ringkas CM/BizDev Workspace (`compact-list.tsx`).
+ * 0100 belum di-apply / query gagal → array kosong (slot jatuh ke tampilan `ads_payer`
+ * lama) — badge ads tidak boleh menjatuhkan halaman jadwal; kegagalan lain dicatat ke log.
+ */
+export async function loadSlotAdsRequestSummaries(slotIds: number[]): Promise<SlotAdsRequestSummary[]> {
+  const ids = [...new Set(slotIds)];
+  if (ids.length === 0) return [];
+  const admin = createAdminClient();
+  const out: SlotAdsRequestSummary[] = [];
+  const seen = new Set<number>();
+  // Potong per 500 id supaya URL PostgREST tidak kepanjangan.
+  for (let i = 0; i < ids.length; i += 500) {
+    const { data, error } = await admin
+      .from("ads_briefs")
+      .select("id, schedule_slot_id, status, funding_type, payment_method, budget_requested, budget_approved, created_at")
+      .in("schedule_slot_id", ids.slice(i, i + 500))
+      .order("created_at", { ascending: false });
+    if (error) {
+      if (!isMissingRelationError(error)) console.error("loadSlotAdsRequestSummaries:", error.message);
+      return [];
+    }
+    for (const r of (data ?? []) as Record<string, unknown>[]) {
+      const slotId = num(r.schedule_slot_id);
+      if (slotId == null || seen.has(slotId)) continue;
+      seen.add(slotId);
+      out.push({
+        slotId,
+        requestId: Number(r.id),
+        status: r.status as RequestStatus,
+        fundingType: (r.funding_type as FundingType | null) ?? null,
+        paymentMethod: (r.payment_method as PaymentMethod | null) ?? null,
+        budget: num(r.budget_approved) ?? num(r.budget_requested),
+      });
+    }
+  }
+  return out;
 }
 
 // ---------- Jatah budget MEA ----------

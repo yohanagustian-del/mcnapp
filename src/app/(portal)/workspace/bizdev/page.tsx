@@ -7,6 +7,7 @@ import { processCreatorRequest } from "./actions";
 import { CampaignReqTable, type CampaignReqRow } from "./campaign-req-table";
 import { RouteCampaignForm } from "./route-campaign-form";
 import { CompactScheduleList, type CompactSlotRow } from "../../schedule/compact-list";
+import { loadSlotAdsRequestSummaries } from "@/lib/m10/request-data";
 import type { LiveScheduleSlot } from "@/lib/schedule/types";
 import { getWeekStart, getWeekDays } from "@/lib/schedule/week";
 import { todayWib } from "@/lib/utils/date";
@@ -83,8 +84,12 @@ export default async function BizdevWorkspacePage({
       ? await supabase.from("creators").select("id, name, username").in("id", bdCreatorIds)
       : { data: [] as { id: string; name: string; username: string | null }[] };
     const bdCreatorById = new Map((bdSlotCreators ?? []).map((c) => [c.id, c]));
+    const bdAdsBySlot = new Map(
+      (await loadSlotAdsRequestSummaries(((bdSlots ?? []) as LiveScheduleSlot[]).map((s) => s.id))).map((r) => [r.slotId, r])
+    );
     bdScheduleRows = ((bdSlots ?? []) as LiveScheduleSlot[]).map((s) => ({
       slot: s,
+      adsRequest: bdAdsBySlot.get(s.id) ?? null,
       creatorName: bdCreatorById.get(s.creator_id)?.name ?? s.creator_id,
       creatorUsername: bdCreatorById.get(s.creator_id)?.username ?? null,
     }));

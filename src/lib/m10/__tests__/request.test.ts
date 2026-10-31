@@ -22,6 +22,7 @@ import {
   invoiceDueDate,
   invoiceReminderState,
   invoiceSeqOf,
+  meaBudgetExhausted,
   nextInvoiceNumber,
   transition,
   validatePayment,
@@ -108,6 +109,15 @@ describe("jatah budget MEA per kreator per bulan (D-2026-10-31-4)", () => {
 
   it("bulan jatah = bulan tanggal live", () => {
     expect(budgetMonthOf("2026-10-31")).toBe("2026-10-01");
+  });
+
+  it("jatah habis (alert ads_mea_budget_exhausted) = ada jatah dan terpakai ≥ jatah", () => {
+    expect(meaBudgetExhausted(checkMeaBudget(2_000_000, 2_000_000, 0))).toBe(true);
+    expect(meaBudgetExhausted(checkMeaBudget(2_000_000, 2_500_000, 0))).toBe(true); // lewat via approval Director
+    expect(meaBudgetExhausted(checkMeaBudget(2_000_000, 1_999_999, 0))).toBe(false);
+    // tanpa jatah: tiap request sudah lewat Director — tidak di-alert
+    expect(meaBudgetExhausted(checkMeaBudget(null, 500_000, 0))).toBe(false);
+    expect(meaBudgetExhausted(checkMeaBudget(0, 0, 0))).toBe(false);
   });
 });
 

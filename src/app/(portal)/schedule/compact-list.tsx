@@ -2,8 +2,10 @@
 
 import { useMemo } from "react";
 import Link from "next/link";
-import { adsPayerLabel, slotFlags } from "@/lib/schedule/indicators";
-import type { LiveScheduleSlot } from "@/lib/schedule/types";
+import { slotFlags } from "@/lib/schedule/indicators";
+import { slotAdsDisplay } from "@/lib/schedule/ads-display";
+import type { LiveScheduleSlot, SlotAdsRequestSummary } from "@/lib/schedule/types";
+import { rupiah } from "@/lib/utils/format";
 import {
   PAGE_SIZE_10, SortableTh, TableFilterBar, TablePagination, useTableControls,
   type FacetDef, type FacetOption, type SortConfig,
@@ -18,6 +20,20 @@ export interface CompactSlotRow {
   /** Dipakai filter CM (opsional — tanpa ini filter CM tidak dirender). */
   ownerCpmId?: string | null;
   cmName?: string | null;
+  /**
+   * Request Ads slot ini (0100, `loadSlotAdsRequestSummaries`). Kosong = belum ada
+   * request; slot lama tetap menampilkan `ads_payer`/`ads_note` dengan penanda "(lama)".
+   */
+  adsRequest?: SlotAdsRequestSummary | null;
+}
+
+const rowAds = (r: CompactSlotRow) => slotAdsDisplay(r.slot, r.adsRequest);
+
+/** Teks kolom "Nominal / Catatan Ads": nominal request, atau catatan bebas slot lama. */
+function adsDetailText(r: CompactSlotRow): string | null {
+  const ads = rowAds(r);
+  if (ads.source === "request") return ads.budget != null ? rupiah(ads.budget) : null;
+  return ads.legacyNote;
 }
 
 function timeRange(slot: LiveScheduleSlot): string {
@@ -38,8 +54,8 @@ const searchRowText = (r: CompactSlotRow) =>
     r.slot.status === "off" ? "" : r.slot.brand_name?.trim() || "Organik",
     r.slot.schedule_date,
     timeRange(r.slot),
-    adsPayerLabel(r.slot.ads_payer) ?? "",
-    r.slot.ads_note ?? "",
+    rowAds(r).label ?? "",
+    adsDetailText(r) ?? "",
   ].join(" ");
 
 const rowCm = (r: CompactSlotRow) => ({ id: r.ownerCpmId ?? null, name: r.cmName ?? null });
@@ -57,10 +73,16 @@ const SORT: SortConfig<CompactSlotRow> = {
     username: { value: (r) => r.creatorUsername ?? r.creatorName },
     brand: { value: (r) => (r.slot.status === "off" ? null : r.slot.brand_name?.trim() || "Organik") },
     jam: { value: (r) => r.slot.start_time },
-    pembayar_ads: { value: (r) => (r.slot.status === "off" ? null : adsPayerLabel(r.slot.ads_payer)) },
-    // Catatan ads ditulis bebas ("Rp500rb", "invoicing MEA"); diurutkan sebagai
-    // teks, slot tanpa catatan (null) selalu jatuh ke bawah lewat sortRows.
-    catatan_ads: { value: (r) => r.slot.ads_note?.trim() || null },
+    pembayar_ads: { value: (r) => rowAds(r).label },
+    // Nominal request diurutkan sebagai angka; slot lama tanpa request memakai catatan
+    // bebasnya ("Rp500rb", "invoicing MEA") sebagai teks. Bila keduanya tercampur,
+    // compareSortValues membandingkan sebagai teks numerik; kosong selalu ke bawah.
+    catatan_ads: {
+      value: (r) => {
+        const ads = rowAds(r);
+        return ads.source === "request" ? ads.budget : ads.legacyNote;
+      },
+    },
     status: { value: (r) => r.slot.status },
   },
   // Default = urutan yang dipakai server (tanggal menaik).
@@ -84,10 +106,10 @@ function slotHour(r: CompactSlotRow): FacetOption | null {
   return { value: hh, label: `${hh}:00–${hh}:59` };
 }
 
-/** Nilai facet "Pembayar Ads" — slot OFF atau belum diisi tidak punya nilai. */
-function slotAdsPayer(r: CompactSlotRow): FacetOption | null {
-  if (r.slot.status === "off" || !r.slot.ads_payer) return null;
-  return { value: r.slot.ads_payer, label: adsPayerLabel(r.slot.ads_payer) as string };
+/** Nilai facet "Pendanaan Ads" — pendanaan request, atau pembayar lama "(lama)"; OFF/belum ada = tanpa nilai. */
+function slotAdsFunding(r: CompactSlotRow): FacetOption | null {
+  const ads = rowAds(r);
+  return ads.facetValue && ads.facetLabel ? { value: ads.facetValue, label: ads.facetLabel } : null;
 }
 
 /**
@@ -126,9 +148,8 @@ export function CompactScheduleList({
    */
   identity?: "name" | "username";
   /**
-   * Tampilkan kolom "Catatan Ads" (live_schedule_slots.ads_note — nominal /
-   * detail ads yang diisi di form slot). Dipakai CM Workspace; BizDev memakai
-   * daftar yang sama tanpa kolom ini supaya tabelnya tetap ringkas.
+   * Tampilkan kolom "Nominal / Catatan Ads": nominal Request Ads slot (0100), atau
+   * catatan bebas `ads_note` untuk slot lama tanpa request.
    */
   showAdsNote?: boolean;
 }) {
@@ -150,8 +171,8 @@ export function CompactScheduleList({
       },
       { key: "jam", label: "Jam", sortBy: "value", value: slotHour, emptyLabel: "Belum ada jam mulai pada jadwal ini." },
       {
-        key: "pembayar_ads", label: "Pembayar Ads", value: slotAdsPayer,
-        emptyLabel: "Belum ada pembayar ads pada jadwal ini.",
+        key: "pembayar_ads", label: "Pendanaan Ads", value: slotAdsFunding,
+        emptyLabel: "Belum ada request ads pada jadwal ini.",
       },
     ];
   }, [filterable, todayIso]);
@@ -179,7 +200,7 @@ export function CompactScheduleList({
         controls={controls}
         searchPlaceholder={
           showAdsNote
-            ? "Cari kreator / brand / tanggal / jam / catatan ads…"
+            ? "Cari kreator / brand / tanggal / jam / ads…"
             : "Cari kreator / brand / tanggal / jam…"
         }
         className="mt-3"
@@ -200,10 +221,10 @@ export function CompactScheduleList({
                 </SortableTh>
                 <SortableTh controls={controls} sortKey="brand" className="px-3 py-2">Brand</SortableTh>
                 <SortableTh controls={controls} sortKey="jam" className="px-3 py-2">Jam</SortableTh>
-                <SortableTh controls={controls} sortKey="pembayar_ads" className="px-3 py-2">Pembayar Ads</SortableTh>
+                <SortableTh controls={controls} sortKey="pembayar_ads" className="px-3 py-2">Request Ads</SortableTh>
                 {showAdsNote && (
                   <SortableTh controls={controls} sortKey="catatan_ads" className="px-3 py-2">
-                    Catatan Ads
+                    Nominal / Catatan Ads
                   </SortableTh>
                 )}
                 <SortableTh controls={controls} sortKey="status" className="px-3 py-2">Status</SortableTh>
@@ -212,6 +233,7 @@ export function CompactScheduleList({
             <tbody className="divide-y divide-slate-100">
               {controls.visibleRows.map((r) => {
                 const flags = slotFlags(r.slot, todayIso);
+                const ads = rowAds(r);
                 return (
                   <tr key={r.slot.id}>
                     <td className="px-3 py-2">{r.slot.schedule_date}</td>
@@ -234,17 +256,21 @@ export function CompactScheduleList({
                     <td className="px-3 py-2">{flags.isOff ? "—" : r.slot.brand_name?.trim() || "Organik"}</td>
                     <td className="px-3 py-2">{timeRange(r.slot)}</td>
                     <td className="px-3 py-2">
-                      {flags.isOff ? (
+                      {ads.source === "off" ? (
                         "—"
-                      ) : adsPayerLabel(r.slot.ads_payer) ? (
-                        adsPayerLabel(r.slot.ads_payer)
+                      ) : ads.requestId != null ? (
+                        <Link href={`/ads/${ads.requestId}`} className="text-blue-700 hover:underline">
+                          {ads.label}
+                        </Link>
+                      ) : ads.label ? (
+                        <span className="text-slate-500">{ads.label}</span>
                       ) : (
-                        <span className="text-amber-600">belum diisi</span>
+                        <span className="text-amber-600">belum ada request</span>
                       )}
                     </td>
                     {showAdsNote && (
-                      <td className="max-w-[200px] truncate px-3 py-2" title={r.slot.ads_note ?? ""}>
-                        {r.slot.ads_note?.trim() || <span className="text-slate-300">—</span>}
+                      <td className="max-w-[200px] truncate px-3 py-2" title={adsDetailText(r) ?? ""}>
+                        {adsDetailText(r) || <span className="text-slate-300">—</span>}
                       </td>
                     )}
                     <td className="px-3 py-2">

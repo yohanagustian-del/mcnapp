@@ -131,6 +131,16 @@ export function meaBudgetMessage(check: MeaBudgetCheck): string {
   return `[jatah budget MEA bulan ini tersisa Rp${Math.round(check.remaining).toLocaleString("id-ID")}, request melebihi — butuh approval Director]`;
 }
 
+/**
+ * Jatah MEA bulan itu HABIS (alert `ads_mea_budget_exhausted`, plan §7 butir 7): ada jatah
+ * (> 0) dan terpakai — termasuk request yang baru masuk — sudah mencapai/melewati jatah.
+ * Kreator tanpa jatah (0) tidak di-alert: tiap request-nya sudah lewat approval Director.
+ * `check` dihitung dengan `requested = 0` setelah request tersimpan (terpakai sudah memuatnya).
+ */
+export function meaBudgetExhausted(check: Pick<MeaBudgetCheck, "budget" | "used">): boolean {
+  return check.budget > 0 && check.used >= check.budget;
+}
+
 /** Bulan jatah (YYYY-MM-01) dari tanggal live/project. */
 export function budgetMonthOf(dateIso: string): string {
   return `${dateIso.slice(0, 7)}-01`;

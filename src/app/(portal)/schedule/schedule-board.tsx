@@ -2,14 +2,13 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { adsPayerLabel, creatorDayEmpty, slotFlags } from "@/lib/schedule/indicators";
+import { creatorDayEmpty, slotFlags } from "@/lib/schedule/indicators";
 import { slotLiveBadgeLabel, slotUploadEligibility, type SlotLiveSummary } from "@/lib/schedule/live-report";
 import { formatDayLabel } from "@/lib/schedule/week";
 import type { LiveScheduleSlot } from "@/lib/schedule/types";
 import { SlotForm, type ShopDealOption, type RosterCreatorOption } from "./slot-form";
 import type { SlotAdsRequestSummary } from "@/lib/schedule/types";
-import { fundingBadgeLabel } from "@/lib/m10/funding-spec";
-import { REQUEST_STATUS_LABELS } from "@/lib/m10/request";
+import { slotAdsDisplay } from "@/lib/schedule/ads-display";
 import { useCreatorFilter } from "@/components/creator-filter";
 
 const btnSmall = "rounded-md px-2 py-1 text-xs font-medium";
@@ -67,14 +66,10 @@ function SlotBlock({
     !flags.isOff && slot.start_time && slot.end_time
       ? `${slot.start_time.slice(0, 5)}–${slot.end_time.slice(0, 5)}`
       : null;
-  // Supaya "siapa yang bayar ads slot ini" langsung kebaca dari board, tanpa
-  // klik buka form (keluhan user) — brand/MEA/invoicing MEA/organik.
-  const adsPayer = flags.isOff ? null : adsPayerLabel(slot.ads_payer);
-  // Request Ads (0100) menang atas ads_payer lama: "Ads: Budget MEA · Menunggu ACC".
-  const adsRequestLabel =
-    !flags.isOff && adsRequest
-      ? `${fundingBadgeLabel(adsRequest.fundingType, adsRequest.paymentMethod) ?? "Request"} · ${REQUEST_STATUS_LABELS[adsRequest.status] ?? adsRequest.status}`
-      : null;
+  // Supaya "siapa yang bayar ads slot ini" langsung kebaca dari board, tanpa klik buka
+  // form (keluhan user). Request Ads (0100) menang atas ads_payer lama — logika label
+  // dipakai bersama daftar ringkas Workspace (lib/schedule/ads-display.ts).
+  const ads = slotAdsDisplay(slot, adsRequest);
 
   const border = flags.needsVerification
     ? "border-red-400 ring-1 ring-red-300"
@@ -94,8 +89,8 @@ function SlotBlock({
       )}
       {time && <div className="text-slate-500">{time}</div>}
       {!flags.isOff && (
-        <div className={adsRequestLabel || adsPayer ? "text-slate-500" : "text-amber-600"}>
-          Ads: {adsRequestLabel ?? adsPayer ?? "belum ada request"}
+        <div className={ads.label ? "text-slate-500" : "text-amber-600"}>
+          Ads: {ads.label ?? "belum ada request"}
         </div>
       )}
       <div className="mt-0.5 flex flex-wrap gap-1">

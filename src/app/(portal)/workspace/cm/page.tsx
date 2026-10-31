@@ -22,6 +22,7 @@ import {
   transitionContract,
 } from "./actions";
 import { CompactScheduleList, type CompactSlotRow } from "../../schedule/compact-list";
+import { loadSlotAdsRequestSummaries } from "@/lib/m10/request-data";
 import type { LiveScheduleSlot } from "@/lib/schedule/types";
 import { ComplaintReplyForm, ComplaintStatusForm } from "./complaint-forms";
 import { rupiah } from "@/lib/utils/format";
@@ -278,10 +279,16 @@ export default async function CmWorkspacePage({
         .in("schedule_date", [todayIso, tomorrowIso])
         .order("schedule_date", { ascending: true })
     : { data: [] as LiveScheduleSlot[] };
+  // Kolom ads dibaca dari Request Ads (0100), pemuat yang sama dengan kalender /schedule.
+  const scheduleAdsBySlot = new Map(
+    (await loadSlotAdsRequestSummaries(((todayTomorrowSlots ?? []) as LiveScheduleSlot[]).map((s) => s.id)))
+      .map((r) => [r.slotId, r])
+  );
   const scheduleRows: CompactSlotRow[] = ((todayTomorrowSlots ?? []) as LiveScheduleSlot[]).map((s) => {
     const rc = rosterById.get(s.creator_id);
     return {
       slot: s,
+      adsRequest: scheduleAdsBySlot.get(s.id) ?? null,
       creatorName: rc?.name ?? s.creator_id,
       creatorUsername: rc?.username ?? null,
       ownerCpmId: rc?.owner_cpm_id ?? null,
