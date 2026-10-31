@@ -9,7 +9,7 @@ import { fetchAll, fetchAllIn } from "@/lib/supabase/fetch-all";
 import { genId } from "@/lib/utils/id";
 import { writeWithDealStatusFallback } from "@/lib/deals/deal-status";
 import { parseRupiah } from "@/lib/utils/rupiah";
-import { adsNeedsDirectorApproval, isPerfDrop, latestTwoPeriods, type PeriodSummaryPoint } from "@/lib/m8/routing";
+import { isPerfDrop, latestTwoPeriods, type PeriodSummaryPoint } from "@/lib/m8/routing";
 import { assertComplaintMutationAllowed, type ComplaintCore, type ComplaintStatus, type Severity } from "@/lib/m9/portal";
 
 /** CPM hanya untuk creator yang di-handle sendiri; CM Lead/management lintas (§2F). */
@@ -195,9 +195,10 @@ export async function refreshGrowthAlerts(formData: FormData): Promise<void> {
 }
 
 /**
- * Req creator sample/ads/HSL (§2A.4): sample tak terbatas; HSL per sesi (acc di
- * brand); ads dicek terhadap creators.ads_budget_cap — lewat cap / tak
- * terverifikasi → approval Director (LOCKED §6.4, CLAUDE.md #2).
+ * Req creator sample/HSL (§2A.4): sample tak terbatas; HSL per sesi (acc di brand).
+ * Req ADS tidak lagi lewat sini (D-2026-10-31-7): pendanaan, jatah MEA per bulan, ACC
+ * Finance/Head CM, dan executor Creator Support hidup di Request Ads (/ads) di atas
+ * ads_briefs — satu jalur, bukan dua (CLAUDE.md #4). creators.ads_budget_cap tidak dibaca lagi.
  */
 export async function createCreatorRequest(formData: FormData): Promise<void> {
   const actor = await requirePermission("m8.creator_request");
@@ -206,18 +207,20 @@ export async function createCreatorRequest(formData: FormData): Promise<void> {
   const targetBrand = String(formData.get("target_brand") ?? "").trim() || null;
   const notes = String(formData.get("notes") ?? "").trim() || null;
   const amount = parseRupiah(String(formData.get("amount") ?? ""));
-  if (!creatorId || !["sample", "ads", "hsl"].includes(type)) {
+  if (type === "ads") {
+    throw new Error("[request ads diajukan lewat Request Ads (/ads) dari slot Jadwal Live atau Special Project]");
+  }
+  if (!creatorId || !["sample", "hsl"].includes(type)) {
     throw new Error("Creator & jenis req wajib diisi");
   }
 
   const admin = createAdminClient();
   const { data: creator } = await admin
-    .from("creators").select("id, owner_cpm_id, ads_budget_cap").eq("id", creatorId).maybeSingle();
+    .from("creators").select("id, owner_cpm_id").eq("id", creatorId).maybeSingle();
   if (!creator) throw new Error(`Creator ${creatorId} tidak ditemukan`);
   assertCreatorScope(actor, creator.owner_cpm_id);
 
-  const needsApproval = type === "ads" &&
-    adsNeedsDirectorApproval(amount, creator.ads_budget_cap === null ? null : Number(creator.ads_budget_cap));
+  const needsApproval = false;
 
   const { data: req, error } = await admin
     .from("creator_requests")

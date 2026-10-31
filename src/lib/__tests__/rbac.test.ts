@@ -1,5 +1,8 @@
 import { describe, it, expect } from "vitest";
-import { ROLES, PERMISSIONS, hasPermission, MANAGEMENT_ROLES, ADS_ROLES, NAV_ITEMS, canAccessNav, type Role } from "@/lib/rbac";
+import {
+  ROLES, PERMISSIONS, hasPermission, MANAGEMENT_ROLES, ADS_ROLES, ADS_EXECUTOR_ROLES, ADS_REQUESTER_ROLES,
+  NAV_ITEMS, canAccessNav, type Role,
+} from "@/lib/rbac";
 import { isCreatorInScope } from "@/lib/schedule/scope";
 import { portalInviteGate } from "@/lib/portal/invite-gate";
 
@@ -26,12 +29,16 @@ describe("Phase 5.0 — RBAC foundation", () => {
     }
   });
 
-  // M10 §2.6 — ads_support executes/inputs but cannot create briefs or approve budget.
-  it("ads_support can execute + input results but not create briefs nor approve budget", () => {
-    expect(hasPermission("m10.brief_execute", "ads_support")).toBe(true);
-    expect(hasPermission("m10.result_input", "ads_support")).toBe(true);
-    expect(hasPermission("m10.brief_create", "ads_support")).toBe(false);
-    expect(hasPermission("m10.budget_approve", "ads_support")).toBe(false);
+  // D-2026-10-31-2 — ads_support dipensiunkan: satu divisi dengan Creator Support, 0 akun.
+  it("ads_support tidak punya izin M10/Finance lagi; Creator Support = executor", () => {
+    for (const perm of ["m10.brief_create", "m10.brief_execute", "m10.result_input", "m10.budget_approve",
+      "m10.mea_budget_set", "finance.ads_review", "finance.invoice_manage", "finance.view"] as const) {
+      expect(hasPermission(perm, "ads_support"), perm).toBe(false);
+    }
+    expect(hasPermission("m10.brief_execute", "creator_support")).toBe(true);
+    expect(hasPermission("m10.result_input", "creator_support")).toBe(true);
+    expect(hasPermission("m10.brief_create", "creator_support")).toBe(false);
+    expect(hasPermission("m10.budget_approve", "creator_support")).toBe(false);
   });
 
   it("only Director approves ads budget over cap", () => {
@@ -39,8 +46,9 @@ describe("Phase 5.0 — RBAC foundation", () => {
     expect(approvers).toEqual(["director"]);
   });
 
-  it("ADS_ROLES scopes Campaign Ops execution to campaign_ops + ads_support", () => {
-    expect(ADS_ROLES).toEqual(["campaign_ops", "ads_support"]);
+  it("ADS_EXECUTOR_ROLES = creator_support + campaign_ops (ADS_ROLES alias)", () => {
+    expect(ADS_EXECUTOR_ROLES).toEqual(["creator_support", "campaign_ops"]);
+    expect(ADS_ROLES).toBe(ADS_EXECUTOR_ROLES);
   });
 
   // Produk TAP: the catalog itself is open to every role that can reach /products
@@ -217,5 +225,50 @@ describe("campaign_ops — support administratif, bukan pitching/closing", () =>
     for (const perm of ["deals.import_preview", "deals.niche_manage"] as const) {
       expect(PERMISSIONS[perm]).toEqual([...MANAGEMENT_ROLES, "bizdev_lead"]);
     }
+  });
+});
+
+// D-2026-10-31 — Request Ads & Finance.
+describe("Request Ads & Finance (D-2026-10-31-1…6)", () => {
+  const nav = (href: string) => NAV_ITEMS.find((n) => n.href === href)!;
+
+  it("pembuat request = CM, BizDev, Campaign Ops (+ management); bukan executor/finance", () => {
+    expect(ADS_REQUESTER_ROLES).toEqual(["cm_lead", "cpm", "bizdev_lead", "bizdev", "campaign_ops"]);
+    for (const role of [...ADS_REQUESTER_ROLES, ...MANAGEMENT_ROLES]) {
+      expect(hasPermission("m10.brief_create", role), role).toBe(true);
+    }
+    for (const role of ["creator_support", "finance", "bd_admin", "acquisition_spec", "campaign_external"] as Role[]) {
+      expect(hasPermission("m10.brief_create", role), role).toBe(false);
+    }
+  });
+
+  it("jatah budget MEA ditetapkan Head/Director saja", () => {
+    expect(PERMISSIONS["m10.mea_budget_set"]).toEqual(["director", "head"]);
+    expect(hasPermission("m10.mea_budget_set", "cm_lead")).toBe(false);
+  });
+
+  it("ACC request: Finance, Head, CM Lead, Director; invoice & pembayaran: Finance + Director", () => {
+    expect(PERMISSIONS["finance.ads_review"]).toEqual(["director", "head", "cm_lead", "finance"]);
+    expect(PERMISSIONS["finance.invoice_manage"]).toEqual(["director", "finance"]);
+    expect(hasPermission("finance.invoice_manage", "cm_lead")).toBe(false);
+    expect(hasPermission("finance.ads_review", "spv")).toBe(false);
+  });
+
+  it("nav: /ads untuk pembuat + executor + finance + management; /finance di grup Finance", () => {
+    const ads = nav("/ads");
+    expect(ads.group).toBe("Project & Campaign");
+    for (const role of [...ADS_REQUESTER_ROLES, ...ADS_EXECUTOR_ROLES, "finance", ...MANAGEMENT_ROLES] as Role[]) {
+      expect(canAccessNav(ads, role), role).toBe(true);
+    }
+    expect(canAccessNav(ads, "ads_support")).toBe(false);
+    expect(canAccessNav(ads, "od_viewer")).toBe(false);
+
+    const fin = nav("/finance");
+    expect(fin.group).toBe("Finance");
+    for (const role of ["finance", "cm_lead", "od_viewer", ...MANAGEMENT_ROLES] as Role[]) {
+      expect(canAccessNav(fin, role), role).toBe(true);
+    }
+    expect(canAccessNav(fin, "bizdev")).toBe(false);
+    expect(NAV_ITEMS.find((n) => n.href === "/workspace/ads")).toBeUndefined();
   });
 });

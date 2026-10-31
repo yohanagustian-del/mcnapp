@@ -37,7 +37,8 @@ export const NAV_ICON_PATHS: Record<string, string> = {
     "M8 7a3 3 0 100-6 3 3 0 000 6zM8 23a3 3 0 100-6 3 3 0 000 6zM19 15a3 3 0 100-6 3 3 0 000 6zM11 5.5h3a2 2 0 012 2V9M11 18.5h3a2 2 0 002-2V15",
   "/products": "M20 7l-8-4-8 4v10l8 4 8-4zM4 7l8 4 8-4M12 11v10",
   "/projects": "M3 6h7l2 2h9v11H3zM3 10h18",
-  "/workspace/ads": "M3 10v4h4l5 4V6L7 10zM16 8a5 5 0 010 8",
+  "/ads": "M3 10v4h4l5 4V6L7 10zM16 8a5 5 0 010 8",
+  "/finance": "M3 7h18v12H3zM3 11h18M7 15h4",
   "/workspace/external":
     "M12 3a9 9 0 100 18 9 9 0 000-18zM3 12h18M12 3c2.5 3 2.5 15 0 18M12 3c-2.5 3-2.5 15 0 18",
   "/workspace/acquisition": "M11 18a7 7 0 100-14 7 7 0 000 14zM20 20l-4-4M11 8v6M8 11h6",

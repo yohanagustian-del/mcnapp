@@ -219,6 +219,44 @@ Platform internal MCN MEA (agency creator TikTok/Shopee). Menggabungkan tools te
   Flow C) — jangan pernah menaruhnya di balik gate sesi Supabase (`middleware.ts` mengizinkan
   `/api/bridge` lewat).
 
+### 10. Request Ads & Finance (sejak 2026-10-31, migrasi 0100, keputusan D-2026-10-31-1…7)
+- **Satu jalur request ads = `ads_briefs`** (0012 diperluas 0100), pemilik = `schedule_slot_id` (slot
+  Jadwal Live) ATAU `project_id` (Special Project) — tepat satu (`ck_ads_brief_owner`). Jalur lama
+  `creator_requests` type `ads` (CM Workspace) DITUTUP di server; `/workspace/ads` → redirect `/ads`;
+  `creators.ads_budget_cap` tidak dibaca lagi. Jangan bikin tabel/alur request ads kedua.
+- **Pendanaan** (`funding_type`): `mea_budget` | `creator_budget` | `brand_budget` | `tiktok_ads_credit`;
+  `creator_budget` & `brand_budget` wajib `payment_method` `cash_upfront` | `invoice`. Spec, label, dan
+  aturan = `lib/m10/funding-spec.ts` (client-safe) — SATU sumber.
+- **Mesin status** = `lib/m10/request.ts` (`transition()`, tabel `TRANSITIONS`, pesan `[...]`):
+  `menunggu_finance → siap_dieksekusi → dikerjakan → selesai`; `mea_budget` lewat jatah →
+  `menunggu_approval_director` dulu (Director, `m10.budget_approve`). Status HANYA diubah lewat
+  `applyTransition` di `app/(portal)/ads/actions.ts` (status asal dicek ulang, audit_logs tiap langkah).
+- **Jatah Budget MEA per kreator per bulan** = `creator_ads_monthly_budgets` (Head/Director,
+  `m10.mea_budget_set`, halaman `/ads/jatah`); tanpa baris = 0; sisa hangus; terpakai = view
+  `creator_mea_budget_usage_v` (SQL) — jangan hitung di JS selain lewat `loadMeaBudgetContext`.
+- **Gate ACC** (`canAccRequest`): cash di awal → HANYA Finance (+Director), dan `cash_received_at` wajib
+  terisi dulu (`financeGate`); invoice / Budget MEA / TikTok credit → Head CM (`head`, `cm_lead`) atau
+  Finance. Izin kasar `finance.ads_review`; aturan per pendanaan ditegakkan di `accRequestAction`.
+- **Invoice** = `ads_invoices` (`INV-YYYYMM-NNNN`, satu aktif per request, batal = status, nomor tak
+  dipakai ulang) + `ads_invoice_events` (append-only, trigger tolak update/delete). Terbit OTOMATIS saat
+  ACC request berpendanaan invoice (`issueInvoiceForRequest`, satu-satunya penerbit). PPN =
+  `app_config m10.invoice_ppn_rate`; jatuh tempo = terbit + `m10.invoice_due_days`; flag jatuh tempo
+  DIHITUNG (`invoiceReminderState`), tidak disimpan. PDF = `lib/m10/invoice-pdf.ts` (pdf-lib; layout
+  placeholder sampai template Yohan masuk) lewat `/finance/invoice/[id]/pdf`. Pembayaran hanya lunas
+  bila penuh (`validatePayment`). Tidak sinkron ke CDPS.
+- **Biaya MEA di Special Project** = hanya `mea_budget` (+ brief lama tanpa pendanaan):
+  `project_ads_spend_v` sudah menyaring itu, jadi `recompute_project_daily()` tidak berubah; rincian
+  semua pendanaan = `project_ads_spend_by_funding_v` (informasi, bukan biaya).
+- **Executor** = `creator_support` (+ `campaign_ops`, management) — `ADS_EXECUTOR_ROLES`; pembuat =
+  `ADS_REQUESTER_ROLES` (CM/BizDev/Campaign Ops; CPM hanya kreator miliknya). `ads_support` dicabut
+  dari semua izin (0 akun), nilai enum DB dibiarkan.
+- **Pengingat** = badge sidebar (`lib/m10/badges.ts`, dihitung saat render) + job pg_cron harian
+  `run_m10_invoice_reminders()` → `platform_alerts` (`ads_invoice_due`/`ads_invoice_overdue`) +
+  event `diingatkan`, idempoten per invoice selama alert belum resolved. In-app saja.
+- Slot Jadwal Live tidak lagi menanyakan `ads_payer`/`ads_note` (nilai lama dibawa hidden & tampil);
+  board membaca request lewat `SlotAdsRequestSummary`. Tabel/view baru wajib deny `is_creator_user()`
+  (dijaga `missing-migration.test.ts` blok 0100).
+
 ## Konvensi kode
 - DB: snake_case. Kode: camelCase. Komponen: PascalCase.
 - ID entity: `CRT-`, `DEAL-`, `LNK-` (text PK, generate util terpusat).

@@ -7,6 +7,9 @@ import { slotLiveBadgeLabel, slotUploadEligibility, type SlotLiveSummary } from 
 import { formatDayLabel } from "@/lib/schedule/week";
 import type { LiveScheduleSlot } from "@/lib/schedule/types";
 import { SlotForm, type ShopDealOption, type RosterCreatorOption } from "./slot-form";
+import type { SlotAdsRequestSummary } from "@/lib/schedule/types";
+import { fundingBadgeLabel } from "@/lib/m10/funding-spec";
+import { REQUEST_STATUS_LABELS } from "@/lib/m10/request";
 import { useCreatorFilter } from "@/components/creator-filter";
 
 const btnSmall = "rounded-md px-2 py-1 text-xs font-medium";
@@ -46,12 +49,14 @@ export interface BoardWeekMatrix {
 }
 
 function SlotBlock({
-  slot, todayIso, liveSummary,
+  slot, todayIso, liveSummary, adsRequest,
 }: {
   slot: LiveScheduleSlot;
   todayIso: string;
   /** Ringkasan data & report live slot ini (migrasi 0066); undefined = belum ada apa-apa. */
   liveSummary: SlotLiveSummary | undefined;
+  /** Request Ads slot ini (0100); undefined = belum ada request. */
+  adsRequest: SlotAdsRequestSummary | undefined;
 }) {
   const liveBadge = slotLiveBadgeLabel(liveSummary);
   const flags = slotFlags(slot, todayIso);
@@ -65,6 +70,11 @@ function SlotBlock({
   // Supaya "siapa yang bayar ads slot ini" langsung kebaca dari board, tanpa
   // klik buka form (keluhan user) — brand/MEA/invoicing MEA/organik.
   const adsPayer = flags.isOff ? null : adsPayerLabel(slot.ads_payer);
+  // Request Ads (0100) menang atas ads_payer lama: "Ads: Budget MEA · Menunggu ACC".
+  const adsRequestLabel =
+    !flags.isOff && adsRequest
+      ? `${fundingBadgeLabel(adsRequest.fundingType, adsRequest.paymentMethod) ?? "Request"} · ${REQUEST_STATUS_LABELS[adsRequest.status] ?? adsRequest.status}`
+      : null;
 
   const border = flags.needsVerification
     ? "border-red-400 ring-1 ring-red-300"
@@ -84,8 +94,8 @@ function SlotBlock({
       )}
       {time && <div className="text-slate-500">{time}</div>}
       {!flags.isOff && (
-        <div className={adsPayer ? "text-slate-500" : "text-amber-600"}>
-          Ads: {adsPayer ?? "belum diisi"}
+        <div className={adsRequestLabel || adsPayer ? "text-slate-500" : "text-amber-600"}>
+          Ads: {adsRequestLabel ?? adsPayer ?? "belum ada request"}
         </div>
       )}
       <div className="mt-0.5 flex flex-wrap gap-1">
@@ -126,6 +136,7 @@ export function ScheduleBoard({
   todayIso,
   canEdit,
   liveSummaries = [],
+  adsRequests = [],
 }: {
   matrix: BoardWeekMatrix;
   creators: RosterCreatorOption[];
@@ -134,6 +145,8 @@ export function ScheduleBoard({
   canEdit: boolean;
   /** Data & report live per slot minggu ini (migrasi 0066) — array, bukan Map, supaya bisa dikirim server → klien. */
   liveSummaries?: SlotLiveSummary[];
+  /** Request Ads per slot minggu ini (0100) — array, bukan Map, supaya bisa dikirim server → klien. */
+  adsRequests?: SlotAdsRequestSummary[];
 }) {
   const [selected, setSelected] = useState<Selected | null>(null);
   const [page, setPage] = useState(1);
@@ -141,6 +154,10 @@ export function ScheduleBoard({
   const liveBySlot = useMemo(
     () => new Map(liveSummaries.map((s) => [s.slotId, s])),
     [liveSummaries]
+  );
+  const adsBySlot = useMemo(
+    () => new Map(adsRequests.map((r) => [r.slotId, r])),
+    [adsRequests]
   );
 
   const filteredRows = useMemo(
@@ -201,6 +218,7 @@ export function ScheduleBoard({
           date={selected.date}
           creators={creators}
           initialShops={initialShops}
+          adsRequest={selected.slot ? adsBySlot.get(selected.slot.id) ?? null : null}
           onDone={close}
           onCancel={close}
         />
@@ -251,7 +269,7 @@ export function ScheduleBoard({
                                 className="block w-full text-left"
                                 onClick={() => canEdit && setSelected({ slot, creatorId: row.creator.id, date: d })}
                               >
-                                <SlotBlock slot={slot} todayIso={todayIso} liveSummary={liveBySlot.get(slot.id)} />
+                                <SlotBlock slot={slot} todayIso={todayIso} liveSummary={liveBySlot.get(slot.id)} adsRequest={adsBySlot.get(slot.id)} />
                               </button>
                               {canOpenLive && (
                                 <Link

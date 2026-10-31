@@ -24,8 +24,13 @@ export const MANAGEMENT_ROLES: Role[] = ["director", "head", "spv"];
 export const BIZDEV_ROLES: Role[] = ["bizdev_lead", "bizdev", "campaign_ops", "bd_admin"];
 export const ACQUISITION_ROLES: Role[] = ["acquisition_lead", "acquisition_spec"];
 export const CM_ROLES: Role[] = ["cm_lead", "cpm"];
-// M10 §2.1: Campaign Ops division = campaign_ops (lead/assign) + ads_support (execute/input).
-export const ADS_ROLES: Role[] = ["campaign_ops", "ads_support"];
+// Executor Request Ads (D-2026-10-31-2): Creator Support = satu divisi dengan "ads
+// support" lama; `ads_support` dicabut dari semua izin (0 akun di produksi). campaign_ops
+// tetap boleh mengeksekusi (D-2026-10-20-6). Nama ADS_ROLES dipertahankan untuk pemakai lama.
+export const ADS_EXECUTOR_ROLES: Role[] = ["creator_support", "campaign_ops"];
+export const ADS_ROLES: Role[] = ADS_EXECUTOR_ROLES;
+// Pembuat Request Ads (D-2026-10-31-1): CM (cpm = kreator miliknya), BizDev, Campaign Ops.
+export const ADS_REQUESTER_ROLES: Role[] = ["cm_lead", "cpm", "bizdev_lead", "bizdev", "campaign_ops"];
 
 /**
  * M9 external principal. `creator_user` is NOT a team_members role — it is a separate
@@ -58,6 +63,7 @@ export const NAV_GROUPS = [
   "Project & Campaign",
   "Akuisisi",
   "Data Platform",
+  "Finance",
   "Management & Admin",
 ] as const;
 export type NavGroup = (typeof NAV_GROUPS)[number];
@@ -113,8 +119,9 @@ export const NAV_ITEMS: NavItem[] = [
   // ⊇ m7.curate memberi hak ke role yang dulu menunya tidak tampil (audit 2026-10).
   // od_viewer dikecualikan — menunya sendiri (/od). Dijaga test di rbac.test.ts.
   { href: "/projects", label: "Special Project (M7)", roles: ROLES.filter((role) => role !== "od_viewer"), group: "Project & Campaign" },
-  // M10: Campaign & Ads Support portal — Management + Campaign Ops (lead) + ads_support (execute).
-  { href: "/workspace/ads", label: "Ads Support (M10)", roles: [...MANAGEMENT_ROLES, ...ADS_ROLES], group: "Project & Campaign" },
+  // Request Ads (D-2026-10-31): pembuat (CM/BizDev/Campaign Ops) + executor (Creator Support)
+  // + yang meng-ACC (Head CM/Finance) + management. /workspace/ads lama dialihkan ke sini.
+  { href: "/ads", label: "Request Ads", roles: [...MANAGEMENT_ROLES, ...ADS_REQUESTER_ROLES, ...ADS_EXECUTOR_ROLES, "finance"], group: "Project & Campaign" },
   // M8 §2F: metrik approach external — External ✔, BizDev view, Management ✔.
   // Acquisition Lead ditambahkan agar bisa memantau pipeline scouting untuk kandidat binding (§2D.2).
   { href: "/workspace/external", label: "External Workspace", roles: [...MANAGEMENT_ROLES, "bizdev_lead", "bizdev", "campaign_external", "acquisition_lead"], group: "Project & Campaign" },
@@ -127,6 +134,9 @@ export const NAV_ITEMS: NavItem[] = [
   // Module 0.5: shared ingest (MCN + TAP) — process-on-ingest, drop-raw (matrix §2.8).
   { href: "/ingest", label: "Upload Data Platform Mingguan", roles: [...MANAGEMENT_ROLES, ...CM_ROLES, "campaign_ops", "campaign_external"], group: "Data Platform" },
   { href: "/link-leakage", label: "Link Leakage", roles: [...MANAGEMENT_ROLES, ...CM_ROLES, ...BIZDEV_ROLES, "campaign_external"], group: "Data Platform" },
+
+  // Finance (D-2026-10-31-3/6): antrean ACC request ads, invoice, pembayaran, piutang.
+  { href: "/finance", label: "Finance Ads & Penagihan", roles: [...MANAGEMENT_ROLES, "finance", "cm_lead", "od_viewer"], group: "Finance" },
 
   { href: "/tim", label: "Tim", roles: MANAGEMENT_ROLES, group: "Management & Admin" },
   { href: "/okr/director", label: "Config OKR (Director)", roles: ["director"] as Role[], group: "Management & Admin" },
@@ -324,15 +334,27 @@ export const PERMISSIONS: Record<string, Role[]> = {
   "m9.complaint_manage": [...MANAGEMENT_ROLES, ...CM_ROLES],
   // Decide project join requests: management + relevant leads + PM (campaign_ops).
   "m9.project_join_decide": [...MANAGEMENT_ROLES, "cm_lead", "bizdev_lead", "acquisition_lead", "campaign_ops"],
-  // ===== M10 Ads Support Portal (§2.6) =====
-  // Buat brief ads: Director/Head/SPV + CM (creator-nya) + BizDev (deal). NOT ads_support.
-  "m10.brief_create": [...MANAGEMENT_ROLES, ...CM_ROLES, "bizdev_lead", "bizdev"],
-  // Klaim/assign & kerjakan brief: management + campaign_ops + ads_support.
-  "m10.brief_execute": [...MANAGEMENT_ROLES, ...ADS_ROLES],
-  // Input ads spend & metrik hasil (single-source ads_spend): management + campaign_ops + ads_support.
-  "m10.result_input": [...MANAGEMENT_ROLES, ...ADS_ROLES],
-  // Approve brief budget over ads_budget_cap: Director only (reuse M8 §2A.4/§6.4).
+  // ===== M10 Request Ads (D-2026-10-31-1…6; dulu "Ads Support Portal" §2.6) =====
+  // Buat request ads: CM (cpm hanya kreator miliknya — assertCreatorInScope), BizDev, Campaign Ops,
+  // management. BUKAN executor, BUKAN finance.
+  "m10.brief_create": [...MANAGEMENT_ROLES, ...ADS_REQUESTER_ROLES],
+  // Klaim & kerjakan request yang sudah di-ACC: Creator Support (+ campaign_ops, management).
+  "m10.brief_execute": [...MANAGEMENT_ROLES, ...ADS_EXECUTOR_ROLES],
+  // Input ads spend & metrik hasil (single-source ads_spend): sama dengan executor.
+  "m10.result_input": [...MANAGEMENT_ROLES, ...ADS_EXECUTOR_ROLES],
+  // Request mea_budget melewati jatah bulan → approval Director (CLAUDE.md #2).
   "m10.budget_approve": ["director"] as Role[],
+  // Tetapkan jatah budget MEA per kreator per bulan: Head (D-2026-10-31-4) + Director.
+  "m10.mea_budget_set": ["director", "head"] as Role[],
+  // ACC / tolak request (gerbang kasar; aturan per tipe pendanaan — cash = Finance saja,
+  // invoice/MEA/credit = Head CM atau Finance — ditegakkan di lib/m10/request.ts canAccRequest).
+  "finance.ads_review": ["director", "head", "cm_lead", "finance"] as Role[],
+  // Terbit/batal invoice, catat uang masuk & pembayaran: Finance (+ Director override, ter-log).
+  "finance.invoice_manage": ["director", "finance"] as Role[],
+  // Baca halaman Finance (antrean, invoice, piutang): Finance, management, Head CM.
+  // od_viewer membacanya lewat nav /finance (read-only), bukan lewat daftar izin ini —
+  // matriks izin od_viewer harus tetap kosong (rbac.test.ts).
+  "finance.view": [...MANAGEMENT_ROLES, "finance", "cm_lead"],
   // ===== M11 Governance (§2B/§2C) =====
   // Multi-Director account management (invite/suspend director & roles): Director.
   "m11.manage_accounts": ["director"] as Role[],
