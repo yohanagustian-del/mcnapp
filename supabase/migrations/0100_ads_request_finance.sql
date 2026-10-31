@@ -228,14 +228,24 @@ declare
   wanted text[] := array['ads_invoice_due','ads_invoice_overdue','ads_mea_budget_exhausted'];
   missing text[];
 begin
+  -- Dua bentuk yang pernah ada (HANDOFF 2026-10-01 butir 5):
+  --   lama : check (alert_type in ('a'::text, 'b'::text, …))
+  --   0083+: check (alert_type = any ('{a,b,…}'::text[]))  ← staging & produksi sekarang
   select array_agg(distinct m[1]) into allowed
   from pg_constraint c,
        regexp_matches(pg_get_constraintdef(c.oid), '''([a-z0-9_]+)''::text', 'g') m
   where c.conname = 'platform_alerts_alert_type_check'
     and c.conrelid = 'public.platform_alerts'::regclass;
+  if allowed is null then
+    select string_to_array(m[1], ',') into allowed
+    from pg_constraint c,
+         regexp_matches(pg_get_constraintdef(c.oid), '''\{([a-z0-9_,]+)\}''::text\[\]') m
+    where c.conname = 'platform_alerts_alert_type_check'
+      and c.conrelid = 'public.platform_alerts'::regclass;
+  end if;
 
   if allowed is null then
-    return;
+    raise exception 'platform_alerts_alert_type_check: bentuk constraint tidak dikenali — tambah tipe ads_invoice_* manual';
   end if;
 
   select array_agg(w) into missing from unnest(wanted) w where not (w = any(allowed));
