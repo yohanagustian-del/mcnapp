@@ -9,7 +9,7 @@ import {
 } from "@/lib/platform-csv";
 import type { PriceBounds } from "@/lib/projection/gmv";
 import { validateW1W5Period } from "@/lib/utils/date";
-import { derivePeriod, mergeExtraMcn, parseMcnFile, parseTapFile, type ParseResult, type SkippedRow } from "./parse";
+import { assertTapHeaders, derivePeriod, mergeExtraMcn, parseMcnFile, parseTapFile, type ParseResult, type SkippedRow } from "./parse";
 import { buildCreatorShopPeriod, buildPeriodSummary, buildSubcatSegment, buildTopProducts } from "./aggregate";
 import { writeCreatorShopPeriod } from "./shop-period-write";
 import { fillMissingCategories } from "./category-fill";
@@ -197,6 +197,10 @@ export async function runIngest(input: RunIngestInput): Promise<RunIngestResult>
     ? await parseTapFile(tapFile)
     : { rows: [] as TapRow[], skipped: [] as SkippedRow[], rawHeadersFound: [] as string[] };
   const skipped: SkippedRow[] = [...mcnParsed.skipped, ...tapParsed.skipped];
+  if (tapFile) {
+    // Ketentuan header TAP (TAP_HEADER_SPEC): kolom wajib hilang → tolak, jangan diam-diam GMV 0.
+    for (const reason of assertTapHeaders(tapParsed)) skipped.push({ row: -1, reason });
+  }
   lap(`parse (${mcnParsed.rows.length} MCN, ${tapParsed.rows.length} TAP)`);
 
   const period = derivePeriod(mcnParsed.rows);

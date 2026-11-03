@@ -4,7 +4,7 @@ import { parseRupiah } from "@/lib/utils/rupiah";
 import { parsePeriodRange } from "@/lib/utils/date";
 import { parseCount } from "@/lib/platform-csv";
 import {
-  MCN_COLUMNS, MCN_HEADER_ALIASES, TAP_COLUMNS, TAP_HEADER_ALIASES, parsePercent,
+  MCN_COLUMNS, MCN_HEADER_ALIASES, TAP_COLUMNS, TAP_HEADER_ALIASES, TAP_HEADER_SPEC, missingTapHeaders, parsePercent,
   type McnRow, type TapRow,
 } from "./schema";
 
@@ -215,4 +215,27 @@ export function mergeExtraMcn(main: ParseResult<McnRow>, extra: ParseResult<McnR
   }
   for (const r of extra.rows) main.rows.push(r);
   for (const s of extra.skipped) main.skipped.push({ ...s, reason: `File MCN tambahan: ${s.reason}` });
+}
+
+/**
+ * Ketentuan header file TAP (TAP_HEADER_SPEC) — SATU pemeriksa untuk /ingest dan /link-leakage.
+ * Throw bila file kosong atau kolom wajib (Product ID, Shop ID, Creator-attributed GMV) tidak ada,
+ * supaya GMV TAP tidak terbaca 0 diam-diam. Mengembalikan catatan untuk kolom opsional yang hilang.
+ */
+export function assertTapHeaders(tapParsed: Pick<ParseResult<TapRow>, "rawHeadersFound">): string[] {
+  const headers = tapParsed.rawHeadersFound;
+  if (headers.length === 0) {
+    throw new Error("File TAP kosong atau tidak terbaca — pastikan file export TAP asli (bukan file kosong/rusak).");
+  }
+  const missing = missingTapHeaders(headers);
+  if (missing.required.length > 0) {
+    throw new Error(
+      `File TAP tidak memenuhi ketentuan header — kolom wajib tidak ditemukan: ${missing.required.join(", ")}. ` +
+        `Header yang ditemukan di file: ${headers.slice(0, 8).join(", ")}. ` +
+        `Gunakan export TAP dengan header: ${TAP_HEADER_SPEC.map((h) => h.label).join(", ")}.`
+    );
+  }
+  return missing.optional.length > 0
+    ? [`File TAP: kolom tidak ditemukan (dianggap 0/kosong): ${missing.optional.join(", ")}.`]
+    : [];
 }
