@@ -13,7 +13,7 @@ import { derivePeriod, mergeExtraMcn, parseMcnFile, parseTapFile, type ParseResu
 import { buildCreatorShopPeriod, buildPeriodSummary, buildSubcatSegment, buildTopProducts } from "./aggregate";
 import { writeCreatorShopPeriod } from "./shop-period-write";
 import { fillMissingCategories } from "./category-fill";
-import { MCN_COLUMNS, type McnRow, type TapRow } from "./schema";
+import { MCN_COLUMNS, TAP_HEADER_SPEC, missingTapHeaders, type McnRow, type TapRow } from "./schema";
 import { upsertDerivedFromTap } from "@/lib/m10/products";
 import {
   computeSharedAutoFillFields, fetchMonthlyAvgGmvByCreator, writeCreatorAutoFillUpdate,
@@ -197,6 +197,26 @@ export async function runIngest(input: RunIngestInput): Promise<RunIngestResult>
     ? await parseTapFile(tapFile)
     : { rows: [] as TapRow[], skipped: [] as SkippedRow[], rawHeadersFound: [] as string[] };
   const skipped: SkippedRow[] = [...mcnParsed.skipped, ...tapParsed.skipped];
+  if (tapFile) {
+    // Ketentuan header TAP (TAP_HEADER_SPEC): kolom wajib hilang → tolak, jangan diam-diam GMV 0.
+    if (tapParsed.rawHeadersFound.length === 0) {
+      throw new Error("File TAP kosong atau tidak terbaca — pastikan file export TAP asli (bukan file kosong/rusak).");
+    }
+    const missing = missingTapHeaders(tapParsed.rawHeadersFound);
+    if (missing.required.length > 0) {
+      throw new Error(
+        `File TAP tidak memenuhi ketentuan header — kolom wajib tidak ditemukan: ${missing.required.join(", ")}. ` +
+          `Header yang ditemukan di file: ${tapParsed.rawHeadersFound.slice(0, 8).join(", ")}. ` +
+          `Gunakan export TAP dengan header: ${TAP_HEADER_SPEC.map((h) => h.label).join(", ")}.`
+      );
+    }
+    if (missing.optional.length > 0) {
+      skipped.push({
+        row: -1,
+        reason: `File TAP: kolom tidak ditemukan (dianggap 0/kosong): ${missing.optional.join(", ")}.`,
+      });
+    }
+  }
   lap(`parse (${mcnParsed.rows.length} MCN, ${tapParsed.rows.length} TAP)`);
 
   const period = derivePeriod(mcnParsed.rows);

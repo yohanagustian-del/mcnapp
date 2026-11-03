@@ -208,6 +208,43 @@ export const TAP_HEADER_ALIASES: Record<string, string> = {
   "creator-attributed_items_sold": "items_sold",
 };
 
+/**
+ * Ketentuan header file TAP (export TikTok, judul Inggris — berlaku sejak TikTok mengganti
+ * judul kolom). SATU sumber untuk validasi upload (run.ts), pesan error, dan teks di /ingest.
+ * `internal` = nama kolom setelah normalisasi + alias (lihat TAP_COLUMNS / TAP_HEADER_ALIASES).
+ * `required` = tanpa kolom ini file DITOLAK (kalau tidak, GMV TAP terbaca 0 tanpa error);
+ * selain itu hanya peringatan di catatan upload.
+ */
+export const TAP_HEADER_SPEC: ReadonlyArray<{ label: string; internal: string; required: boolean }> = [
+  { label: "Date", internal: TAP_COLUMNS.date, required: false },
+  { label: "Creator name", internal: TAP_COLUMNS.creator, required: false },
+  { label: "Product ID", internal: TAP_COLUMNS.productId, required: true },
+  { label: "Shop ID", internal: TAP_COLUMNS.shopId, required: true },
+  { label: "Creator-attributed GMV", internal: TAP_COLUMNS.gmv, required: true },
+  { label: "Creator LIVE-attributed GMV", internal: TAP_COLUMNS.gmvLive, required: false },
+  { label: "Affiliate video-attributed GMV", internal: TAP_COLUMNS.gmvVideo, required: false },
+  { label: "Creator-attributed orders", internal: TAP_COLUMNS.orders, required: false },
+  { label: "Creator-attributed items sold", internal: TAP_COLUMNS.itemsSold, required: false },
+];
+
+/**
+ * Header ketentuan TAP yang tidak ditemukan di `rawHeaders` (header ter-normalisasi dari
+ * baris pertama file, sebelum alias). Sebuah kolom dianggap ada bila nama internalnya
+ * ATAU salah satu aliasnya (Indonesia / "Custom report") ada.
+ */
+export function missingTapHeaders(rawHeaders: string[]): { required: string[]; optional: string[] } {
+  const have = new Set(rawHeaders);
+  const present = (internal: string) =>
+    have.has(internal) ||
+    Object.entries(TAP_HEADER_ALIASES).some(([alias, target]) => target === internal && have.has(alias));
+  const out = { required: [] as string[], optional: [] as string[] };
+  for (const h of TAP_HEADER_SPEC) {
+    if (present(h.internal)) continue;
+    (h.required ? out.required : out.optional).push(h.label);
+  }
+  return out;
+}
+
 /** Percentage cell ("5.45%" / "13.19%") → number (5.45). null when unreadable (never crash). */
 export function parsePercent(raw: string | null | undefined): number | null {
   if (raw === null || raw === undefined) return null;

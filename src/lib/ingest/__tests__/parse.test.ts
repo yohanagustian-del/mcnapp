@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import * as XLSX from "xlsx";
 import { parseMcnFile, parseTapFile, derivePeriod, mergeExtraMcn } from "../parse";
-import { parsePercent } from "../schema";
+import { missingTapHeaders, parsePercent } from "../schema";
 
 function xlsxFile(rows: Record<string, unknown>[], name = "data.xlsx"): File {
   const ws = XLSX.utils.json_to_sheet(rows);
@@ -477,5 +477,23 @@ describe("mergeExtraMcn (MCN utama + MCN tambahan, mis. MEA Academy)", () => {
     const extra = await parseMcnFile(xlsxFile([{ ...MCN_DATA_ROW, Date: "2026-07-05-2026-07-11" }]));
     expect(() => mergeExtraMcn(main, extra)).toThrow(/minggu yang sama/);
     expect(main.rows).toHaveLength(1);
+  });
+});
+
+describe("missingTapHeaders — ketentuan header TAP (judul Inggris)", () => {
+  const norm = (h: string) => h.trim().toLowerCase().replace(/\s+/g, "_");
+
+  it("export Custom report lengkap memenuhi ketentuan", () => {
+    expect(missingTapHeaders(Object.keys(TAP_V3_DATA_ROW).map(norm))).toEqual({ required: [], optional: [] });
+  });
+
+  it("kolom GMV tak dikenal → wajib hilang (bukan GMV 0 diam-diam)", () => {
+    const headers = ["Date", "Product ID", "Shop ID", "Affiliate partner creator attributed GMV"].map(norm);
+    expect(missingTapHeaders(headers).required).toEqual(["Creator-attributed GMV"]);
+  });
+
+  it("header Bahasa Indonesia tetap diterima lewat alias", () => {
+    const headers = ["Tanggal", "ID Produk", "ID Toko", "GMV afiliasi"].map(norm);
+    expect(missingTapHeaders(headers).required).toEqual([]);
   });
 });

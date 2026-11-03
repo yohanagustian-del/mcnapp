@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useRef, useState, useTransition } from "react";
 import type { RunIngestResult } from "@/lib/ingest/run";
 import { uploadIngestFile } from "@/lib/ingest/upload-client";
+import { TAP_HEADER_SPEC } from "@/lib/ingest/schema";
 import { LeakResultPanel } from "@/components/leak-result-panel";
 import { getIngestJobAction, startIngestFromStorageAction } from "./actions";
 
@@ -180,6 +181,18 @@ export function IngestForm() {
             onChange={(e) => setTapChosen((e.target.files?.length ?? 0) > 0)}
             className="mt-1 text-sm file:mr-3 file:rounded-md file:border-0 file:bg-slate-100 file:px-3 file:py-2 file:text-sm"
           />
+          <p className="mt-1 text-xs text-slate-500">
+            Header file TAP (export TikTok):{" "}
+            {TAP_HEADER_SPEC.map((h, i) => (
+              <span key={h.label}>
+                {i > 0 && ", "}
+                <span className={h.required ? "font-semibold text-slate-700" : undefined}>{h.label}</span>
+              </span>
+            ))}
+            . Yang <span className="font-semibold text-slate-700">tebal</span> wajib ada — file tanpa kolom itu
+            ditolak. <em>Creator name</em> wajib bila file MCN berisi lebih dari satu kreator dan harus sama
+            dengan nama kreator di file MCN.
+          </p>
           {!tapChosen && (
             <p className="mt-1 rounded-md bg-amber-50 p-2 text-xs text-amber-800">
               ⚠ Tanpa file TAP, analisa KEBOCORAN LINK tidak dihitung (semua GMV di shop ber-deal akan
