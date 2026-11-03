@@ -5,7 +5,7 @@ import { getConfig } from "@/lib/config";
 import { resolveCreatorNamesByPlatform } from "@/lib/platform-csv";
 import { fetchAll } from "@/lib/supabase/fetch-all";
 import { validateLeakPeriod, validateW1W5Period } from "@/lib/utils/date";
-import { derivePeriod, parseMcnFile, parseTapFile, type SkippedRow } from "@/lib/ingest/parse";
+import { assertTapHeaders, derivePeriod, parseMcnFile, parseTapFile, type SkippedRow } from "@/lib/ingest/parse";
 import type { McnRow, TapRow } from "@/lib/ingest/schema";
 import { enforceLeakRetention } from "@/lib/ingest/leak-retention";
 import {
@@ -609,6 +609,7 @@ export async function runLeakAnalysisFromFiles(
 ): Promise<LeakAnalysisResult> {
   const mcnParsed = await parseMcnFile(input.mcnFile);
   const tapParsed = await parseTapFile(input.tapFile);
+  const tapHeaderNotes = assertTapHeaders(tapParsed).map((reason) => ({ row: -1, reason }));
   const period = derivePeriod(mcnParsed.rows);
   if (!period) {
     throw new Error(
@@ -623,7 +624,7 @@ export async function runLeakAnalysisFromFiles(
     periodEnd: period.periodEnd,
     actorId: input.actorId,
     origin: input.origin ?? "link_leakage",
-    skipped: [...mcnParsed.skipped, ...tapParsed.skipped],
+    skipped: [...mcnParsed.skipped, ...tapParsed.skipped, ...tapHeaderNotes],
   });
 }
 
@@ -662,6 +663,7 @@ export async function runLeakAnalysisCustom(input: {
   const admin = createAdminClient();
   const mcnParsed = await parseMcnFile(input.mcnFile);
   const tapParsed = await parseTapFile(input.tapFile);
+  assertTapHeaders(tapParsed);
   if (mcnParsed.rows.length === 0) {
     throw new Error("File MCN tidak berisi baris data yang valid — analisa dibatalkan.");
   }

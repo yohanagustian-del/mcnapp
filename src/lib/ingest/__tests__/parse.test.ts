@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import * as XLSX from "xlsx";
-import { parseMcnFile, parseTapFile, derivePeriod, mergeExtraMcn } from "../parse";
+import { assertTapHeaders, parseMcnFile, parseTapFile, derivePeriod, mergeExtraMcn } from "../parse";
 import { missingTapHeaders, parsePercent } from "../schema";
 
 function xlsxFile(rows: Record<string, unknown>[], name = "data.xlsx"): File {
@@ -495,5 +495,19 @@ describe("missingTapHeaders — ketentuan header TAP (judul Inggris)", () => {
   it("header Bahasa Indonesia tetap diterima lewat alias", () => {
     const headers = ["Tanggal", "ID Produk", "ID Toko", "GMV afiliasi"].map(norm);
     expect(missingTapHeaders(headers).required).toEqual([]);
+  });
+});
+
+describe("assertTapHeaders — dipakai /ingest dan /link-leakage", () => {
+  const norm = (h: string) => h.trim().toLowerCase().replace(/\s+/g, "_");
+  it("throw bila kolom GMV wajib tak ada", () => {
+    expect(() => assertTapHeaders({ rawHeadersFound: ["Product ID", "Shop ID"].map(norm) })).toThrow(/Creator-attributed GMV/);
+  });
+  it("throw bila file kosong", () => {
+    expect(() => assertTapHeaders({ rawHeadersFound: [] })).toThrow(/kosong/);
+  });
+  it("catatan untuk kolom opsional yang hilang", () => {
+    const notes = assertTapHeaders({ rawHeadersFound: ["Product ID", "Shop ID", "Creator-attributed GMV"].map(norm) });
+    expect(notes[0]).toMatch(/Creator name/);
   });
 });
