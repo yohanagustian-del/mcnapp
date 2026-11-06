@@ -139,6 +139,7 @@ Migrasi `0100_ads_request_finance.sql`.
 - `mea_budget` & `tiktok_ads_credit` tidak dijawab eksplisit → **asumsi A1**: ACC-nya sama dengan
   jalur invoice (Head CM atau Finance), tanpa invoice. **Dikonfirmasi Yohan 2026-10-31 (sesi lanjutan):
   A1 tetap** — `accRolesFor()` tidak berubah.
+- **Diubah sebagian oleh D-2026-11-06-1** (metode ketiga `ads_by_brand` untuk Brand Budget, tanpa ACC).
 
 ### D-2026-10-31-4 Jatah budget MEA per kreator per bulan
 - Berbeda per kreator, ditetapkan **Head** (`head`, `director`; izin `m10.mea_budget_set`).
@@ -166,3 +167,20 @@ Migrasi `0100_ads_request_finance.sql`.
   nilai lama tetap tampil.
 - Brief M10 lama dibiarkan apa adanya (`funding_type` null); hanya request baru wajib pendanaan.
 - Jalur `creator_requests` type `ads` (CM Workspace) ditutup; sample/HSL tetap.
+
+## 2026-11-06 — Request Ads: metode "Ads by Brand" (Yohan ACC, pelapor Adinda)
+
+### D-2026-11-06-1 Ads by Brand tanpa ACC Finance/Director (mengganti sebagian D-2026-10-31-3)
+- `payment_method` bertambah satu nilai: `ads_by_brand` — **hanya** untuk `funding_type = brand_budget`
+  (brand menjalankan/membayar ads sendiri; tidak ada uang lewat MEA). Creator Budget tetap
+  `cash_upfront` | `invoice`. Migrasi `0101_ads_by_brand_payment.sql` (memperluas
+  `ck_ads_brief_payment_method`; file saja, apply prod terpisah).
+- Request Ads by Brand **tidak lewat ACC siapa pun** (Finance, Head CM, Director): status awal langsung
+  `siap_dieksekusi` (`initialRequestStatus`), `accRolesFor()` = kosong, tanpa cek uang masuk
+  (`financeGate` lolos), tanpa invoice (`fundingProducesInvoice` = false). Eksekusi tetap lewat flow
+  yang sama: Creator Support klaim → dikerjakan → selesai; batal tetap boleh sebelum dieksekusi.
+- Alasan masuk pola "auto" CLAUDE.md #2: tidak ada biaya/piutang MEA → tidak merugikan perusahaan;
+  tetap tercatat `audit_logs` (`m10.request_create`, type `auto`). Tidak mengurangi margin Special
+  Project (bukan `mea_budget`, D-2026-10-31-5 tidak berubah).
+- Aturan & label = `lib/m10/funding-spec.ts` (`paymentMethodsFor`, `fundingSkipsAcc`) — SATU sumber.
+- Bila 0101 belum di-apply, insert `ads_by_brand` ditolak constraint → pesan `MIGRATION_0101_MISSING`.

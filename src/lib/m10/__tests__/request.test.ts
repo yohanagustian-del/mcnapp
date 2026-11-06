@@ -5,7 +5,9 @@ import {
   fundingNeedsCashCheck,
   fundingNeedsPaymentMethod,
   fundingProducesInvoice,
+  fundingSkipsAcc,
   legacyAdsPayerToFunding,
+  paymentMethodsFor,
 } from "../funding-spec";
 import {
   OPEN_STATUSES,
@@ -177,5 +179,37 @@ describe("invoice (D-2026-10-31-6)", () => {
     expect(validatePayment(1_110_000, 2_000_000).ok).toBe(false);
     expect(validatePayment(1_110_000, 1_000_000).ok).toBe(false);
     expect(validatePayment(1_110_000, 1_110_000).ok).toBe(true);
+  });
+});
+
+describe("Ads by Brand (D-2026-11-06-1)", () => {
+  it("metode hanya untuk Brand Budget", () => {
+    expect(paymentMethodsFor("brand_budget")).toContain("ads_by_brand");
+    expect(paymentMethodsFor("creator_budget")).not.toContain("ads_by_brand");
+    expect(paymentMethodsFor("mea_budget")).toEqual([]);
+    const base = { budgetRequested: 1_000_000, ownerSlotId: 1, ownerProjectId: null };
+    expect(validateRequestInput({ ...base, fundingType: "brand_budget", paymentMethod: "ads_by_brand" })).toEqual({ ok: true });
+    expect(validateRequestInput({ ...base, fundingType: "creator_budget", paymentMethod: "ads_by_brand" }).ok).toBe(false);
+  });
+
+  it("tanpa ACC: langsung siap dieksekusi, tanpa cek cash & invoice", () => {
+    expect(fundingSkipsAcc("brand_budget", "ads_by_brand")).toBe(true);
+    expect(fundingSkipsAcc("brand_budget", "invoice")).toBe(false);
+    expect(initialRequestStatus({ fundingType: "brand_budget", paymentMethod: "ads_by_brand", meaCheck: null })).toBe("siap_dieksekusi");
+    expect(initialRequestStatus({ fundingType: "brand_budget", paymentMethod: "invoice", meaCheck: null })).toBe("menunggu_finance");
+    expect(fundingNeedsCashCheck("brand_budget", "ads_by_brand")).toBe(false);
+    expect(fundingProducesInvoice("brand_budget", "ads_by_brand")).toBe(false);
+    expect(financeGate({ fundingType: "brand_budget", paymentMethod: "ads_by_brand", cashReceivedAt: null })).toEqual({ ok: true });
+    expect(accRolesFor("brand_budget", "ads_by_brand")).toEqual([]);
+    expect(canAccRequest("finance", "brand_budget", "ads_by_brand")).toBe(false);
+  });
+
+  it("alur eksekusi tetap sama: siap_dieksekusi → dikerjakan → selesai", () => {
+    expect(transition("siap_dieksekusi", "claim")).toEqual({ ok: true, to: "dikerjakan" });
+    expect(transition("dikerjakan", "finish")).toEqual({ ok: true, to: "selesai" });
+  });
+
+  it("badge", () => {
+    expect(fundingBadgeLabel("brand_budget", "ads_by_brand")).toBe("Brand Budget · Ads by Brand");
   });
 });

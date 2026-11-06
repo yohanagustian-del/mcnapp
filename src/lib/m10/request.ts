@@ -9,6 +9,8 @@
 import {
   fundingNeedsCashCheck,
   fundingNeedsPaymentMethod,
+  fundingSkipsAcc,
+  paymentMethodsFor,
   type FundingType,
   type PaymentMethod,
 } from "./funding-spec";
@@ -150,8 +152,11 @@ export function budgetMonthOf(dateIso: string): string {
 
 export function initialRequestStatus(input: {
   fundingType: FundingType;
+  paymentMethod?: PaymentMethod | null;
   meaCheck: MeaBudgetCheck | null;
 }): RequestStatus {
+  // Ads by Brand: tanpa ACC → langsung antre eksekusi (D-2026-11-06-1).
+  if (fundingSkipsAcc(input.fundingType, input.paymentMethod ?? null)) return "siap_dieksekusi";
   if (input.fundingType === "mea_budget" && input.meaCheck?.needsDirectorApproval) {
     return "menunggu_approval_director";
   }
@@ -176,6 +181,9 @@ export function validateRequestInput(input: {
   if (!fundingNeedsPaymentMethod(input.fundingType) && input.paymentMethod) {
     return { ok: false, error: "[metode pembayaran hanya untuk creator/brand budget]" };
   }
+  if (input.paymentMethod && !paymentMethodsFor(input.fundingType).includes(input.paymentMethod)) {
+    return { ok: false, error: "[Ads by Brand hanya untuk Brand Budget]" };
+  }
   if (input.budgetRequested == null || !(input.budgetRequested > 0)) {
     return { ok: false, error: "[nominal budget ads wajib diisi dan lebih dari 0]" };
   }
@@ -188,8 +196,12 @@ export function validateRequestInput(input: {
 
 // ---------- Gate Finance / Head (D-2026-10-31-3) ----------
 
-/** Role yang boleh ACC request ini. Cash = Finance (+Director override); lainnya = Head CM atau Finance. */
+/**
+ * Role yang boleh ACC request ini. Cash = Finance (+Director override); Ads by Brand = tidak ada
+ * (tidak lewat ACC sama sekali); lainnya = Head CM atau Finance.
+ */
 export function accRolesFor(ft: FundingType, pm: PaymentMethod | null): readonly string[] {
+  if (fundingSkipsAcc(ft, pm)) return [];
   if (fundingNeedsCashCheck(ft, pm)) return ["finance", "director"];
   return ["finance", "head", "cm_lead", "director"];
 }

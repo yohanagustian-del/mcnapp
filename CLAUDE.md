@@ -225,7 +225,8 @@ Platform internal MCN MEA (agency creator TikTok/Shopee). Menggabungkan tools te
   `creator_requests` type `ads` (CM Workspace) DITUTUP di server; `/workspace/ads` → redirect `/ads`;
   `creators.ads_budget_cap` tidak dibaca lagi. Jangan bikin tabel/alur request ads kedua.
 - **Pendanaan** (`funding_type`): `mea_budget` | `creator_budget` | `brand_budget` | `tiktok_ads_credit`;
-  `creator_budget` & `brand_budget` wajib `payment_method` `cash_upfront` | `invoice`. Spec, label, dan
+  `creator_budget` & `brand_budget` wajib `payment_method` `cash_upfront` | `invoice`; `brand_budget` juga boleh
+  `ads_by_brand` (0101, D-2026-11-06-1) = TANPA ACC Finance/Head/Director, tanpa invoice → langsung `siap_dieksekusi`. Spec, label, dan
   aturan = `lib/m10/funding-spec.ts` (client-safe) — SATU sumber.
 - **Mesin status** = `lib/m10/request.ts` (`transition()`, tabel `TRANSITIONS`, pesan `[...]`):
   `menunggu_finance → siap_dieksekusi → dikerjakan → selesai`; `mea_budget` lewat jatah →
