@@ -10,6 +10,7 @@ import { isMissingRelationError } from "@/lib/db/missing-migration";
 import {
   fundingNeedsPaymentMethod,
   fundingProducesInvoice,
+  fundingSkipsAcc,
   isFundingType,
   isPaymentMethod,
   type FundingType,
@@ -26,7 +27,7 @@ import {
   type RequestAction,
   type RequestStatus,
 } from "@/lib/m10/request";
-import { loadMeaBudgetContext, MIGRATION_0100_MISSING } from "@/lib/m10/request-data";
+import { loadMeaBudgetContext, MIGRATION_0100_MISSING, MIGRATION_0101_MISSING } from "@/lib/m10/request-data";
 import { issueInvoiceForRequest } from "@/lib/m10/invoice-data";
 import { syncMeaBudgetExhaustedAlert } from "@/lib/m10/mea-budget-alert";
 
@@ -206,7 +207,7 @@ export async function createAdsRequestAction(fd: FormData): Promise<AdsActionRes
       return { ok: false, error: e instanceof Error ? e.message : "Gagal memeriksa jatah budget MEA" };
     }
   }
-  const status = initialRequestStatus({ fundingType: ft, meaCheck });
+  const status = initialRequestStatus({ fundingType: ft, paymentMethod: pm, meaCheck });
 
   const { data: row, error } = await admin
     .from("ads_briefs")
@@ -229,7 +230,13 @@ export async function createAdsRequestAction(fd: FormData): Promise<AdsActionRes
     })
     .select("id")
     .single();
-  if (error) return { ok: false, error: isMissingRelationError(error) ? MIGRATION_0100_MISSING : error.message };
+  if (error) {
+    if (isMissingRelationError(error)) return { ok: false, error: MIGRATION_0100_MISSING };
+    if (pm === "ads_by_brand" && error.message.includes("ck_ads_brief_payment_method")) {
+      return { ok: false, error: MIGRATION_0101_MISSING };
+    }
+    return { ok: false, error: error.message };
+  }
 
   await writeAudit({
     actorId: actor.id, action: "m10.request_create", entityType: "ads_briefs", entityId: String(row.id),
@@ -301,7 +308,9 @@ export async function accRequestAction(fd: FormData): Promise<AdsActionResult> {
   const pm = (row.payment_method as PaymentMethod | null) ?? null;
   if (!ft) return { ok: false, error: "[brief lama tanpa tipe pendanaan — lengkapi dulu lewat request baru]" };
   if (!canAccRequest(actor.role, ft, pm)) {
-    return { ok: false, error: pm === "cash_upfront"
+    return { ok: false, error: fundingSkipsAcc(ft, pm)
+      ? "[request Ads by Brand tidak memerlukan ACC]"
+      : pm === "cash_upfront"
       ? "[ACC pembayaran cash hanya oleh Finance]"
       : "[ACC request ini hanya oleh Head CM atau Finance]" };
   }

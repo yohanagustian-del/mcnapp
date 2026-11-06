@@ -5,9 +5,10 @@ import { useState, useTransition } from "react";
 import {
   FUNDING_LABELS,
   FUNDING_TYPES,
-  PAYMENT_METHODS,
   PAYMENT_METHOD_LABELS,
   fundingNeedsPaymentMethod,
+  fundingSkipsAcc,
+  paymentMethodsFor,
   type FundingType,
   type PaymentMethod,
 } from "@/lib/m10/funding-spec";
@@ -47,6 +48,7 @@ export function RequestForm({
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
   const needsPayment = funding !== "" && fundingNeedsPaymentMethod(funding);
+  const skipsAcc = funding !== "" && payment !== "" && fundingSkipsAcc(funding, payment);
 
   function onProjectChange(id: string) {
     // Peserta dimuat server-side per project → navigasi ulang dengan query.
@@ -126,13 +128,15 @@ export function RequestForm({
             <label className={label}>Metode pembayaran</label>
             <select name="payment_method" required value={payment} onChange={(e) => setPayment(e.target.value as PaymentMethod | "")} className={input}>
               <option value="">— pilih —</option>
-              {PAYMENT_METHODS.map((pm) => <option key={pm} value={pm}>{PAYMENT_METHOD_LABELS[pm]}</option>)}
+              {(needsPayment ? paymentMethodsFor(funding as FundingType) : []).map((pm) => <option key={pm} value={pm}>{PAYMENT_METHOD_LABELS[pm]}</option>)}
             </select>
             <p className="mt-1 text-xs text-slate-500">
               {payment === "cash_upfront"
                 ? "Finance mengecek uang masuk dulu sebelum request di-ACC."
                 : payment === "invoice"
                 ? "Invoice (PDF, PPN otomatis) terbit saat di-ACC Head CM/Finance; eksekusi boleh jalan sebelum lunas."
+                : payment === "ads_by_brand"
+                ? "Brand menjalankan/membayar ads sendiri — tanpa ACC Finance/Director dan tanpa invoice; request langsung masuk antrean eksekusi."
                 : ""}
             </p>
           </div>
@@ -187,7 +191,9 @@ export function RequestForm({
       <div className="flex items-center gap-3">
         <button type="submit" disabled={pending} className={btn}>{pending ? "Mengirim…" : "Ajukan Request Ads"}</button>
         <span className="text-xs text-slate-500">
-          Setelah diajukan: {funding === "mea_budget" ? "cek jatah MEA → " : ""}ACC {payment === "cash_upfront" ? "Finance" : "Head CM / Finance"} → Creator Support mengeksekusi.
+          {skipsAcc
+            ? "Setelah diajukan: langsung siap dieksekusi (tanpa ACC) → Creator Support mengeksekusi."
+            : <>Setelah diajukan: {funding === "mea_budget" ? "cek jatah MEA → " : ""}ACC {payment === "cash_upfront" ? "Finance" : "Head CM / Finance"} → Creator Support mengeksekusi.</>}
         </span>
       </div>
     </form>

@@ -11,6 +11,8 @@ import { checkMeaBudget, type MeaBudgetCheck } from "./request";
 
 export const MIGRATION_0100_MISSING =
   "Migrasi 0100 (Request Ads & Finance) belum di-apply di environment ini — kolom pendanaan, jatah budget MEA, dan invoice belum tersedia.";
+export const MIGRATION_0101_MISSING =
+  "Migrasi 0101 (metode Ads by Brand) belum di-apply di environment ini — pilih Cash di awal / Invoice dulu, atau minta migrasi di-apply.";
 
 export interface AdsRequestRow {
   id: number;

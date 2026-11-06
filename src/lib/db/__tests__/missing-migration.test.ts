@@ -281,3 +281,20 @@ describe("migrasi 0100 — Request Ads & Finance: penjaga CLAUDE.md #9 & K23", (
     expect(sql).toMatch(/before update or delete on ads_invoice_events/);
   });
 });
+
+describe("migrasi 0101 — Ads by Brand (D-2026-11-06-1)", () => {
+  const sql = readFileSync(
+    join(process.cwd(), "supabase/migrations/0101_ads_by_brand_payment.sql"),
+    "utf8"
+  );
+
+  it("ads_by_brand hanya untuk brand_budget; nilai lama tetap sah", () => {
+    expect(sql).toMatch(/payment_method = 'ads_by_brand' and funding_type = 'brand_budget'/);
+    expect(sql).toMatch(/payment_method in \('cash_upfront','invoice'\) and funding_type in \('creator_budget','brand_budget'\)/);
+  });
+
+  it("tanpa tabel baru dan tanpa DROP POLICY/TRIGGER (K23)", () => {
+    expect(sql).not.toMatch(/create table/i);
+    expect(sql).not.toMatch(/drop\s+(policy|trigger)/i);
+  });
+});
